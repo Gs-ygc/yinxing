@@ -43,8 +43,8 @@ android {
         applicationId = "com.yinxing.launcher"
         minSdk = 24
         targetSdk = 36
-        versionCode = 20
-        versionName = "1.10.0-root-preview.4"
+        versionCode = 21
+        versionName = "1.10.0-root-preview.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
