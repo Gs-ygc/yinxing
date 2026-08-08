@@ -29,4 +29,5 @@ launcher_prefs*.xml
 app/google-services .json
 .windsurf
 .tmp_preview/
+.worktrees/
 update_release.py
