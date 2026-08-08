@@ -51,6 +51,10 @@ install_cleanup_helper() {
     cleanup_dir=${CLEANUP_TARGET%/*}
     temp_path="$CLEANUP_TARGET.tmp.$$"
 
+    if [ -d "$CLEANUP_TARGET" ]; then
+        log_event "uninstall_cleanup_target_is_directory"
+        return 1
+    fi
     if ! mkdir -p "$cleanup_dir" 2>/dev/null; then
         log_event "uninstall_cleanup_dir_failed"
         return 1
@@ -129,10 +133,14 @@ repair_keepalive() {
     if [ "$doze_status" -eq 1 ]; then
         if [ "$state_ready" -ne 1 ]; then
             log_event "doze_whitelist_skipped_no_state"
-        elif [ ! -x "$CLEANUP_TARGET" ]; then
+        elif [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
             log_event "doze_whitelist_skipped_no_cleanup"
         elif cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
-            if ! printf 'added\n' > "$STATE_DIR/doze_added_by_module" 2>/dev/null; then
+            marker_tmp="$STATE_DIR/doze_added_by_module.tmp.$$"
+            rm -f "$marker_tmp"
+            if ! printf 'added\n' > "$marker_tmp" 2>/dev/null || \
+                ! mv -f "$marker_tmp" "$STATE_DIR/doze_added_by_module" 2>/dev/null; then
+                rm -f "$marker_tmp"
                 log_event "doze_marker_write_failed"
                 cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
                     log_event "doze_rollback_failed"

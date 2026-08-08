@@ -14,7 +14,7 @@ rm -f \
     "$STATE_DIR/guard.boot_id"
 rm -rf "$STATE_DIR/guard.lock"
 
-if [ -f "$marker" ] && [ "$(cat "$marker" 2>/dev/null)" = "added" ]; then
+if [ -f "$marker" ]; then
     install_cleanup_helper "$cleanup_source" || true
 else
     rm -f "$cleanup_target"

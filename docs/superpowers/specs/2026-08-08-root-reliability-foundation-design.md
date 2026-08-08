@@ -110,6 +110,7 @@ Disabling the KernelSU module prevents it from starting on the next boot. The he
 - All privileged commands are best-effort and independently checked; one unsupported ColorOS command cannot stop accessibility repair.
 - Logs use a stable `YinxingGuard` tag and include module version, action name, and success/failure without contact names, phone numbers, tokens, or UI content.
 - The loop uses a fixed low-frequency interval and an atomic per-boot directory lock with PID/boot metadata so module entry points cannot create duplicate watchdogs; an incomplete lock is never reclaimed by a concurrent process.
+- A dead same-boot owner can be reclaimed through an exclusive reclaim subdirectory after its PID is rechecked; an owner with a missing/incomplete PID is only waited on, never deleted.
 - Missing package state is not treated as a boot failure.
 - Shell functions quote package/component values and do not evaluate external input.
 - A failed repair remains visible in logs and is retried; the APK continues in its existing non-Root mode.
@@ -136,6 +137,7 @@ The first tag is a prerelease so device feedback can change ColorOS-specific pol
 - Failure-injection tests prove settings read failures preserve all existing services, failed Doze queries do not claim ownership, and failed deferred removal keeps its retry state.
 - Concurrent-process tests prove only one guard owns the atomic lock, while startup tests cover a package appearing late and a transient HOME launch failure.
 - Cleanup-helper tests prove it stays inert while the module is active and remains available across an uninstall scheduling failure.
+- Ownership-marker tests cover atomic marker replacement and malformed markers that must remain available for later cleanup.
 - ZIP-content validation confirms required module files, permissions metadata expectations, and absence of test fixtures.
 - Reproducibility tests change source mtimes and require byte-identical module ZIPs.
 - Existing JVM tests and `:app:assembleDebug` must pass.

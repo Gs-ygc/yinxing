@@ -34,8 +34,7 @@ fi
 
 if [ "$(cat "$MARKER" 2>/dev/null)" != "added" ]; then
     log_event "uninstall_marker_invalid"
-    rm -f "$SELF_PATH"
-    exit 0
+    exit 1
 fi
 
 if ! cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1; then

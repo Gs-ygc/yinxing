@@ -30,6 +30,7 @@ OUTPUT_ABS="$(realpath -m -- "$OUTPUT")"
 case "$OUTPUT_ABS" in
     "$MODULE_ABS"|"$MODULE_ABS"/*) die "output must not be inside the module source" ;;
 esac
+[ ! -d "$OUTPUT_ABS" ] || die "output must be a file path"
 OUTPUT_DIR="$(dirname "$OUTPUT_ABS")"
 mkdir -p "$OUTPUT_DIR"
 

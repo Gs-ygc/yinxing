@@ -227,12 +227,25 @@ test_settings_read_failure_is_safe() {
 
 test_doze_query_failure_is_safe() {
     reset_fixture
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install Doze test cleanup helper"
     touch "$TEST_ROOT/fail_deviceidle_query"
     repair_state || fail "optional Doze query failure should not block accessibility"
     assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "accessibility survives Doze query failure"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || fail "Doze ownership was claimed after a failed query"
     pass "Doze query failure is safe"
+}
+
+test_doze_add_claims_ownership() {
+    reset_fixture
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install Doze add test cleanup helper"
+    repair_state || fail "normal Doze add repair should succeed"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "normal repair did not add Doze whitelist"
+    assert_equals "added" "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" "normal repair ownership marker"
+    : > "$CALLS"
+    repair_state || fail "idempotent Doze repair should succeed"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    pass "Doze add claims ownership"
 }
 
 test_home_launch_is_fixed() {
@@ -310,6 +323,34 @@ test_guard_respects_live_guard_same_boot() {
     pass "guard respects live same-boot lock"
 }
 
+test_guard_reclaims_dead_same_boot_lock() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/guard.lock/dead-boot-id"
+    printf '999999\n' > "$TEST_ROOT/state/guard.lock/dead-boot-id/pid"
+    printf 'dead-boot-id\n' > "$TEST_ROOT/state/guard.lock/dead-boot-id/boot_id"
+    printf 'dead-boot-id\n' > "$TEST_ROOT/boot_id"
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "dead same-boot lock must be reclaimed"
+    pass "guard reclaims dead same-boot lock"
+}
+
+test_guard_does_not_reclaim_incomplete_lock() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/guard.lock/incomplete-boot-id"
+    printf 'incomplete-boot-id\n' > "$TEST_ROOT/boot_id"
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    assert_equals "0" "$(grep -c '^am start ' "$CALLS" || true)" "incomplete lock must not be reclaimed"
+    pass "guard preserves incomplete lock"
+}
+
 test_guard_prevents_concurrent_processes() {
     reset_fixture
     touch "$TEST_ROOT/use_real_sleep"
@@ -340,6 +381,8 @@ test_action_reuses_repair_and_launch() {
     assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "action repairs accessibility"
     assert_equals "1" "$(grep -c '^am start ' "$CALLS")" "action launches HOME once"
     [[ -x "$CLEANUP_TARGET" ]] || fail "action did not install deferred cleanup helper"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "action did not add Doze whitelist"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || fail "action did not record Doze ownership"
     pass "action reuses repair and launch"
 }
 
@@ -377,6 +420,34 @@ test_cleanup_schedule_failure_preserves_existing_helper() {
     CLEANUP_TARGET="$previous_target"
     [[ -x "$CLEANUP_TARGET" ]] || fail "schedule failure removed the existing helper"
     pass "cleanup schedule failure preserves existing helper"
+}
+
+test_cleanup_directory_target_is_rejected() {
+    reset_fixture
+    mkdir -p "$CLEANUP_TARGET"
+    if install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh"; then
+        fail "cleanup helper accepted a directory target"
+    fi
+    repair_state || fail "accessibility repair should survive a bad helper target"
+    [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || fail "bad helper target allowed an unowned Doze add"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || fail "bad helper target created ownership marker"
+    pass "cleanup directory target is rejected"
+}
+
+test_uninstall_retains_malformed_marker() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'partial\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "malformed marker did not retain cleanup helper"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "malformed marker cleanup unexpectedly succeeded"
+    fi
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || fail "malformed marker was deleted"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "malformed marker cleanup helper was deleted"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "malformed marker cleanup changed Doze state"
+    pass "uninstall retains malformed marker"
 }
 
 test_uninstall_defers_cleanup_until_boot_completed() {
@@ -428,6 +499,11 @@ test_module_package() {
     fi
     [[ ! -e "$PACKAGE_NESTED_DIR" ]] || fail "rejected nested output dirtied the module source"
 
+    mkdir "$TEST_ROOT/output-directory"
+    if bash "$REPO_ROOT/tools/package-yinxing-guard.sh" "$TEST_ROOT/output-directory" 2>/dev/null; then
+        fail "packager accepted a directory as its output"
+    fi
+
     printf 'preserve-this-hardlink-target\n' > "$TEST_ROOT/hardlink-source"
     ln "$TEST_ROOT/hardlink-source" "$TEST_ROOT/hardlink.zip"
     bash "$REPO_ROOT/tools/package-yinxing-guard.sh" "$TEST_ROOT/hardlink.zip" "9.9.9-test" >/dev/null
@@ -474,13 +550,17 @@ case "$MODE" in
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
+        test_guard_reclaims_dead_same_boot_lock
+        test_guard_does_not_reclaim_incomplete_lock
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
         test_cleanup_helper_stays_for_first_boot
         test_cleanup_schedule_failure_preserves_existing_helper
+        test_cleanup_directory_target_is_rejected
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_retains_malformed_marker
         ;;
     all)
         test_merge_cases
@@ -490,18 +570,23 @@ case "$MODE" in
         test_optional_failure_does_not_block_accessibility
         test_settings_read_failure_is_safe
         test_doze_query_failure_is_safe
+        test_doze_add_claims_ownership
         test_home_launch_is_fixed
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
+        test_guard_reclaims_dead_same_boot_lock
+        test_guard_does_not_reclaim_incomplete_lock
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
         test_cleanup_helper_stays_for_first_boot
         test_cleanup_schedule_failure_preserves_existing_helper
+        test_cleanup_directory_target_is_rejected
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_retains_malformed_marker
         test_module_package
         if [[ -z "${YINXING_TEST_SHELL:-}" ]] && command -v busybox >/dev/null 2>&1; then
             YINXING_TEST_SHELL=busybox bash "$0" all

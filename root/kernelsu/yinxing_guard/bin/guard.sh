@@ -2,6 +2,7 @@
 
 MODDIR=${0%/*}
 . "$MODDIR/common.sh"
+CLEANUP_SOURCE="$MODDIR/uninstall-cleanup.sh"
 
 BOOT_WAIT_SECONDS=${YINXING_GUARD_BOOT_WAIT_SECONDS:-5}
 BOOT_WAIT_MAX_CYCLES=${YINXING_GUARD_BOOT_WAIT_MAX_CYCLES:-0}
@@ -42,6 +43,8 @@ LOCK_ROOT="$STATE_DIR/guard.lock"
 LOCK_DIR="$LOCK_ROOT/$LOCK_BOOT_ID"
 PID_FILE="$LOCK_DIR/pid"
 BOOT_MARKER_FILE="$LOCK_DIR/boot_id"
+RECLAIM_DIR="$LOCK_DIR/reclaim"
+RECLAIM_PID_FILE="$RECLAIM_DIR/pid"
 
 release_lock() {
     if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$$" ]; then
@@ -56,10 +59,41 @@ acquire_lock() {
         log_event "guard_lock_root_failed"
         return 1
     fi
-    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
+    attempts=0
+    while [ "$attempts" -lt 5 ]; do
+        if mkdir "$LOCK_DIR" 2>/dev/null; then
+            if ! printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE" || \
+                ! printf '%s\n' "$$" > "$PID_FILE"; then
+                rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
+                rmdir "$LOCK_DIR" 2>/dev/null || true
+                rmdir "$LOCK_ROOT" 2>/dev/null || true
+                log_event "guard_lock_write_failed"
+                return 1
+            fi
+            return 0
+        fi
+
+        reclaim_pid="$(cat "$RECLAIM_PID_FILE" 2>/dev/null || true)"
+        case "$reclaim_pid" in
+            ''|*[!0-9]*) ;;
+            *)
+                if kill -0 "$reclaim_pid" 2>/dev/null; then
+                    attempts=$((attempts + 1))
+                    sleep 1
+                    continue
+                fi
+                rm -rf "$RECLAIM_DIR"
+                ;;
+        esac
+
         previous_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
         case "$previous_pid" in
-            ''|*[!0-9]*) ;;
+            ''|*[!0-9]*)
+                # The owner may have created the directory but not written its PID yet.
+                attempts=$((attempts + 1))
+                sleep 1
+                continue
+                ;;
             *)
                 if kill -0 "$previous_pid" 2>/dev/null; then
                     log_event "guard_already_running"
@@ -67,19 +101,40 @@ acquire_lock() {
                 fi
                 ;;
         esac
-        log_event "guard_lock_busy"
-        return 1
-    fi
 
-    if ! printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE" || \
-        ! printf '%s\n' "$$" > "$PID_FILE"; then
-        rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
-        rmdir "$LOCK_DIR" 2>/dev/null || true
-        rmdir "$LOCK_ROOT" 2>/dev/null || true
-        log_event "guard_lock_write_failed"
-        return 1
-    fi
-    return 0
+        if mkdir "$RECLAIM_DIR" 2>/dev/null; then
+            if ! printf '%s\n' "$$" > "$RECLAIM_PID_FILE" 2>/dev/null; then
+                rm -rf "$RECLAIM_DIR"
+                log_event "guard_reclaim_lock_write_failed"
+                return 1
+            fi
+            checked_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+            case "$checked_pid" in
+                ''|*[!0-9]*)
+                    rm -rf "$RECLAIM_DIR"
+                    attempts=$((attempts + 1))
+                    sleep 1
+                    continue
+                    ;;
+                *)
+                    if kill -0 "$checked_pid" 2>/dev/null; then
+                        rm -rf "$RECLAIM_DIR"
+                        log_event "guard_already_running"
+                        return 1
+                    fi
+                    rm -rf "$LOCK_DIR"
+                    attempts=$((attempts + 1))
+                    continue
+                    ;;
+            esac
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    log_event "guard_lock_busy"
+    return 1
 }
 
 wait_for_boot() {
@@ -96,6 +151,9 @@ wait_for_boot() {
 }
 
 run_health_cycle() {
+    if [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
+        install_cleanup_helper "$CLEANUP_SOURCE" || true
+    fi
     if ! repair_state; then
         log_event "repair_cycle_failed"
         return 1
