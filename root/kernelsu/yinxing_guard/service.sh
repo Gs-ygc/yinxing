@@ -12,11 +12,34 @@ case "$LOCK_RETRY_SECONDS" in
     ''|*[!0-9]*) LOCK_RETRY_SECONDS=5 ;;
 esac
 
+RESTART_SECONDS=${YINXING_GUARD_RESTART_SECONDS:-30}
+case "$RESTART_SECONDS" in
+    ''|*[!0-9]*) RESTART_SECONDS=30 ;;
+esac
+
+MODULE_STATE_DIR=${YINXING_GUARD_MODULE_STATE_DIR:-$MODDIR}
+module_is_active() {
+    [ -d "$MODULE_STATE_DIR" ] && \
+        [ ! -e "$MODULE_STATE_DIR/disable" ] && \
+        [ ! -e "$MODULE_STATE_DIR/remove" ]
+}
+
 (
-    while :; do
+    while module_is_active; do
         sh "$MODDIR/bin/guard.sh"
         guard_status=$?
-        [ "$guard_status" -eq 75 ] || exit 0
-        sleep "$LOCK_RETRY_SECONDS"
+        module_is_active || exit 0
+        case "$guard_status" in
+            0)
+                exit 0
+                ;;
+            75)
+                sleep "$LOCK_RETRY_SECONDS"
+                ;;
+            *)
+                log_event "guard_unexpected_exit=$guard_status"
+                sleep "$RESTART_SECONDS"
+                ;;
+        esac
     done
 ) >/dev/null 2>&1 &
