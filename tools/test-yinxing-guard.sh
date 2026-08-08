@@ -667,6 +667,12 @@ test_service_reclaims_lock_after_owner_disappears() {
     kill "$LIVE_PID" 2>/dev/null || true
     wait "$LIVE_PID" 2>/dev/null || true
     LIVE_PID=""
+    for _ in $(seq 1 100); do
+        if [[ ! -e "$TEST_ROOT/state/guard.lock" ]]; then
+            break
+        fi
+        /bin/sleep 0.05
+    done
     pass "service reclaims lock after owner disappears"
 }
 
