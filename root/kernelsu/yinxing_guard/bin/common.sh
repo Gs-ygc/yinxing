@@ -6,11 +6,13 @@ HOME_COMPONENT="com.yinxing.launcher/.feature.home.MainActivity"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 LOG_TAG="YinxingGuard"
+MODULE_VERSION="1.10.0-root-preview.1"
+CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
 
 log_event() {
     message="$1"
     if command -v log >/dev/null 2>&1; then
-        log -t "$LOG_TAG" -- "$message" 2>/dev/null || true
+        log -t "$LOG_TAG" -- "version=$MODULE_VERSION $message" 2>/dev/null || true
     fi
 }
 
@@ -44,6 +46,26 @@ ensure_state_dir() {
     }
 }
 
+install_cleanup_helper() {
+    source_path="$1"
+    cleanup_dir=${CLEANUP_TARGET%/*}
+    temp_path="$CLEANUP_TARGET.tmp.$$"
+
+    if ! mkdir -p "$cleanup_dir" 2>/dev/null; then
+        log_event "uninstall_cleanup_dir_failed"
+        return 1
+    fi
+    rm -f "$temp_path"
+    if ! cp "$source_path" "$temp_path" 2>/dev/null || \
+        ! chmod 0755 "$temp_path" 2>/dev/null || \
+        ! mv -f "$temp_path" "$CLEANUP_TARGET" 2>/dev/null; then
+        rm -f "$temp_path"
+        log_event "uninstall_cleanup_schedule_failed"
+        return 1
+    fi
+    return 0
+}
+
 repair_accessibility() {
     if ! pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_missing"
@@ -55,7 +77,15 @@ repair_accessibility() {
     pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1 || \
         log_event "service_enable_failed"
 
-    current="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null || true)"
+    if ! current="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)"; then
+        log_event "accessibility_services_read_failed"
+        return 1
+    fi
+    if ! enabled="$(settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
+        log_event "accessibility_enabled_read_failed"
+        return 1
+    fi
+
     merged="$(merge_accessibility_services "$current" "$ACCESSIBILITY_COMPONENT")"
     accessibility_changed=0
     if [ "$merged" != "$current" ]; then
@@ -66,7 +96,6 @@ repair_accessibility() {
         accessibility_changed=1
     fi
 
-    enabled="$(settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null || true)"
     if [ "$enabled" != "1" ]; then
         settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1 || {
             log_event "accessibility_enabled_write_failed"
@@ -82,17 +111,32 @@ repair_accessibility() {
 }
 
 doze_contains_package() {
-    output="$(cmd deviceidle whitelist 2>/dev/null || true)"
-    printf '%s\n' "$output" | grep -Eq "(^|[[:space:],])${PACKAGE_NAME}([[:space:],]|$)"
+    if ! output="$(cmd deviceidle whitelist 2>/dev/null)"; then
+        log_event "doze_whitelist_read_failed"
+        return 2
+    fi
+    printf '%s\n' "$output" | tr ',[:space:]' '\n' | grep -Fx "$PACKAGE_NAME" >/dev/null 2>&1
 }
 
 repair_keepalive() {
-    ensure_state_dir || true
+    state_ready=1
+    if ! ensure_state_dir; then
+        state_ready=0
+    fi
 
-    if ! doze_contains_package; then
-        if cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
-            printf 'added\n' > "$STATE_DIR/doze_added_by_module" 2>/dev/null || \
+    doze_contains_package
+    doze_status=$?
+    if [ "$doze_status" -eq 1 ]; then
+        if [ "$state_ready" -ne 1 ]; then
+            log_event "doze_whitelist_skipped_no_state"
+        elif [ ! -x "$CLEANUP_TARGET" ]; then
+            log_event "doze_whitelist_skipped_no_cleanup"
+        elif cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
+            if ! printf 'added\n' > "$STATE_DIR/doze_added_by_module" 2>/dev/null; then
                 log_event "doze_marker_write_failed"
+                cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
+                    log_event "doze_rollback_failed"
+            fi
         else
             log_event "doze_whitelist_failed"
         fi

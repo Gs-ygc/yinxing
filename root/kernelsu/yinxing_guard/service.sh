@@ -4,4 +4,6 @@ MODDIR=${0%/*}
 PATH="/data/adb/ksu/bin:/system/bin:/system/xbin:${PATH:-}"
 export PATH
 
-"$MODDIR/bin/guard.sh" >/dev/null 2>&1 &
+. "$MODDIR/bin/common.sh"
+install_cleanup_helper "$MODDIR/bin/uninstall-cleanup.sh" || true
+sh "$MODDIR/bin/guard.sh" >/dev/null 2>&1 &

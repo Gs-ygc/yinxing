@@ -4,11 +4,9 @@ MODDIR=${0%/*}
 . "$MODDIR/common.sh"
 
 BOOT_WAIT_SECONDS=${YINXING_GUARD_BOOT_WAIT_SECONDS:-5}
-BOOT_WAIT_MAX_CYCLES=${YINXING_GUARD_BOOT_WAIT_MAX_CYCLES:-120}
+BOOT_WAIT_MAX_CYCLES=${YINXING_GUARD_BOOT_WAIT_MAX_CYCLES:-0}
 HEALTH_INTERVAL_SECONDS=${YINXING_GUARD_INTERVAL_SECONDS:-60}
 MAX_CYCLES=${YINXING_GUARD_MAX_CYCLES:-0}
-PID_FILE="$STATE_DIR/guard.pid"
-BOOT_MARKER_FILE="$STATE_DIR/guard.boot_id"
 BOOT_ID_FILE=${YINXING_GUARD_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}
 
 number_or_default() {
@@ -21,7 +19,7 @@ number_or_default() {
 }
 
 BOOT_WAIT_SECONDS="$(number_or_default "$BOOT_WAIT_SECONDS" 5)"
-BOOT_WAIT_MAX_CYCLES="$(number_or_default "$BOOT_WAIT_MAX_CYCLES" 120)"
+BOOT_WAIT_MAX_CYCLES="$(number_or_default "$BOOT_WAIT_MAX_CYCLES" 0)"
 HEALTH_INTERVAL_SECONDS="$(number_or_default "$HEALTH_INTERVAL_SECONDS" 60)"
 MAX_CYCLES="$(number_or_default "$MAX_CYCLES" 0)"
 
@@ -38,45 +36,56 @@ read_boot_id() {
 }
 
 CURRENT_BOOT_ID="$(read_boot_id)"
+LOCK_BOOT_ID="$(printf '%s' "$CURRENT_BOOT_ID" | tr -c 'A-Za-z0-9._-' '_')"
+[ -n "$LOCK_BOOT_ID" ] || LOCK_BOOT_ID="unknown"
+LOCK_ROOT="$STATE_DIR/guard.lock"
+LOCK_DIR="$LOCK_ROOT/$LOCK_BOOT_ID"
+PID_FILE="$LOCK_DIR/pid"
+BOOT_MARKER_FILE="$LOCK_DIR/boot_id"
 
 release_lock() {
     if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$$" ]; then
         rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        rmdir "$LOCK_ROOT" 2>/dev/null || true
     fi
 }
 
 acquire_lock() {
-    if [ -f "$PID_FILE" ]; then
+    if ! mkdir -p "$LOCK_ROOT" 2>/dev/null; then
+        log_event "guard_lock_root_failed"
+        return 1
+    fi
+    if ! mkdir "$LOCK_DIR" 2>/dev/null; then
         previous_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-        previous_boot_id="$(cat "$BOOT_MARKER_FILE" 2>/dev/null || true)"
         case "$previous_pid" in
             ''|*[!0-9]*) ;;
             *)
-                if [ "$previous_boot_id" = "$CURRENT_BOOT_ID" ] && \
-                    kill -0 "$previous_pid" 2>/dev/null; then
+                if kill -0 "$previous_pid" 2>/dev/null; then
                     log_event "guard_already_running"
                     return 1
                 fi
                 ;;
         esac
+        log_event "guard_lock_busy"
+        return 1
     fi
 
-    printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE" || {
-        log_event "guard_boot_marker_write_failed"
+    if ! printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE" || \
+        ! printf '%s\n' "$$" > "$PID_FILE"; then
+        rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
+        rmdir "$LOCK_DIR" 2>/dev/null || true
+        rmdir "$LOCK_ROOT" 2>/dev/null || true
+        log_event "guard_lock_write_failed"
         return 1
-    }
-    printf '%s\n' "$$" > "$PID_FILE" || {
-        log_event "guard_pid_write_failed"
-        rm -f "$BOOT_MARKER_FILE"
-        return 1
-    }
+    fi
     return 0
 }
 
 wait_for_boot() {
     attempts=0
     while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
-        if [ "$attempts" -ge "$BOOT_WAIT_MAX_CYCLES" ]; then
+        if [ "$BOOT_WAIT_MAX_CYCLES" -gt 0 ] && [ "$attempts" -ge "$BOOT_WAIT_MAX_CYCLES" ]; then
             log_event "boot_wait_timeout"
             return 1
         fi
@@ -89,16 +98,22 @@ wait_for_boot() {
 run_health_cycle() {
     if ! repair_state; then
         log_event "repair_cycle_failed"
+        return 1
     fi
+    if [ "$HOME_LAUNCHED" -eq 0 ] && launch_home; then
+        HOME_LAUNCHED=1
+    fi
+    return 0
 }
 
 ensure_state_dir || exit 1
 acquire_lock || exit 0
-trap release_lock EXIT INT TERM
+trap release_lock EXIT
+trap 'exit 143' INT TERM
 
 wait_for_boot || exit 1
+HOME_LAUNCHED=0
 run_health_cycle
-launch_home || true
 
 cycles=0
 while [ "$MAX_CYCLES" -eq 0 ] || [ "$cycles" -lt "$MAX_CYCLES" ]; do

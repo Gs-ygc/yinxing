@@ -21,18 +21,19 @@ VERSION="${2:-}"
 
 command -v zip >/dev/null 2>&1 || die "zip is required"
 command -v unzip >/dev/null 2>&1 || die "unzip is required"
+command -v realpath >/dev/null 2>&1 || die "realpath is required"
 [ -d "$MODULE_DIR" ] || die "module source is missing: $MODULE_DIR"
 
 MODULE_ABS="$(cd "$MODULE_DIR" && pwd -P)"
-OUTPUT_DIR="$(dirname "$OUTPUT")"
-OUTPUT_NAME="$(basename "$OUTPUT")"
-mkdir -p "$OUTPUT_DIR"
-OUTPUT_ABS="$(cd "$OUTPUT_DIR" && pwd -P)/$OUTPUT_NAME"
+[ ! -L "$OUTPUT" ] || die "output must not be a symbolic link"
+OUTPUT_ABS="$(realpath -m -- "$OUTPUT")"
 case "$OUTPUT_ABS" in
     "$MODULE_ABS"|"$MODULE_ABS"/*) die "output must not be inside the module source" ;;
 esac
+OUTPUT_DIR="$(dirname "$OUTPUT_ABS")"
+mkdir -p "$OUTPUT_DIR"
 
-for required in module.prop skip_mount service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh; do
+for required in module.prop skip_mount service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/uninstall-cleanup.sh; do
     [ -f "$MODULE_DIR/$required" ] || die "required module file is missing: $required"
 done
 
@@ -43,14 +44,20 @@ if [ -n "$VERSION" ]; then
 fi
 
 STAGING="$(mktemp -d)"
+OUTPUT_TMP="$(mktemp "$OUTPUT_DIR/.yinxing-guard.XXXXXX.zip")"
+rm -f -- "$OUTPUT_TMP"
 cleanup() {
     rm -rf "$STAGING"
+    rm -f -- "$OUTPUT_TMP"
 }
 trap cleanup EXIT
 
 cp -a "$MODULE_DIR"/. "$STAGING"/
 if [ -n "$VERSION" ]; then
     sed -i "s/^version=.*/version=$VERSION/" "$STAGING/module.prop"
+    sed -i "s/^MODULE_VERSION=.*/MODULE_VERSION=\"$VERSION\"/" \
+        "$STAGING/bin/common.sh" \
+        "$STAGING/bin/uninstall-cleanup.sh"
 fi
 
 chmod 0755 \
@@ -58,19 +65,25 @@ chmod 0755 \
     "$STAGING/action.sh" \
     "$STAGING/uninstall.sh" \
     "$STAGING/bin/common.sh" \
-    "$STAGING/bin/guard.sh"
+    "$STAGING/bin/guard.sh" \
+    "$STAGING/bin/uninstall-cleanup.sh"
 
-rm -f -- "$OUTPUT_ABS"
+find "$STAGING" -exec touch -t 198001010000 {} +
+
 (
     cd "$STAGING"
-    zip -X -q -r "$OUTPUT_ABS" \
+    zip -X -q "$OUTPUT_TMP" \
         module.prop \
         skip_mount \
         service.sh \
         action.sh \
         uninstall.sh \
-        bin
+        bin/ \
+        bin/common.sh \
+        bin/guard.sh \
+        bin/uninstall-cleanup.sh
 )
 
-unzip -t "$OUTPUT_ABS" >/dev/null || die "created ZIP failed integrity check"
+unzip -t "$OUTPUT_TMP" >/dev/null || die "created ZIP failed integrity check"
+mv -f -- "$OUTPUT_TMP" "$OUTPUT_ABS"
 printf '%s\n' "$OUTPUT_ABS"

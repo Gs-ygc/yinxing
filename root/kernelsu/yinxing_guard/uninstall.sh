@@ -6,11 +6,19 @@ export PATH
 . "$MODDIR/bin/common.sh"
 
 marker="$STATE_DIR/doze_added_by_module"
+cleanup_source="$MODDIR/bin/uninstall-cleanup.sh"
+cleanup_target="$CLEANUP_TARGET"
+
+rm -f \
+    "$STATE_DIR/guard.pid" \
+    "$STATE_DIR/guard.boot_id"
+rm -rf "$STATE_DIR/guard.lock"
+
 if [ -f "$marker" ] && [ "$(cat "$marker" 2>/dev/null)" = "added" ]; then
-    cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
-        log_event "doze_whitelist_remove_failed"
+    install_cleanup_helper "$cleanup_source" || true
+else
+    rm -f "$cleanup_target"
+    rmdir "$STATE_DIR" 2>/dev/null || true
 fi
 
-rm -f "$marker" "$STATE_DIR/guard.pid" "$STATE_DIR/guard.boot_id"
-rmdir "$STATE_DIR" 2>/dev/null || true
 log_event "module_uninstalled"

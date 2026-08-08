@@ -60,9 +60,10 @@ A repository-owned module named `yinxing_guard` contains:
 - `module.prop`: stable module identity and version.
 - `service.sh`: KernelSU late-start entry point.
 - `action.sh`: caregiver-triggered one-shot repair from KernelSU Manager.
-- `uninstall.sh`: removes only module-owned runtime state and the Doze whitelist entry.
+- `uninstall.sh`: removes runtime lock metadata and schedules deferred cleanup for a module-owned Doze entry.
 - `bin/common.sh`: constants and deterministic state-repair functions.
 - `bin/guard.sh`: boot wait, initial repair, and low-frequency health loop.
+- `bin/uninstall-cleanup.sh`: a fixed boot-completed helper kept in KernelSU's common script directory while the module is installed; it becomes a one-shot Doze cleanup only after the module is removed.
 
 The module uses KernelSU's own BusyBox shell environment. It does not modify `/system` in the first release, so no metamodule is required.
 
@@ -80,14 +81,16 @@ The module may perform only these operations for `com.yinxing.launcher` and its 
 
 It must never erase other accessibility components, clear all app-ops, kill unrelated processes, disable system updates, change lock-screen security, or accept command text from Intents/files/network input.
 
+Accessibility reads fail closed: a failed `settings get` aborts that repair pass before any secure-setting write. The module adds a Doze exemption only after a successful three-state query (present, absent, or failed) and records ownership only for an entry it added.
+
 ## State Flow
 
 ### Boot
 
-1. KernelSU invokes `service.sh` during late start.
-2. The guard waits until `sys.boot_completed=1` without a busy loop.
+1. KernelSU invokes `service.sh` during late start; the service atomically refreshes the deferred cleanup helper before starting the guard.
+2. The guard waits until `sys.boot_completed=1` without a busy loop or terminal timeout.
 3. If Yinxing is not installed, it records one concise log entry and retries later.
-4. If installed, it repairs the allowlisted state and starts the HOME activity once.
+4. If installed, it repairs the allowlisted state and starts the HOME activity once. A missing package or failed HOME launch is retried on later health passes until the first success.
 5. It rechecks the package/component, accessibility entry, and Doze whitelist at a low frequency. Writes occur only when state is missing or incorrect.
 
 ### Package Update
@@ -100,20 +103,20 @@ The KernelSU Manager action runs the same idempotent repair functions once and o
 
 ### Disable and Rollback
 
-Disabling the KernelSU module prevents it from starting on the next boot. Uninstall removes the module runtime marker and its Doze whitelist entry, but deliberately does not disable Yinxing or remove its accessibility registration; destructive rollback remains an explicit caregiver choice in Android Settings.
+Disabling the KernelSU module prevents it from starting on the next boot. The helper under `/data/adb/boot-completed.d` is inert while the module directory is present. KernelSU prunes removed modules before Android services are available; `uninstall.sh` atomically refreshes the helper (while retaining any previous copy if refresh fails), and the next boot's helper removes only the module-owned Doze entry after boot completion. It deletes itself after success and remains for a later-boot retry after failure. It deliberately does not disable Yinxing or remove its accessibility registration; destructive rollback remains an explicit caregiver choice in Android Settings.
 
 ## Error Handling and Observability
 
 - All privileged commands are best-effort and independently checked; one unsupported ColorOS command cannot stop accessibility repair.
 - Logs use a stable `YinxingGuard` tag and include module version, action name, and success/failure without contact names, phone numbers, tokens, or UI content.
-- The loop uses a fixed low-frequency interval and a lock/pid guard so module entry points cannot create duplicate watchdogs.
+- The loop uses a fixed low-frequency interval and an atomic per-boot directory lock with PID/boot metadata so module entry points cannot create duplicate watchdogs; an incomplete lock is never reclaimed by a concurrent process.
 - Missing package state is not treated as a boot failure.
 - Shell functions quote package/component values and do not evaluate external input.
 - A failed repair remains visible in logs and is retried; the APK continues in its existing non-Root mode.
 
 ## Packaging and Releases
 
-The repository provides a deterministic module-packaging script that produces a KernelSU-installable ZIP without including development files. Each preview release contains:
+The repository provides a deterministic module-packaging script that normalizes timestamps, uses an explicit archive order, and produces a KernelSU-installable ZIP without development files. Each preview release contains:
 
 - A versioned Debug APK signed by the workspace's stable debug key.
 - A versioned `yinxing_guard` KernelSU module ZIP.
@@ -130,7 +133,11 @@ The first tag is a prerelease so device feedback can change ColorOS-specific pol
 - Host-side tests with fake `settings`, `pm`, `cmd`, `am`, and `getprop` commands.
 - Tests prove that accessibility merging preserves existing services, is idempotent, handles an empty list, and refuses to run state changes when the package is absent.
 - Tests prove one failed optional app-op does not block the remaining repair sequence.
+- Failure-injection tests prove settings read failures preserve all existing services, failed Doze queries do not claim ownership, and failed deferred removal keeps its retry state.
+- Concurrent-process tests prove only one guard owns the atomic lock, while startup tests cover a package appearing late and a transient HOME launch failure.
+- Cleanup-helper tests prove it stays inert while the module is active and remains available across an uninstall scheduling failure.
 - ZIP-content validation confirms required module files, permissions metadata expectations, and absence of test fixtures.
+- Reproducibility tests change source mtimes and require byte-identical module ZIPs.
 - Existing JVM tests and `:app:assembleDebug` must pass.
 
 ### OnePlus 15 Acceptance Checks

@@ -24,9 +24,10 @@
 - Create: `root/kernelsu/yinxing_guard/skip_mount` — explicit systemless/no-mount marker.
 - Create: `root/kernelsu/yinxing_guard/service.sh` — KernelSU late-start entry point.
 - Create: `root/kernelsu/yinxing_guard/action.sh` — one-shot repair action.
-- Create: `root/kernelsu/yinxing_guard/uninstall.sh` — remove only the module-owned Doze whitelist marker/state.
+- Create: `root/kernelsu/yinxing_guard/uninstall.sh` — remove runtime lock metadata and schedule cleanup for the module-owned Doze entry.
 - Create: `root/kernelsu/yinxing_guard/bin/common.sh` — constants, logging, command wrappers, state repair, and launcher start functions.
 - Create: `root/kernelsu/yinxing_guard/bin/guard.sh` — boot wait, lock acquisition, initial repair, and health loop.
+- Create: `root/kernelsu/yinxing_guard/bin/uninstall-cleanup.sh` — deferred boot-completed cleanup for a module-owned Doze entry.
 - Create: `tools/test-yinxing-guard.sh` — deterministic host test harness with fake `settings`, `pm`, `cmd`, `am`, and `getprop`.
 - Create: `tools/package-yinxing-guard.sh` — reproducible ZIP builder and content validator.
 - Modify: `app/build.gradle.kts:43-47` — increment Preview 1 `versionCode` and `versionName`.
@@ -80,12 +81,13 @@ Expected: non-zero exit because `root/kernelsu/yinxing_guard/bin/common.sh` does
 - Create: `root/kernelsu/yinxing_guard/action.sh`
 - Create: `root/kernelsu/yinxing_guard/uninstall.sh`
 - Test: `tools/test-yinxing-guard.sh`
+- Create: `root/kernelsu/yinxing_guard/bin/uninstall-cleanup.sh`
 
 **Interfaces:**
 - `merge_accessibility_services(current, component)` prints the original colon-delimited value plus the component exactly once.
-- `repair_state()` returns success only when the package exists and the required accessibility setting write succeeds; optional Doze/app-op failures are logged and do not abort the repair.
+- `repair_state()` returns success only when the package exists and accessibility setting reads/writes succeed; a failed read must cause no write. Optional Doze/app-op failures are logged and do not abort the repair.
 - `launch_home()` runs only the fixed `com.yinxing.launcher/.feature.home.MainActivity` component for user 0.
-- `guard.sh` calls `repair_state` once after `sys.boot_completed=1`, launches HOME once, then repeats `repair_state` at `YINXING_GUARD_INTERVAL_SECONDS` (default 60).
+- `guard.sh` waits without a terminal boot timeout, retries package/HOME startup until the first success, then repeats `repair_state` at `YINXING_GUARD_INTERVAL_SECONDS` (default 60) without reopening HOME.
 
 - [x] **Step 1: Implement the smallest pure merge helper**
 
@@ -112,22 +114,32 @@ if ! pm path --user 0 "$PACKAGE_NAME" >/dev/null 2>&1; then
 fi
 pm enable --user 0 "$PACKAGE_NAME" >/dev/null 2>&1 || log "package_enable_failed"
 pm enable --user 0 "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1 || log "service_enable_failed"
-current=$(settings --user 0 get secure enabled_accessibility_services 2>/dev/null || true)
+if ! current=$(settings --user 0 get secure enabled_accessibility_services 2>/dev/null); then
+    log "accessibility_services_read_failed"
+    return 1
+fi
+if ! enabled=$(settings --user 0 get secure accessibility_enabled 2>/dev/null); then
+    log "accessibility_enabled_read_failed"
+    return 1
+fi
 merged=$(merge_accessibility_services "$current" "$ACCESSIBILITY_COMPONENT")
 if [ "$merged" != "$current" ]; then
     settings --user 0 put secure enabled_accessibility_services "$merged" || return 1
 fi
-settings --user 0 put secure accessibility_enabled 1 || return 1
+if [ "$enabled" != "1" ]; then
+    settings --user 0 put secure accessibility_enabled 1 || return 1
+fi
 ```
 
 The implementation must not clear or replace unrelated services. It must log each failed command with a stable action name, never command output containing user data.
 
 - [x] **Step 4: Add optional keepalive policy and verify failure isolation**
 
-Implement `repair_keepalive` with independent commands:
+Implement `repair_keepalive` with a three-state Doze query (present, absent, failed). Add the package only after a successful absent query, write an ownership marker only after the add succeeds, and roll back the add if the marker cannot be written. Keep the app-op commands independent:
+
+The two app-op writes remain independent:
 
 ```sh
-cmd deviceidle whitelist +com.yinxing.launcher >/dev/null 2>&1 || log "doze_whitelist_failed"
 cmd appops set --user 0 com.yinxing.launcher RUN_IN_BACKGROUND allow >/dev/null 2>&1 || log "background_appop_unsupported"
 cmd appops set --user 0 com.yinxing.launcher RUN_ANY_IN_BACKGROUND allow >/dev/null 2>&1 || log "any_background_appop_unsupported"
 ```
@@ -136,9 +148,9 @@ cmd appops set --user 0 com.yinxing.launcher RUN_ANY_IN_BACKGROUND allow >/dev/n
 
 - [x] **Step 5: Implement boot entry, lock, loop, action, and uninstall behavior**
 
-`guard.sh` waits for `getprop sys.boot_completed` with a bounded sleep interval, writes a PID/boot marker under `/data/adb/yinxing_guard`, and exits if a live guard already owns the marker. It performs one repair and one HOME launch, then sleeps 60 seconds between health passes. Test-only overrides are accepted through `YINXING_GUARD_BOOT_WAIT_SECONDS`, `YINXING_GUARD_INTERVAL_SECONDS`, and `YINXING_GUARD_MAX_CYCLES`.
+`guard.sh` waits for `getprop sys.boot_completed` with a bounded sleep interval, acquires an atomic directory lock under `/data/adb/yinxing_guard`, and exits if a live guard owns that boot's PID metadata. It retries initial repair/HOME launch until success, then sleeps 60 seconds between health passes. Test-only overrides are accepted through `YINXING_GUARD_BOOT_WAIT_SECONDS`, `YINXING_GUARD_INTERVAL_SECONDS`, and `YINXING_GUARD_MAX_CYCLES`.
 
-`service.sh` sets a restricted Android command `PATH`, starts `guard.sh` once, and exits. `action.sh` performs one repair and HOME launch. `uninstall.sh` removes the Doze whitelist only when the module-owned marker says this module added it, then removes its exact runtime state directory; it does not touch accessibility settings.
+`service.sh` sets a restricted Android command `PATH`, atomically refreshes the fixed cleanup helper in `/data/adb/boot-completed.d`, starts `guard.sh` with KernelSU's inherited BusyBox shell mode, and exits. `action.sh` refreshes the helper before performing one repair and HOME launch. The helper stays inert while the module directory exists; because KernelSU runs `uninstall.sh` before Android services are available, the uninstall hook atomically refreshes it again and the next boot removes the Doze entry only when the module-owned marker is present. It self-deletes after success and retains marker/script state after failure. It does not touch accessibility settings.
 
 - [x] **Step 6: Run all focused shell tests and syntax checks**
 
@@ -151,6 +163,7 @@ sh -n root/kernelsu/yinxing_guard/action.sh
 sh -n root/kernelsu/yinxing_guard/uninstall.sh
 sh -n root/kernelsu/yinxing_guard/bin/common.sh
 sh -n root/kernelsu/yinxing_guard/bin/guard.sh
+sh -n root/kernelsu/yinxing_guard/bin/uninstall-cleanup.sh
 ```
 
 Expected: all assertions pass and every syntax command exits 0.
@@ -163,7 +176,7 @@ Expected: all assertions pass and every syntax command exits 0.
 
 **Interfaces:**
 - Command: `bash tools/package-yinxing-guard.sh <output-zip> [module-version]`.
-- Produces: a ZIP whose archive root contains `module.prop`, `skip_mount`, `service.sh`, `action.sh`, `uninstall.sh`, and `bin/` scripts; no extra `yinxing_guard/` directory, host tests, or `.git` files. KernelSU's installer extracts module files directly into `/data/adb/modules/<MODID>`.
+- Produces: a ZIP whose archive root contains `module.prop`, `skip_mount`, `service.sh`, `action.sh`, `uninstall.sh`, and `bin/` scripts including the deferred cleanup helper; no extra `yinxing_guard/` directory, host tests, or `.git` files. KernelSU's installer extracts module files directly into `/data/adb/modules/<MODID>`.
 
 - [x] **Step 1: Add a failing packaging assertion**
 
@@ -171,7 +184,7 @@ Extend the test harness to call the packaging script with an explicit temporary 
 
 - [x] **Step 2: Implement packaging with explicit paths**
 
-Use `zip -X -r` from the module's parent directory. Reject output paths that resolve inside the module source, remove only the exact requested output, and run `unzip -t` before returning success. If a version argument is supplied, write it into a temporary staged copy's `module.prop` rather than mutating the source.
+Use `zip -X` with a fixed file order and normalized 1980 epoch timestamps. Reject output paths that resolve inside the module source before creating directories, build and validate a temporary ZIP before replacing only the exact requested output, and keep existing hard-linked source files intact. If a version argument is supplied, update `module.prop` and runtime log-version constants only in a temporary staged copy rather than mutating the source.
 
 - [x] **Step 3: Run packaging and content tests**
 
