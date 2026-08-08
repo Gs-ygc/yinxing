@@ -153,6 +153,14 @@ write_fake sleep \
     '[[ -e "$TEST_ROOT/use_real_sleep" ]] && /bin/sleep "$@"' \
     'exit 0'
 
+write_fake dumpsys \
+    '#!/usr/bin/env bash' \
+    'printf "dumpsys %s\\n" "$*" >> "$CALLS"' \
+    '[[ "${1:-}" == "accessibility" ]] || exit 2' \
+    '[[ -e "$TEST_ROOT/fail_accessibility_dump" ]] && exit 1' \
+    '[[ -f "$TEST_ROOT/accessibility_dump" ]] && cat "$TEST_ROOT/accessibility_dump"' \
+    'exit 0'
+
 # The assertions describe observable state and command effects, not source text.
 source "$MODULE_ROOT/bin/common.sh"
 export ACCESSIBILITY_COMPONENT
@@ -176,6 +184,8 @@ reset_fixture() {
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_home_once" \
         "$TEST_ROOT/use_real_sleep" \
+        "$TEST_ROOT/accessibility_dump" \
+        "$TEST_ROOT/fail_accessibility_dump" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
@@ -261,6 +271,24 @@ test_status_reports_unknown_when_component_state_query_fails() {
     pass "status reports unknown on component state failure"
 }
 
+test_status_reports_stale_when_accessibility_service_crashed() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=stale"
+    pass "status reports stale crashed accessibility service"
+}
+
 test_status_output_contract_ignores_log_noise() {
     reset_fixture
     prepare_healthy_status_fixture
@@ -316,6 +344,41 @@ test_repair_is_idempotent() {
     [[ "$(grep -oF "$ACCESSIBILITY_COMPONENT" "$SERVICES" | wc -l)" -eq 1 ]] || fail "service appears more than once"
     assert_not_contains "$CALLS" "settings --user 0 put secure"
     pass "repair is idempotent"
+}
+
+test_repair_rebinds_crashed_accessibility_service() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    repair_state || fail "crashed accessibility service should be rebound"
+    assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
+        "rebind preserves existing services"
+    assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "rebind should remove and restore the target service"
+    assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other"
+    assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other:$ACCESSIBILITY_COMPONENT"
+    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_contains "$CALLS" "accessibility_service_rebound"
+    pass "repair rebinds crashed accessibility service"
+}
+
+test_repair_ignores_unavailable_accessibility_diagnostic() {
+    reset_fixture
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    touch "$TEST_ROOT/fail_accessibility_dump"
+    repair_state || fail "unavailable accessibility diagnostic should not fail repair"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    pass "repair ignores unavailable accessibility diagnostic"
 }
 
 test_missing_package_is_safe() {
@@ -846,6 +909,7 @@ case "$MODE" in
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
         test_status_reports_unknown_when_component_state_query_fails
+        test_status_reports_stale_when_accessibility_service_crashed
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_missing_module
@@ -882,11 +946,14 @@ case "$MODE" in
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
         test_status_reports_unknown_when_component_state_query_fails
+        test_status_reports_stale_when_accessibility_service_crashed
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_missing_module
         test_repair_preserves_and_enables
         test_repair_is_idempotent
+        test_repair_rebinds_crashed_accessibility_service
+        test_repair_ignores_unavailable_accessibility_diagnostic
         test_missing_package_is_safe
         test_optional_failure_does_not_block_accessibility
         test_settings_read_failure_is_safe
