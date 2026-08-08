@@ -35,7 +35,7 @@ APK 使用构建机 Debug 签名，不是正式发布私钥签名。若手机上
 
 ## 验证边界
 
-发布前已执行宿主 Shell 与独立 BusyBox 模块测试、完整 Debug 单元/Smoke 测试、强制 Debug 构建、APK 签名/元数据检查和模块 ZIP 完整性检查；发布后会从 GitHub 下载远程资产复核。最终强制构建通过 `337` 个测试（`0` 跳过、`0` 失败、`0` 错误），Gradle 报告 `BUILD SUCCESSFUL in 1m 13s`，外部耗时 `73.70s`。真机侧尚未连接，OnePlus 15/ColorOS 16 的最终结果等待本次 Release 反馈。
+发布前已执行宿主 Shell 与独立 BusyBox 模块测试、完整 Debug 单元/Smoke 测试、强制 Debug 构建、APK 签名/元数据检查和模块 ZIP 完整性检查；发布后会从 GitHub 下载远程资产复核。最终强制构建通过 `337` 个测试（`0` 跳过、`0` 失败、`0` 错误），Gradle 报告 `BUILD SUCCESSFUL in 1m 14s`，外部耗时 `74.90s`。真机侧尚未连接，OnePlus 15/ColorOS 16 的最终结果等待本次 Release 反馈。
 
 ## 回滚
 
