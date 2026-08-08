@@ -40,6 +40,97 @@ merge_accessibility_services() {
     esac
 }
 
+remove_accessibility_service() {
+    current="$1"
+    component="$2"
+
+    case "$current" in
+        null|NULL|"") current="" ;;
+    esac
+
+    printf '%s\n' "$current" | awk -v target="$component" -F: '
+        {
+            result = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "" || $i == target) {
+                    continue
+                }
+                if (result != "") {
+                    result = result ":"
+                }
+                result = result $i
+            }
+            print result
+        }
+    '
+}
+
+accessibility_service_binding_state() {
+    if ! accessibility_dump="$(dumpsys accessibility 2>/dev/null)"; then
+        printf 'unknown\n'
+        return 0
+    fi
+    if [ -z "$accessibility_dump" ]; then
+        printf 'unknown\n'
+        return 0
+    fi
+
+    printf '%s\n' "$accessibility_dump" | awk -v component="$ACCESSIBILITY_COMPONENT" '
+        /^[[:space:]]*Bound services:/ { section = "bound" }
+        /^[[:space:]]*Enabled services:/ { section = "" }
+        /^[[:space:]]*Binding services:/ { section = "binding" }
+        /^[[:space:]]*Crashed services:/ { section = "crashed" }
+        /^[[:space:]]*Client list info:/ { section = "" }
+        section != "" && index($0, component) {
+            if (section == "bound") {
+                bound = 1
+            } else if (section == "binding") {
+                binding = 1
+            } else if (section == "crashed") {
+                crashed = 1
+            }
+        }
+        END {
+            if (crashed) {
+                print "crashed"
+            } else if (binding) {
+                print "binding"
+            } else if (bound) {
+                print "bound"
+            } else {
+                print "unknown"
+            }
+        }
+    '
+}
+
+rebind_accessibility_service() {
+    current="$1"
+    merged="$2"
+
+    case ":$current:" in
+        *":$ACCESSIBILITY_COMPONENT:"*) ;;
+        *) return 0 ;;
+    esac
+
+    without="$(remove_accessibility_service "$current" "$ACCESSIBILITY_COMPONENT")"
+    if ! settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$without"; then
+        log_event "accessibility_service_rebind_remove_failed"
+        return 1
+    fi
+    sleep 1
+    if ! settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged"; then
+        log_event "accessibility_service_rebind_restore_failed"
+        return 1
+    fi
+    if ! settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1; then
+        log_event "accessibility_service_rebind_enable_failed"
+        return 1
+    fi
+    log_event "accessibility_service_rebound"
+    return 0
+}
+
 ensure_state_dir() {
     mkdir -p "$STATE_DIR" 2>/dev/null || {
         log_event "state_dir_unavailable"
@@ -156,6 +247,11 @@ repair_accessibility() {
 
     if [ "$accessibility_changed" -eq 1 ]; then
         log_event "accessibility_repaired"
+    fi
+
+    binding_state="$(accessibility_service_binding_state)"
+    if [ "$binding_state" = "crashed" ]; then
+        rebind_accessibility_service "$current" "$merged" || return 1
     fi
     return 0
 }

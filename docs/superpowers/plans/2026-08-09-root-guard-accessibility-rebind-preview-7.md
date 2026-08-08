@@ -18,10 +18,11 @@ Detect when Yinxing remains enabled in Android's accessibility settings but its 
 
 1. Extend `tools/test-yinxing-guard.sh` with a fake `dumpsys accessibility` command and reset its fixture files between tests.
 2. Add a crashed-service repair test proving `talkback:other` survives, Yinxing is removed and restored, `accessibility_enabled=1` is reasserted, and the rebound event is logged.
-3. Add status coverage for `accessibility=stale` and a failed/empty diagnostic proving settings are not toggled when dump evidence is unavailable.
-4. Register the new tests in focused and full dispatch paths.
-5. Run Host and standalone BusyBox focused suites; the new crashed-service test must fail against the Preview 6 implementation.
-6. Commit the red tests as `test: cover crashed accessibility service recovery`.
+3. Add bound/binding coverage proving healthy or transient states are left untouched.
+4. Add status coverage for `accessibility=stale` and a failed/empty diagnostic proving settings are not toggled when dump evidence is unavailable.
+5. Register the new tests in focused and full dispatch paths.
+6. Run Host and standalone BusyBox focused suites; the new crashed-service test must fail against the Preview 6 implementation.
+7. Commit the red tests as `test: cover crashed accessibility service recovery`.
 
 ## Task 2: Implement binding-state parsing and targeted recovery
 

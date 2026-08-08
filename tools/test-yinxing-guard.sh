@@ -371,6 +371,20 @@ EOF
     pass "repair rebinds crashed accessibility service"
 }
 
+test_repair_leaves_bound_or_binding_accessibility_service_untouched() {
+    local state
+    for state in "Bound services" "Binding services"; do
+        reset_fixture
+        printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+        printf '1\n' > "$ACCESSIBILITY_ENABLED"
+        printf 'User state[\n  %s:{%s}\n  Enabled services:{}\n  Crashed services:{}\n  Client list info:{}\n]\n' \
+            "$state" "$ACCESSIBILITY_COMPONENT" > "$TEST_ROOT/accessibility_dump"
+        repair_state || fail "$state accessibility service should remain healthy"
+        assert_not_contains "$CALLS" "settings --user 0 put secure"
+    done
+    pass "repair leaves bound and binding accessibility services untouched"
+}
+
 test_repair_ignores_unavailable_accessibility_diagnostic() {
     reset_fixture
     printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
@@ -953,6 +967,7 @@ case "$MODE" in
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_repair_rebinds_crashed_accessibility_service
+        test_repair_leaves_bound_or_binding_accessibility_service_untouched
         test_repair_ignores_unavailable_accessibility_diagnostic
         test_missing_package_is_safe
         test_optional_failure_does_not_block_accessibility

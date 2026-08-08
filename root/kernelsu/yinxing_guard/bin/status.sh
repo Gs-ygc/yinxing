@@ -115,7 +115,11 @@ accessibility_state() {
     case ":$current_services:" in
         *":$ACCESSIBILITY_COMPONENT:"*)
             if [ "$enabled_state" = "1" ]; then
-                printf 'enabled\n'
+                if [ "$(accessibility_service_binding_state)" = "crashed" ]; then
+                    printf 'stale\n'
+                else
+                    printf 'enabled\n'
+                fi
             else
                 printf 'disabled\n'
             fi
