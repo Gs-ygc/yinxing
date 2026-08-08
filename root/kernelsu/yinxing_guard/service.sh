@@ -17,6 +17,11 @@ case "$RESTART_SECONDS" in
     ''|*[!0-9]*) RESTART_SECONDS=30 ;;
 esac
 
+OWNER_RETRY_SECONDS=${YINXING_GUARD_OWNER_RETRY_SECONDS:-30}
+case "$OWNER_RETRY_SECONDS" in
+    ''|*[!0-9]*) OWNER_RETRY_SECONDS=30 ;;
+esac
+
 MODULE_STATE_DIR=${YINXING_GUARD_MODULE_STATE_DIR:-$MODDIR}
 module_is_active() {
     [ -d "$MODULE_STATE_DIR" ] && \
@@ -31,7 +36,7 @@ module_is_active() {
         module_is_active || exit 0
         case "$guard_status" in
             0)
-                exit 0
+                sleep "$OWNER_RETRY_SECONDS"
                 ;;
             75)
                 sleep "$LOCK_RETRY_SECONDS"
