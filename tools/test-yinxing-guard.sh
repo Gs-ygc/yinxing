@@ -554,6 +554,40 @@ test_service_restarts_non_lock_guard_failure() {
     pass "service restarts non-lock guard failure"
 }
 
+test_service_reclaims_lock_after_owner_disappears() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/modules/yinxing_guard" "$TEST_ROOT/state/guard.lock/owner-boot-id"
+    printf 'owner-boot-id\n' > "$TEST_ROOT/boot_id"
+    /bin/sh -c "sleep 0.2; rm -rf '$TEST_ROOT/state/guard.lock/owner-boot-id'; sleep 1" &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/owner-boot-id/pid"
+    printf 'owner-boot-id\n' > "$TEST_ROOT/state/guard.lock/owner-boot-id/boot_id"
+    touch "$TEST_ROOT/use_real_sleep"
+    YINXING_GUARD_MODULE_STATE_DIR="$TEST_ROOT/modules/yinxing_guard" \
+        YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_OWNER_RETRY_SECONDS=0 \
+        YINXING_GUARD_LOCK_RETRY_SECONDS=0 \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/service.sh"
+    local found=0
+    for _ in $(seq 1 100); do
+        if grep -q '^am start ' "$CALLS"; then
+            found=1
+            break
+        fi
+        /bin/sleep 0.05
+    done
+    assert_equals "1" "$found" "service did not reclaim lock after owner disappeared"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "service reclaimed owner more than once"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    pass "service reclaims lock after owner disappears"
+}
+
 test_service_stops_when_module_disabled_or_removing() {
     local marker
     for marker in disable remove; do
@@ -814,6 +848,7 @@ case "$MODE" in
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
         test_service_restarts_non_lock_guard_failure
+        test_service_reclaims_lock_after_owner_disappears
         test_service_stops_when_module_disabled_or_removing
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
@@ -853,6 +888,7 @@ case "$MODE" in
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
         test_service_restarts_non_lock_guard_failure
+        test_service_reclaims_lock_after_owner_disappears
         test_service_stops_when_module_disabled_or_removing
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
