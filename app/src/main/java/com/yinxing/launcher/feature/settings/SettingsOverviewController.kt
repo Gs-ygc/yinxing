@@ -23,6 +23,7 @@ internal class SettingsOverviewController(
         onShowContactsSheet: () -> Unit,
         onShowAutoAnswerSheet: () -> Unit,
         onShowPermissionGroupsSheet: () -> Unit,
+        onShowRootHealthSheet: () -> Unit,
         onShowDeviceSettingsSheet: () -> Unit,
         onShowSystemSheet: () -> Unit
     ) {
@@ -33,6 +34,7 @@ internal class SettingsOverviewController(
             findViewById<View>(R.id.btn_card_contacts).setOnClickListener { onShowContactsSheet() }
             findViewById<View>(R.id.btn_card_auto_answer).setOnClickListener { onShowAutoAnswerSheet() }
             findViewById<View>(R.id.btn_card_permissions).setOnClickListener { onShowPermissionGroupsSheet() }
+            findViewById<View>(R.id.btn_card_root).setOnClickListener { onShowRootHealthSheet() }
             findViewById<View>(R.id.btn_card_device).setOnClickListener { onShowDeviceSettingsSheet() }
             findViewById<View>(R.id.btn_card_system).setOnClickListener { onShowSystemSheet() }
         }
@@ -45,6 +47,8 @@ internal class SettingsOverviewController(
     fun updateAutoAnswerHubCard() = activity.updateAutoAnswerHubCard()
 
     fun updateSystemHubCard() = activity.updateSystemHubCard()
+
+    fun updateRootHubCard() = activity.updateRootHubCard()
 
     fun refreshDeviceHubCard() = activity.refreshDeviceHubCard()
 
@@ -90,6 +94,7 @@ internal fun SettingsActivity.refreshOverviewUi() {
 internal fun SettingsActivity.performOverviewRefresh() {
     updateContactsHubSummary()
     updateAutoAnswerHubCard()
+    updateRootHubCard()
     updateSystemHubCard()
     refreshAllPermissionUi()
 }

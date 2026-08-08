@@ -513,6 +513,7 @@ test_uninstall_defers_cleanup_until_boot_completed() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    printf 'ok\n' > "$TEST_ROOT/state/last_repair"
     printf 'keep\n' > "$TEST_ROOT/unrelated"
     printf added > "$TEST_ROOT/doze_whitelisted"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -522,6 +523,7 @@ test_uninstall_defers_cleanup_until_boot_completed() {
     run_module_script "$CLEANUP_TARGET"
     assert_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "successful cleanup did not remove itself"
+    [[ ! -e "$TEST_ROOT/state/last_repair" ]] || fail "successful cleanup left last repair state"
     [[ ! -e "$TEST_ROOT/state" ]] || fail "module state directory was not removed"
     assert_equals "keep" "$(tr -d '\n' < "$TEST_ROOT/unrelated")" "uninstall preserves unrelated files"
     pass "uninstall defers cleanup until boot completed"

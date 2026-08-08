@@ -25,6 +25,8 @@ internal class SettingsViewBinding(activity: Activity) {
     val tvAutoAnswerHubSummary: TextView = activity.findViewById(R.id.tv_auto_answer_hub_summary)
     val tvPermissionHubStatus: TextView = activity.findViewById(R.id.tv_permission_hub_status)
     val tvPermissionHubSummary: TextView = activity.findViewById(R.id.tv_permission_hub_summary)
+    val tvRootHubStatus: TextView = activity.findViewById(R.id.tv_root_hub_status)
+    val tvRootHubSummary: TextView = activity.findViewById(R.id.tv_root_hub_summary)
     val tvDeviceHubStatus: TextView = activity.findViewById(R.id.tv_device_hub_status)
     val tvDeviceHubSummary: TextView = activity.findViewById(R.id.tv_device_hub_summary)
     val tvSystemHubSummary: TextView = activity.findViewById(R.id.tv_system_hub_summary)

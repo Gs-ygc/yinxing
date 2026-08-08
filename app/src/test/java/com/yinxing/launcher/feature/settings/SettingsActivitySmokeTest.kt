@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import android.os.Looper
 import android.provider.Settings
+import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
@@ -14,6 +15,7 @@ import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import com.yinxing.launcher.feature.incoming.IncomingCallDiagnostics
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -84,6 +86,28 @@ class SettingsActivitySmokeTest {
         val activity = buildActivity()
         idle()
         assertNotNull(activity.findViewById(R.id.btn_card_system))
+    }
+
+    @Test
+    fun rootHealthCardExistsWithoutRoot() {
+        val activity = buildActivity()
+        idle()
+        assertNotNull(activity.findViewById<View>(R.id.btn_card_root))
+        assertTrue(activity.findViewById<TextView>(R.id.tv_root_hub_summary).text.isNotEmpty())
+    }
+
+    @Test
+    fun rootHealthCardStartsUncheckedWithoutInvokingRoot() {
+        val activity = buildActivity()
+        idle()
+        assertEquals(
+            activity.getString(R.string.settings_root_status_unchecked),
+            activity.findViewById<TextView>(R.id.tv_root_hub_status).text.toString()
+        )
+        assertEquals(
+            activity.getString(R.string.settings_root_hub_summary_unchecked),
+            activity.findViewById<TextView>(R.id.tv_root_hub_summary).text.toString()
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════════════

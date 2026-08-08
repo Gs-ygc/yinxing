@@ -9,6 +9,9 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootHealthRepository
+import com.yinxing.launcher.common.root.RootHealthSnapshot
+import com.yinxing.launcher.common.root.SuRootCommandRunner
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.weather.WeatherPreferences
 import com.yinxing.launcher.feature.incoming.IncomingGuardReadiness
@@ -36,6 +39,8 @@ class SettingsActivity : AppCompatActivity() {
     internal val tvAutoAnswerHubSummary: TextView get() = binding.tvAutoAnswerHubSummary
     internal val tvPermissionHubStatus: TextView get() = binding.tvPermissionHubStatus
     internal val tvPermissionHubSummary: TextView get() = binding.tvPermissionHubSummary
+    internal val tvRootHubStatus: TextView get() = binding.tvRootHubStatus
+    internal val tvRootHubSummary: TextView get() = binding.tvRootHubSummary
     internal val tvDeviceHubStatus: TextView get() = binding.tvDeviceHubStatus
     internal val tvDeviceHubSummary: TextView get() = binding.tvDeviceHubSummary
     internal val tvSystemHubSummary: TextView get() = binding.tvSystemHubSummary
@@ -47,6 +52,15 @@ class SettingsActivity : AppCompatActivity() {
     internal var permissionEntryStates: Map<PermissionEntry, PermissionEntryState>
         get() = runtime.permissionEntryStates
         set(value) { runtime.permissionEntryStates = value }
+
+    internal var rootHealthSnapshot: RootHealthSnapshot
+        get() = runtime.rootHealthSnapshot
+        set(value) { runtime.rootHealthSnapshot = value }
+
+    /** 延迟创建，设置页启动和普通刷新不会触发 Root 授权提示。 */
+    internal val rootHealthRepository: RootHealthRepository by lazy {
+        RootHealthRepository(SuRootCommandRunner())
+    }
 
     internal var contactsSummaryJob: Job?
         get() = runtime.contactsSummaryJob
@@ -92,6 +106,7 @@ class SettingsActivity : AppCompatActivity() {
             onShowContactsSheet = sheetController::showContactsSheet,
             onShowAutoAnswerSheet = sheetController::showAutoAnswerSheet,
             onShowPermissionGroupsSheet = sheetController::showPermissionGroupsSheet,
+            onShowRootHealthSheet = sheetController::showRootHealthSheet,
             onShowDeviceSettingsSheet = sheetController::showDeviceSettingsSheet,
             onShowSystemSheet = sheetController::showSystemSheet
         )

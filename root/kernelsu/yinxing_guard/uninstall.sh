@@ -11,7 +11,8 @@ cleanup_target="$CLEANUP_TARGET"
 
 rm -f \
     "$STATE_DIR/guard.pid" \
-    "$STATE_DIR/guard.boot_id"
+    "$STATE_DIR/guard.boot_id" \
+    "$STATE_DIR/last_repair"
 rm -rf "$STATE_DIR/guard.lock"
 
 if [ -f "$marker" ]; then

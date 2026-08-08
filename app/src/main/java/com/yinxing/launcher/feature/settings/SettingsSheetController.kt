@@ -18,6 +18,8 @@ internal class SettingsSheetController(
 
     fun showPermissionGroupsSheet() = activity.showPermissionGroupsSheet()
 
+    fun showRootHealthSheet() = activity.showRootHealthSheet()
+
     fun showDeviceSettingsSheet() = activity.showDeviceSettingsSheet()
 
     fun showSystemSheet() = activity.showSystemSheet()
@@ -59,7 +61,7 @@ internal fun SettingsActivity.addSheetEntry(
     summary: String,
     badge: BadgeStyle,
     onClick: () -> Unit
-) {
+): View {
     val itemView = layoutInflater.inflate(R.layout.item_settings_permission_entry, context.container, false)
     itemView.findViewById<TextView>(R.id.tv_permission_item_title).text = title
     itemView.findViewById<TextView>(R.id.tv_permission_item_summary).text = summary
@@ -71,6 +73,7 @@ internal fun SettingsActivity.addSheetEntry(
     )
     itemView.setOnClickListener { onClick() }
     context.container.addView(itemView)
+    return itemView
 }
 
 internal fun SettingsActivity.addSheetTip(

@@ -1,5 +1,6 @@
 package com.yinxing.launcher.feature.settings
 
+import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.feature.incoming.IncomingGuardReadiness
 import kotlinx.coroutines.Job
 
@@ -13,5 +14,6 @@ import kotlinx.coroutines.Job
 internal class SettingsRuntimeState {
     var incomingGuardReadiness: IncomingGuardReadiness = IncomingGuardReadiness(emptyList())
     var permissionEntryStates: Map<PermissionEntry, PermissionEntryState> = emptyMap()
+    var rootHealthSnapshot: RootHealthSnapshot = RootHealthSnapshot.unchecked()
     var contactsSummaryJob: Job? = null
 }
