@@ -103,6 +103,8 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
     private lateinit var timeoutManager: TimeoutManager
     private var floatingView: FloatingStatusView? = null
     @Volatile
+    private var automationReady = false
+    @Volatile
     private var currentSession: VideoCallSession? = null
     private var postCallSession: VideoCallSession? = null
     private var floatingHideJob: Job? = null
@@ -121,10 +123,17 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
 
     override fun onCreate() {
         super.onCreate()
-        instance = this
+        // Do not publish a partially initialized service. Requests received
+        // while Android is binding remain in the queue until onServiceConnected.
+        automationReady = false
+        instance = null
     }
 
     override fun onServiceConnected() {
+        automationReady = false
+        if (instance === this) {
+            instance = null
+        }
         super.onServiceConnected()
         if (::kioskGuard.isInitialized) {
             kioskGuard.shutdown()
@@ -151,10 +160,15 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
             activeSession = ::hasActiveSession
         )
         kioskGuard.init()
+        automationReady = true
+        instance = this
         consumePendingRequest()
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+        if (!automationReady) {
+            return
+        }
         val pkg = event?.packageName?.toString()
         val className = event?.className?.toString()
 
@@ -211,7 +225,10 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
     }
 
     override fun onDestroy() {
-        instance = null
+        automationReady = false
+        if (instance === this) {
+            instance = null
+        }
         if (::kioskGuard.isInitialized) kioskGuard.shutdown()
         cancelSession(true, "无障碍服务已关闭，请重新开启后再试")
         cancelPostCallJobs()

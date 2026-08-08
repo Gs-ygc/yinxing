@@ -5,6 +5,7 @@ import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
+import android.view.accessibility.AccessibilityEvent
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
@@ -83,6 +84,29 @@ class KioskLauncherGuardTest {
 
         assertNull(shadowOf(service).nextStartedActivity)
 
+        controller.destroy()
+    }
+
+    @Test
+    fun serviceIsNotPublishedBeforeAccessibilityConnectionIsReady() {
+        val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
+
+        assertNull(SelectToSpeakService.getInstance())
+
+        controller.destroy()
+    }
+
+    @Test
+    fun accessibilityEventsBeforeConnectionAreIgnored() {
+        val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
+        val service = controller.get()
+        val event = AccessibilityEvent.obtain(AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED).apply {
+            packageName = SYSTEM_HOME_PACKAGE
+            className = "Launcher"
+        }
+
+        service.onAccessibilityEvent(event)
+        event.recycle()
         controller.destroy()
     }
 

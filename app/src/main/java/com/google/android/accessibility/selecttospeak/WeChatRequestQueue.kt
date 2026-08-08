@@ -28,8 +28,8 @@ internal object WeChatRequestQueue {
      * 行为：
      * - 若当前已有待处理请求，或服务正处于会话中：发送一次 `terminal=true, success=false` 的 busy 进度，结束。
      * - 否则记录为 [pendingRequest] 并：
-     *   - 若 service 还未连接，发送一次 "等待无障碍服务连接" 进度；
-     *   - 若已连接，触发 [WeChatRequestHost.consumePendingRequest]；Host 负责把
+     *   - 若 service 还未完成连接初始化，发送一次 "等待无障碍服务连接" 进度；
+     *   - 若 Host 已由完整连接生命周期发布，触发 [WeChatRequestHost.consumePendingRequest]；Host 负责把
      *     消费动作投递到自己的生命周期线程。
      */
     fun enqueue(
