@@ -139,6 +139,7 @@ write_fake am \
 write_fake getprop \
     '#!/usr/bin/env bash' \
     'printf "getprop %s\\n" "$*" >> "$CALLS"' \
+    'if [[ -e "$TEST_ROOT/boot_incomplete_once" ]]; then calls="$(cat "$TEST_ROOT/boot_incomplete_calls" 2>/dev/null || printf 0)"; calls=$((calls + 1)); printf "%s\\n" "$calls" > "$TEST_ROOT/boot_incomplete_calls"; if [[ "$calls" -ge 2 ]]; then rm -f "$TEST_ROOT/boot_incomplete_once"; fi; exit 1; fi' \
     '[[ "${1:-}" == "sys.boot_completed" ]] && printf "1\\n"'
 
 write_fake log \
@@ -163,6 +164,8 @@ reset_fixture() {
     rm -f \
         "$TEST_ROOT/package_missing" \
         "$TEST_ROOT/package_missing_once" \
+        "$TEST_ROOT/boot_incomplete_once" \
+        "$TEST_ROOT/boot_incomplete_calls" \
         "$TEST_ROOT/fail_appops" \
         "$TEST_ROOT/fail_settings_get" \
         "$TEST_ROOT/fail_settings_put" \
@@ -522,6 +525,54 @@ test_service_retries_incomplete_lock() {
     pass "service retries incomplete lock"
 }
 
+test_service_restarts_non_lock_guard_failure() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    touch "$TEST_ROOT/boot_incomplete_once"
+    YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_BOOT_WAIT_MAX_CYCLES=1 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        YINXING_GUARD_RESTART_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/service.sh"
+    local found=0
+    for _ in $(seq 1 100); do
+        if grep -q '^am start ' "$CALLS"; then
+            found=1
+            break
+        fi
+        /bin/sleep 0.05
+    done
+    assert_equals "1" "$found" "service did not restart a non-lock guard failure"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "service restarted guard more than once"
+    local boot_calls
+    boot_calls="$(cat "$TEST_ROOT/boot_incomplete_calls" 2>/dev/null || printf 0)"
+    [[ "$boot_calls" -ge 2 ]] || fail "guard did not fail during boot readiness (calls=$boot_calls)"
+    assert_equals "3" "$(grep -c '^getprop sys.boot_completed$' "$CALLS" || true)" \
+        "supervisor should start a second guard after the first boot failure"
+    pass "service restarts non-lock guard failure"
+}
+
+test_service_stops_when_module_disabled_or_removing() {
+    local marker
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"
+        YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+            YINXING_GUARD_INTERVAL_SECONDS=0 \
+            YINXING_GUARD_MAX_CYCLES=1 \
+            YINXING_GUARD_RESTART_SECONDS=0 \
+            run_module_script "$MODULE_ROOT/service.sh"
+        /bin/sleep 0.1
+        assert_equals "0" "$(grep -c '^pm path ' "$CALLS" || true)" \
+            "disabled/removing module must not start guard ($marker)"
+    done
+    pass "service stops when module disabled or removing"
+}
+
 test_guard_prevents_concurrent_processes() {
     reset_fixture
     touch "$TEST_ROOT/use_real_sleep"
@@ -762,6 +813,8 @@ case "$MODE" in
         test_guard_reclaims_dead_same_boot_lock
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
+        test_service_restarts_non_lock_guard_failure
+        test_service_stops_when_module_disabled_or_removing
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
@@ -799,6 +852,8 @@ case "$MODE" in
         test_guard_reclaims_dead_same_boot_lock
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
+        test_service_restarts_non_lock_guard_failure
+        test_service_stops_when_module_disabled_or_removing
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
