@@ -35,7 +35,7 @@ internal data class RootHealthSnapshot(
             "schema" to setOf("1"),
             "module" to setOf("active", "disabled", "removing", "missing"),
             "guard" to setOf("running", "stale", "missing", "unknown"),
-            "accessibility" to setOf("enabled", "disabled", "missing", "unknown"),
+            "accessibility" to setOf("enabled", "disabled", "missing", "stale", "unknown"),
             "doze" to setOf("owned", "present", "absent", "unknown"),
             "cleanup" to setOf("ready", "missing", "invalid"),
             "last_repair" to setOf("ok", "failed", "unknown")

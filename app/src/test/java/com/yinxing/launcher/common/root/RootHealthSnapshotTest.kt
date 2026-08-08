@@ -31,6 +31,17 @@ class RootHealthSnapshotTest {
     }
 
     @Test
+    fun parsesStaleAccessibilitySnapshotAsDegraded() {
+        val snapshot = RootHealthSnapshot.parse(
+            validSnapshot().replace("accessibility=enabled", "accessibility=stale")
+        )
+
+        assertNotNull(snapshot)
+        assertEquals(RootHealthState.DEGRADED, snapshot?.state)
+        assertEquals("stale", snapshot?.accessibility)
+    }
+
+    @Test
     fun mapsMissingModuleToModuleMissingState() {
         val snapshot = RootHealthSnapshot.parse(
             validSnapshot().replace("module=active", "module=missing")
