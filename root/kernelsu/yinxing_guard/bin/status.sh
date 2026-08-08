@@ -49,12 +49,64 @@ guard_state() {
     esac
 }
 
+package_enabled_state() {
+    if ! disabled_packages="$(pm list packages -d --user "$ANDROID_USER_ID" "$PACKAGE_NAME" 2>/dev/null)"; then
+        printf 'unknown\n'
+        return
+    fi
+    if printf '%s\n' "$disabled_packages" | grep -Fx "package:$PACKAGE_NAME" >/dev/null 2>&1; then
+        printf 'disabled\n'
+    else
+        printf 'enabled\n'
+    fi
+}
+
+component_enabled_state() {
+    if ! package_dump="$(pm dump "$PACKAGE_NAME" 2>/dev/null)"; then
+        printf 'unknown\n'
+        return
+    fi
+    component_class="${ACCESSIBILITY_COMPONENT#*/}"
+    if ! printf '%s\n' "$package_dump" | grep -F "$component_class" >/dev/null 2>&1; then
+        printf 'unknown\n'
+        return
+    fi
+    disabled_components="$(printf '%s\n' "$package_dump" | sed -n '/disabledComponents:/,/enabledComponents:/p')"
+    if printf '%s\n' "$disabled_components" | grep -F "$component_class" >/dev/null 2>&1; then
+        printf 'disabled\n'
+    else
+        printf 'enabled\n'
+    fi
+}
+
 accessibility_state() {
     if [ ! -d "$MODULE_DIR" ] || \
         ! pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         printf 'missing\n'
         return
     fi
+    package_state="$(package_enabled_state)"
+    case "$package_state" in
+        disabled)
+            printf 'disabled\n'
+            return
+            ;;
+        unknown)
+            printf 'unknown\n'
+            return
+            ;;
+    esac
+    component_state="$(component_enabled_state)"
+    case "$component_state" in
+        disabled)
+            printf 'disabled\n'
+            return
+            ;;
+        unknown)
+            printf 'unknown\n'
+            return
+            ;;
+    esac
     if ! current_services="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)" || \
         ! enabled_state="$(settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
         printf 'unknown\n'

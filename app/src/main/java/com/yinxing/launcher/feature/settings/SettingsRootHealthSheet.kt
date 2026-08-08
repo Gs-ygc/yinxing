@@ -15,6 +15,7 @@ import kotlinx.coroutines.launch
  * 修复按钮执行一次固定 action.sh，然后重新读取快照，便于家属确认结果。
  */
 internal fun SettingsActivity.showRootHealthSheet() {
+    val sessionId = beginRootHealthSession()
     val sheet = createListSheet(
         title = getString(R.string.settings_section_root_title),
         message = getString(R.string.settings_sheet_root_message)
@@ -30,6 +31,7 @@ internal fun SettingsActivity.showRootHealthSheet() {
         badge = rootHealthBadge(rootHealthSnapshot)
     ) {
         queryRootHealth(
+            sessionId = sessionId,
             statusEntry = statusEntry,
             recoveryEntry = recoveryEntry,
             isBusy = { busy },
@@ -43,6 +45,7 @@ internal fun SettingsActivity.showRootHealthSheet() {
         badge = actionBadge(getString(R.string.settings_root_entry_recover))
     ) {
         recoverRootHealth(
+            sessionId = sessionId,
             statusEntry = statusEntry,
             recoveryEntry = recoveryEntry,
             isBusy = { busy },
@@ -58,15 +61,37 @@ internal fun SettingsActivity.showRootHealthSheet() {
             getString(R.string.settings_root_tip_manual)
         )
     )
+    sheet.dialog.setOnDismissListener {
+        cancelRootHealthSession(sessionId)
+    }
     sheet.dialog.show()
 
     // 只有用户打开此面板才执行一次显式 Root 查询。
     queryRootHealth(
+        sessionId = sessionId,
         statusEntry = statusEntry,
         recoveryEntry = recoveryEntry,
         isBusy = { busy },
         setBusy = { busy = it }
     )
+}
+
+private fun SettingsActivity.beginRootHealthSession(): Long {
+    rootHealthSessionId += 1
+    rootHealthJob?.cancel()
+    rootHealthJob = null
+    return rootHealthSessionId
+}
+
+private fun SettingsActivity.cancelRootHealthSession(sessionId: Long) {
+    if (rootHealthSessionId != sessionId) return
+    rootHealthSessionId += 1
+    rootHealthJob?.cancel()
+    rootHealthJob = null
+}
+
+private fun SettingsActivity.isCurrentRootHealthSession(sessionId: Long): Boolean {
+    return rootHealthSessionId == sessionId && !isFinishing && !isDestroyed
 }
 
 internal fun SettingsActivity.updateRootHubCard() {
@@ -82,65 +107,84 @@ internal fun SettingsActivity.updateRootHubCard() {
 }
 
 private fun SettingsActivity.queryRootHealth(
+    sessionId: Long,
     statusEntry: View,
     recoveryEntry: View,
     isBusy: () -> Boolean,
     setBusy: (Boolean) -> Unit
 ) {
-    if (isBusy()) return
+    if (!isCurrentRootHealthSession(sessionId) || isBusy()) return
     setBusy(true)
     renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = true)
-    lifecycleScope.launch {
+    val job = lifecycleScope.launch {
         try {
-            rootHealthSnapshot = rootHealthRepository.query()
-            renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            val snapshot = rootHealthRepository.query()
+            if (isCurrentRootHealthSession(sessionId)) {
+                rootHealthSnapshot = snapshot
+                renderRootHealthEntries(statusEntry, recoveryEntry, snapshot, busy = false)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
-            rootHealthSnapshot = RootHealthSnapshot.unavailable()
-            renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            if (isCurrentRootHealthSession(sessionId)) {
+                rootHealthSnapshot = RootHealthSnapshot.unavailable()
+                renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            }
         } finally {
-            setBusy(false)
+            if (isCurrentRootHealthSession(sessionId)) {
+                setBusy(false)
+                rootHealthJob = null
+            }
         }
     }
+    rootHealthJob = job
 }
 
 private fun SettingsActivity.recoverRootHealth(
+    sessionId: Long,
     statusEntry: View,
     recoveryEntry: View,
     isBusy: () -> Boolean,
     setBusy: (Boolean) -> Unit
 ) {
-    if (isBusy()) return
+    if (!isCurrentRootHealthSession(sessionId) || isBusy()) return
     Toast.makeText(this, getString(R.string.settings_root_recover_running), Toast.LENGTH_SHORT).show()
     setBusy(true)
     renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = true)
-    lifecycleScope.launch {
+    val job = lifecycleScope.launch {
         try {
             val result = rootHealthRepository.recoverAndQuery()
-            rootHealthSnapshot = result.snapshot
-            Toast.makeText(
-                this@recoverRootHealth,
-                getString(
-                    if (result.actionSucceeded) {
-                        R.string.settings_root_recover_success
-                    } else {
-                        R.string.settings_root_recover_failed
-                    }
-                ),
-                Toast.LENGTH_SHORT
-            ).show()
-            renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            if (isCurrentRootHealthSession(sessionId)) {
+                rootHealthSnapshot = result.snapshot
+                Toast.makeText(
+                    this@recoverRootHealth,
+                    getString(
+                        if (result.actionSucceeded) {
+                            R.string.settings_root_recover_success
+                        } else {
+                            R.string.settings_root_recover_failed
+                        }
+                    ),
+                    Toast.LENGTH_SHORT
+                ).show()
+                renderRootHealthEntries(statusEntry, recoveryEntry, result.snapshot, busy = false)
+            }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
-            rootHealthSnapshot = RootHealthSnapshot.unavailable()
-            Toast.makeText(this@recoverRootHealth, getString(R.string.settings_root_recover_failed), Toast.LENGTH_SHORT).show()
-            renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            if (isCurrentRootHealthSession(sessionId)) {
+                rootHealthSnapshot = RootHealthSnapshot.unavailable()
+                Toast.makeText(this@recoverRootHealth, getString(R.string.settings_root_recover_failed), Toast.LENGTH_SHORT).show()
+                renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+            }
         } finally {
-            setBusy(false)
+            if (isCurrentRootHealthSession(sessionId)) {
+                setBusy(false)
+                rootHealthJob = null
+            }
         }
     }
+    rootHealthJob = job
 }
 
 private fun SettingsActivity.renderRootHealthEntries(

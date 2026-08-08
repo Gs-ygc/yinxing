@@ -57,6 +57,14 @@ class SettingsActivity : AppCompatActivity() {
         get() = runtime.rootHealthSnapshot
         set(value) { runtime.rootHealthSnapshot = value }
 
+    internal var rootHealthJob: Job?
+        get() = runtime.rootHealthJob
+        set(value) { runtime.rootHealthJob = value }
+
+    internal var rootHealthSessionId: Long
+        get() = runtime.rootHealthSessionId
+        set(value) { runtime.rootHealthSessionId = value }
+
     /** 延迟创建，设置页启动和普通刷新不会触发 Root 授权提示。 */
     internal val rootHealthRepository: RootHealthRepository by lazy {
         RootHealthRepository(SuRootCommandRunner())
@@ -132,6 +140,9 @@ class SettingsActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        rootHealthSessionId += 1
+        rootHealthJob?.cancel()
+        rootHealthJob = null
         overviewController.onDestroy()
         super.onDestroy()
     }

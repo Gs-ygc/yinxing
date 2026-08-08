@@ -15,5 +15,7 @@ internal class SettingsRuntimeState {
     var incomingGuardReadiness: IncomingGuardReadiness = IncomingGuardReadiness(emptyList())
     var permissionEntryStates: Map<PermissionEntry, PermissionEntryState> = emptyMap()
     var rootHealthSnapshot: RootHealthSnapshot = RootHealthSnapshot.unchecked()
+    var rootHealthJob: Job? = null
+    var rootHealthSessionId: Long = 0L
     var contactsSummaryJob: Job? = null
 }

@@ -12,7 +12,7 @@ CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/
 log_event() {
     message="$1"
     if command -v log >/dev/null 2>&1; then
-        log -t "$LOG_TAG" -- "version=$MODULE_VERSION $message" 2>/dev/null || true
+        log -t "$LOG_TAG" -- "version=$MODULE_VERSION $message" >/dev/null 2>&1 || true
     fi
 }
 
@@ -117,10 +117,14 @@ repair_accessibility() {
         return 1
     fi
 
-    pm enable --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1 || \
+    if ! pm enable --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_enable_failed"
-    pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1 || \
+        return 1
+    fi
+    if ! pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1; then
         log_event "service_enable_failed"
+        return 1
+    fi
 
     if ! current="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)"; then
         log_event "accessibility_services_read_failed"

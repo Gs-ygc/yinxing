@@ -12,7 +12,9 @@ cleanup_target="$CLEANUP_TARGET"
 rm -f \
     "$STATE_DIR/guard.pid" \
     "$STATE_DIR/guard.boot_id" \
-    "$STATE_DIR/last_repair"
+    "$STATE_DIR/last_repair" \
+    "$STATE_DIR/last_repair.tmp."* \
+    "$STATE_DIR/doze_added_by_module.tmp."*
 rm -rf "$STATE_DIR/guard.lock"
 
 if [ -f "$marker" ]; then

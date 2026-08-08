@@ -10,7 +10,7 @@ MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
 
 log_event() {
     if command -v log >/dev/null 2>&1; then
-        log -t "$LOG_TAG" -- "version=$MODULE_VERSION $1" 2>/dev/null || true
+        log -t "$LOG_TAG" -- "version=$MODULE_VERSION $1" >/dev/null 2>&1 || true
     fi
 }
 
@@ -18,7 +18,9 @@ cleanup_runtime_state() {
     rm -f \
         "$STATE_DIR/guard.pid" \
         "$STATE_DIR/guard.boot_id" \
-        "$STATE_DIR/last_repair"
+        "$STATE_DIR/last_repair" \
+        "$STATE_DIR/last_repair.tmp."* \
+        "$STATE_DIR/doze_added_by_module.tmp."*
     rm -rf "$STATE_DIR/guard.lock"
     rmdir "$STATE_DIR" 2>/dev/null || true
 }

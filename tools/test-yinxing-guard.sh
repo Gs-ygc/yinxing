@@ -81,6 +81,12 @@ assert_contains_text() {
     [[ "$text" == *"$value"* ]] || fail "missing '$value' in status output: $text"
 }
 
+assert_not_contains_text() {
+    local text="$1"
+    local value="$2"
+    [[ "$text" != *"$value"* ]] || fail "unexpected '$value' in status output: $text"
+}
+
 assert_not_contains() {
     local file="$1"
     local value="$2"
@@ -109,8 +115,10 @@ write_fake pm \
     '#!/usr/bin/env bash' \
     'printf "pm %s\\n" "$*" >> "$CALLS"' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
+    'if [[ "${args[0]:-}" == "list" && "${args[1]:-}" == "packages" ]]; then [[ -e "$TEST_ROOT/fail_pm_list" ]] && exit 1; [[ -e "$TEST_ROOT/package_disabled" ]] && printf "package:com.yinxing.launcher\\n"; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "dump" ]]; then [[ -e "$TEST_ROOT/fail_pm_dump" ]] && exit 1; printf "Package com.yinxing.launcher\\n"; if [[ -e "$TEST_ROOT/component_disabled" ]]; then printf "disabledComponents: [%s]\\n" "$ACCESSIBILITY_COMPONENT"; else printf "Services: %s\\n" "$ACCESSIBILITY_COMPONENT"; fi; exit 0; fi' \
     'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
-    'if [[ "${args[0]:-}" == "enable" ]]; then exit 0; fi' \
+    'if [[ "${args[0]:-}" == "enable" ]]; then [[ -e "$TEST_ROOT/fail_pm_enable" ]] && exit 1; exit 0; fi' \
     'exit 2'
 
 write_fake cmd \
@@ -135,7 +143,8 @@ write_fake getprop \
 
 write_fake log \
     '#!/usr/bin/env bash' \
-    'printf "log %s\\n" "$*" >> "$CALLS"'
+    'printf "log %s\\n" "$*" >> "$CALLS"' \
+    '[[ -e "$TEST_ROOT/log_noise" ]] && printf "log-noise\\n"'
 
 write_fake sleep \
     '#!/usr/bin/env bash' \
@@ -143,9 +152,9 @@ write_fake sleep \
     '[[ -e "$TEST_ROOT/use_real_sleep" ]] && /bin/sleep "$@"' \
     'exit 0'
 
-# This is intentionally a RED test until the module implementation exists.
 # The assertions describe observable state and command effects, not source text.
 source "$MODULE_ROOT/bin/common.sh"
+export ACCESSIBILITY_COMPONENT
 
 reset_fixture() {
     : > "$CALLS"
@@ -157,13 +166,35 @@ reset_fixture() {
         "$TEST_ROOT/fail_appops" \
         "$TEST_ROOT/fail_settings_get" \
         "$TEST_ROOT/fail_settings_put" \
+        "$TEST_ROOT/fail_pm_list" \
+        "$TEST_ROOT/fail_pm_dump" \
+        "$TEST_ROOT/fail_pm_enable" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_home_once" \
         "$TEST_ROOT/use_real_sleep" \
         "$TEST_ROOT/home_launched" \
-        "$TEST_ROOT/doze_whitelisted"
+        "$TEST_ROOT/doze_whitelisted" \
+        "$TEST_ROOT/package_disabled" \
+        "$TEST_ROOT/component_disabled" \
+        "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules"
+}
+
+prepare_healthy_status_fixture() {
+    mkdir -p \
+        "$TEST_ROOT/modules/yinxing_guard" \
+        "$TEST_ROOT/state/guard.lock/test-boot" \
+        "$(dirname "$CLEANUP_TARGET")"
+    printf 'test-boot\n' > "$TEST_ROOT/boot_id"
+    printf '%s\n' "$$" > "$TEST_ROOT/state/guard.lock/test-boot/pid"
+    printf 'ok\n' > "$TEST_ROOT/state/last_repair"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    printf 'helper\n' > "$CLEANUP_TARGET"
+    chmod 0755 "$CLEANUP_TARGET"
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    touch "$TEST_ROOT/doze_whitelisted"
 }
 
 test_merge_cases() {
@@ -178,19 +209,7 @@ test_merge_cases() {
 
 test_status_reports_healthy_state() {
     reset_fixture
-    mkdir -p \
-        "$TEST_ROOT/modules/yinxing_guard" \
-        "$TEST_ROOT/state/guard.lock/test-boot" \
-        "$(dirname "$CLEANUP_TARGET")"
-    printf 'test-boot\n' > "$TEST_ROOT/boot_id"
-    printf '%s\n' "$$" > "$TEST_ROOT/state/guard.lock/test-boot/pid"
-    printf 'ok\n' > "$TEST_ROOT/state/last_repair"
-    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
-    printf 'helper\n' > "$CLEANUP_TARGET"
-    chmod 0755 "$CLEANUP_TARGET"
-    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
-    printf '1\n' > "$ACCESSIBILITY_ENABLED"
-    touch "$TEST_ROOT/doze_whitelisted"
+    prepare_healthy_status_fixture
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
     assert_contains_text "$output" "schema=1"
@@ -201,6 +220,52 @@ test_status_reports_healthy_state() {
     assert_contains_text "$output" "cleanup=ready"
     assert_contains_text "$output" "last_repair=ok"
     pass "status reports healthy state"
+}
+
+test_status_reports_disabled_package_as_disabled() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/package_disabled"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=disabled"
+    pass "status reports disabled package"
+}
+
+test_status_reports_disabled_component_as_disabled() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/component_disabled"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=disabled"
+    pass "status reports disabled component"
+}
+
+test_status_reports_unknown_when_package_state_query_fails() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/fail_pm_list"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=unknown"
+    pass "status reports unknown on package state failure"
+}
+
+test_status_reports_unknown_when_component_state_query_fails() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/fail_pm_dump"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=unknown"
+    pass "status reports unknown on component state failure"
+}
+
+test_status_output_contract_ignores_log_noise() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/fail_deviceidle_query" "$TEST_ROOT/log_noise"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_equals "8" "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" "status output line count"
+    assert_not_contains_text "$output" "log-noise"
+    pass "status output contract ignores log noise"
 }
 
 test_status_reports_stale_guard_as_degraded() {
@@ -280,6 +345,16 @@ test_settings_read_failure_is_safe() {
     assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" "settings read failure preserves services"
     assert_not_contains "$CALLS" "settings --user 0 put secure"
     pass "settings read failure is safe"
+}
+
+test_package_enable_failure_is_reported() {
+    reset_fixture
+    touch "$TEST_ROOT/fail_pm_enable"
+    if repair_state; then
+        fail "package enable failure should report an incomplete repair"
+    fi
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    pass "package enable failure is reported"
 }
 
 test_doze_query_failure_is_safe() {
@@ -396,17 +471,55 @@ test_guard_reclaims_dead_same_boot_lock() {
     pass "guard reclaims dead same-boot lock"
 }
 
-test_guard_does_not_reclaim_incomplete_lock() {
+test_guard_preserves_incomplete_lock_for_service_retry() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state/guard.lock/incomplete-boot-id"
     printf 'incomplete-boot-id\n' > "$TEST_ROOT/boot_id"
+    local status
+    set +e
     YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
         YINXING_GUARD_INTERVAL_SECONDS=0 \
         YINXING_GUARD_MAX_CYCLES=1 \
+        YINXING_GUARD_LOCK_ATTEMPTS=1 \
         run_module_script "$MODULE_ROOT/bin/guard.sh"
+    status=$?
+    set -e
+    assert_equals "75" "$status" "incomplete lock should ask service to retry"
     assert_equals "0" "$(grep -c '^am start ' "$CALLS" || true)" "incomplete lock must not be reclaimed"
-    pass "guard preserves incomplete lock"
+    [[ -d "$TEST_ROOT/state/guard.lock/incomplete-boot-id" ]] || fail "incomplete lock was reclaimed"
+    pass "guard preserves incomplete lock for service retry"
+}
+
+test_service_retries_incomplete_lock() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/guard.lock/incomplete-boot-id"
+    printf 'incomplete-boot-id\n' > "$TEST_ROOT/boot_id"
+    touch "$TEST_ROOT/use_real_sleep"
+    (
+        /bin/sleep 0.2
+        rm -rf "$TEST_ROOT/state/guard.lock/incomplete-boot-id"
+    ) &
+    local remover_pid=$!
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        YINXING_GUARD_LOCK_ATTEMPTS=1 \
+        YINXING_GUARD_LOCK_RETRY_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/service.sh"
+    local found=0
+    for _ in $(seq 1 100); do
+        if grep -q '^am start ' "$CALLS"; then
+            found=1
+            break
+        fi
+        /bin/sleep 0.05
+    done
+    wait "$remover_pid" 2>/dev/null || true
+    assert_equals "1" "$found" "service did not retry an incomplete lock"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "service retried more than once"
+    pass "service retries incomplete lock"
 }
 
 test_guard_prevents_concurrent_processes() {
@@ -532,6 +645,8 @@ test_uninstall_defers_cleanup_until_boot_completed() {
     mkdir -p "$TEST_ROOT/state"
     printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
     printf 'ok\n' > "$TEST_ROOT/state/last_repair"
+    printf 'stale\n' > "$TEST_ROOT/state/last_repair.tmp.999"
+    printf 'stale\n' > "$TEST_ROOT/state/doze_added_by_module.tmp.999"
     printf 'keep\n' > "$TEST_ROOT/unrelated"
     printf added > "$TEST_ROOT/doze_whitelisted"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -542,6 +657,8 @@ test_uninstall_defers_cleanup_until_boot_completed() {
     assert_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "successful cleanup did not remove itself"
     [[ ! -e "$TEST_ROOT/state/last_repair" ]] || fail "successful cleanup left last repair state"
+    [[ ! -e "$TEST_ROOT/state/last_repair.tmp.999" ]] || fail "successful cleanup left repair temp state"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module.tmp.999" ]] || fail "successful cleanup left Doze temp state"
     [[ ! -e "$TEST_ROOT/state" ]] || fail "module state directory was not removed"
     assert_equals "keep" "$(tr -d '\n' < "$TEST_ROOT/unrelated")" "uninstall preserves unrelated files"
     pass "uninstall defers cleanup until boot completed"
@@ -626,6 +743,11 @@ case "$MODE" in
         ;;
     --status-only)
         test_status_reports_healthy_state
+        test_status_reports_disabled_package_as_disabled
+        test_status_reports_disabled_component_as_disabled
+        test_status_reports_unknown_when_package_state_query_fails
+        test_status_reports_unknown_when_component_state_query_fails
+        test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_missing_module
         ;;
@@ -638,7 +760,8 @@ case "$MODE" in
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
         test_guard_reclaims_dead_same_boot_lock
-        test_guard_does_not_reclaim_incomplete_lock
+        test_guard_preserves_incomplete_lock_for_service_retry
+        test_service_retries_incomplete_lock
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
@@ -653,6 +776,11 @@ case "$MODE" in
     all)
         test_merge_cases
         test_status_reports_healthy_state
+        test_status_reports_disabled_package_as_disabled
+        test_status_reports_disabled_component_as_disabled
+        test_status_reports_unknown_when_package_state_query_fails
+        test_status_reports_unknown_when_component_state_query_fails
+        test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_missing_module
         test_repair_preserves_and_enables
@@ -660,6 +788,7 @@ case "$MODE" in
         test_missing_package_is_safe
         test_optional_failure_does_not_block_accessibility
         test_settings_read_failure_is_safe
+        test_package_enable_failure_is_reported
         test_doze_query_failure_is_safe
         test_doze_add_claims_ownership
         test_home_launch_is_fixed
@@ -668,7 +797,8 @@ case "$MODE" in
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
         test_guard_reclaims_dead_same_boot_lock
-        test_guard_does_not_reclaim_incomplete_lock
+        test_guard_preserves_incomplete_lock_for_service_retry
+        test_service_retries_incomplete_lock
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal

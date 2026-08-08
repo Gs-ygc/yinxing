@@ -2,7 +2,7 @@ package com.yinxing.launcher.common.root
 
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.withContext
+import kotlinx.coroutines.runInterruptible
 
 internal data class RootRecoveryResult(
     val actionSucceeded: Boolean,
@@ -12,11 +12,11 @@ internal data class RootRecoveryResult(
 internal class RootHealthRepository(
     private val runner: RootCommandRunner
 ) {
-    suspend fun query(): RootHealthSnapshot = withContext(Dispatchers.IO) {
+    suspend fun query(): RootHealthSnapshot = runInterruptible(Dispatchers.IO) {
         readSnapshot()
     }
 
-    suspend fun recoverAndQuery(): RootRecoveryResult = withContext(Dispatchers.IO) {
+    suspend fun recoverAndQuery(): RootRecoveryResult = runInterruptible(Dispatchers.IO) {
         val actionResult = runCommand(RootCommand.RECOVER)
         RootRecoveryResult(
             actionSucceeded = actionResult?.isSuccessful == true,

@@ -31,12 +31,19 @@ internal fun interface RootCommandRunner {
 
 internal class SuRootCommandRunner(
     private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
-    private val maxOutputBytes: Int = MAX_OUTPUT_BYTES
+    private val maxOutputBytes: Int = MAX_OUTPUT_BYTES,
+    private val suExecutable: String = "su"
 ) : RootCommandRunner {
+
+    init {
+        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+        require(maxOutputBytes > 0) { "maxOutputBytes must be positive" }
+        require(suExecutable.isNotBlank()) { "suExecutable must not be blank" }
+    }
 
     override fun run(command: RootCommand): RootCommandResult {
         val process = try {
-            ProcessBuilder("su", "-c", command.shellPath)
+            ProcessBuilder(suExecutable, "-c", command.shellPath)
                 .redirectErrorStream(true)
                 .start()
         } catch (_: IOException) {
@@ -57,12 +64,9 @@ internal class SuRootCommandRunner(
             false
         }
         if (!finished) {
-            process.destroy()
-            if (!waitForExit(process, 250L)) {
-                process.destroy()
-            }
+            terminateProcess(process)
         }
-        closeAndJoin(process, reader)
+        closeAndJoin(process, reader, waitForReader = finished)
 
         val output = readResult.get()
         return RootCommandResult(
@@ -87,14 +91,14 @@ internal class SuRootCommandRunner(
                     val remaining = limit - output.size()
                     if (remaining <= 0) {
                         limitExceeded = true
-                        process.destroy()
+                        terminateProcess(process)
                         break
                     }
                     val copied = minOf(count, remaining)
                     output.write(buffer, 0, copied)
                     if (copied != count) {
                         limitExceeded = true
-                        process.destroy()
+                        terminateProcess(process)
                         break
                     }
                 }
@@ -108,6 +112,28 @@ internal class SuRootCommandRunner(
         )
     }
 
+    private fun terminateProcess(process: Process) {
+        process.destroy()
+        if (waitForExit(process, TERMINATION_GRACE_MILLIS)) {
+            return
+        }
+        forceDestroy(process)
+        waitForExit(process, TERMINATION_GRACE_MILLIS)
+    }
+
+    /** destroyForcibly was added after the app's minSdk; use it when available. */
+    private fun forceDestroy(process: Process) {
+        try {
+            Process::class.java.getMethod("destroyForcibly").invoke(process)
+        } catch (_: ReflectiveOperationException) {
+            process.destroy()
+        } catch (_: SecurityException) {
+            process.destroy()
+        } catch (_: LinkageError) {
+            process.destroy()
+        }
+    }
+
     private fun waitForExit(process: Process, timeout: Long): Boolean {
         return try {
             process.waitFor(timeout, TimeUnit.MILLISECONDS)
@@ -117,13 +143,27 @@ internal class SuRootCommandRunner(
         }
     }
 
-    private fun closeAndJoin(process: Process, reader: Thread) {
-        try {
-            process.inputStream.close()
-        } catch (_: IOException) {
+    private fun closeAndJoin(process: Process, reader: Thread, waitForReader: Boolean) {
+        if (waitForReader) {
+            joinReader(reader, READER_JOIN_MILLIS)
         }
+        listOf(process.inputStream, process.errorStream, process.outputStream).forEach { stream ->
+            try {
+                stream.close()
+            } catch (_: IOException) {
+            }
+        }
+        if (reader.isAlive) {
+            joinReader(reader, READER_JOIN_AFTER_CLOSE_MILLIS)
+        }
+        if (reader.isAlive) {
+            reader.interrupt()
+        }
+    }
+
+    private fun joinReader(reader: Thread, timeout: Long) {
         try {
-            reader.join(500L)
+            reader.join(timeout)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
         }
@@ -145,5 +185,8 @@ internal class SuRootCommandRunner(
     private companion object {
         const val DEFAULT_TIMEOUT_MILLIS = 3_000L
         const val MAX_OUTPUT_BYTES = 16 * 1024
+        const val TERMINATION_GRACE_MILLIS = 100L
+        const val READER_JOIN_MILLIS = 250L
+        const val READER_JOIN_AFTER_CLOSE_MILLIS = 100L
     }
 }

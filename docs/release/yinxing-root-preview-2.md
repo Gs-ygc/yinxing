@@ -59,3 +59,10 @@ su -c 'logcat -d -s YinxingGuard'
 ## 本地验证边界
 
 发布前已执行宿主 Shell 与 `ASH_STANDALONE=1` BusyBox 模块测试、状态解析和 Root 桥接 JVM 测试、设置页 Smoke 测试、Debug APK 构建、模块 ZIP 完整性/权限/时间戳检查。真机侧尚未连接，OnePlus 15/ColorOS 16 的最终体验结果等待本次 Release 反馈。
+
+本次可回滚构建记录：`327` 个 Debug 单元/Smoke 测试通过（`0` 跳过、`0` 失败），强制 `--rerun-tasks` 构建耗时约 `72.8s`。最终资产 SHA-256：
+
+```text
+942b338a4b2fd2489797dd0a9ba402488e240a8a7c12a1127f55c067a3c470dc  yinxing-1.10.0-root-preview.2-debug.apk
+814b9edcd3b7245b8b74180ab9664f65db1480b49c84e6cfe90da11d598289b1  yinxing-guard-1.10.0-root-preview.2.zip
+```
