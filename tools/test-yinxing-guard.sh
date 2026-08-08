@@ -75,6 +75,12 @@ assert_contains() {
     grep -F -- "$value" "$file" >/dev/null || fail "missing '$value' in $file"
 }
 
+assert_contains_text() {
+    local text="$1"
+    local value="$2"
+    [[ "$text" == *"$value"* ]] || fail "missing '$value' in status output: $text"
+}
+
 assert_not_contains() {
     local file="$1"
     local value="$2"
@@ -170,6 +176,57 @@ test_merge_cases() {
     pass "merge cases"
 }
 
+test_status_reports_healthy_state() {
+    reset_fixture
+    mkdir -p \
+        "$TEST_ROOT/modules/yinxing_guard" \
+        "$TEST_ROOT/state/guard.lock/test-boot" \
+        "$(dirname "$CLEANUP_TARGET")"
+    printf 'test-boot\n' > "$TEST_ROOT/boot_id"
+    printf '%s\n' "$$" > "$TEST_ROOT/state/guard.lock/test-boot/pid"
+    printf 'ok\n' > "$TEST_ROOT/state/last_repair"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    printf 'helper\n' > "$CLEANUP_TARGET"
+    chmod 0755 "$CLEANUP_TARGET"
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    touch "$TEST_ROOT/doze_whitelisted"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "schema=1"
+    assert_contains_text "$output" "module=active"
+    assert_contains_text "$output" "guard=running"
+    assert_contains_text "$output" "accessibility=enabled"
+    assert_contains_text "$output" "doze=owned"
+    assert_contains_text "$output" "cleanup=ready"
+    assert_contains_text "$output" "last_repair=ok"
+    pass "status reports healthy state"
+}
+
+test_status_reports_stale_guard_as_degraded() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/modules/yinxing_guard" "$TEST_ROOT/state/guard.lock/test-boot"
+    printf 'test-boot\n' > "$TEST_ROOT/boot_id"
+    printf '999999\n' > "$TEST_ROOT/state/guard.lock/test-boot/pid"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "module=active"
+    assert_contains_text "$output" "guard=stale"
+    assert_contains_text "$output" "accessibility=disabled"
+    assert_contains_text "$output" "last_repair=unknown"
+    pass "status reports stale guard"
+}
+
+test_status_reports_missing_module() {
+    reset_fixture
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "module=missing"
+    assert_contains_text "$output" "guard=missing"
+    assert_contains_text "$output" "accessibility=missing"
+    pass "status reports missing module"
+}
+
 test_repair_preserves_and_enables() {
     reset_fixture
     printf 'talkback:other\n' > "$SERVICES"
@@ -263,6 +320,7 @@ test_guard_runs_initial_repair_and_one_health_cycle() {
         YINXING_GUARD_MAX_CYCLES=1 \
         run_module_script "$MODULE_ROOT/bin/guard.sh"
     assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "guard repairs accessibility"
+    assert_equals "ok" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" "guard records successful repair"
     assert_equals "1" "$(grep -c '^am start ' "$CALLS")" "guard launches HOME once"
     if [[ "${YINXING_TEST_SHELL:-}" != "busybox" ]]; then
         assert_contains "$CALLS" "sleep 0"
@@ -379,6 +437,7 @@ test_action_reuses_repair_and_launch() {
     reset_fixture
     run_module_script "$MODULE_ROOT/action.sh"
     assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "action repairs accessibility"
+    assert_equals "ok" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" "action records successful repair"
     assert_equals "1" "$(grep -c '^am start ' "$CALLS")" "action launches HOME once"
     [[ -x "$CLEANUP_TARGET" ]] || fail "action did not install deferred cleanup helper"
     [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "action did not add Doze whitelist"
@@ -515,13 +574,14 @@ test_module_package() {
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'module.prop' >/dev/null
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/guard.sh' >/dev/null
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/uninstall-cleanup.sh' >/dev/null
+    unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/status.sh' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.1'
-    for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/uninstall-cleanup.sh; do
+    for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"
     done
@@ -541,6 +601,11 @@ test_module_package() {
 case "$MODE" in
     --merge-only)
         test_merge_cases
+        ;;
+    --status-only)
+        test_status_reports_healthy_state
+        test_status_reports_stale_guard_as_degraded
+        test_status_reports_missing_module
         ;;
     --package-only)
         test_module_package
@@ -564,6 +629,9 @@ case "$MODE" in
         ;;
     all)
         test_merge_cases
+        test_status_reports_healthy_state
+        test_status_reports_stale_guard_as_degraded
+        test_status_reports_missing_module
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_missing_package_is_safe

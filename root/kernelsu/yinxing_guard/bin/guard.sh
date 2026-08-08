@@ -25,20 +25,11 @@ HEALTH_INTERVAL_SECONDS="$(number_or_default "$HEALTH_INTERVAL_SECONDS" 60)"
 MAX_CYCLES="$(number_or_default "$MAX_CYCLES" 0)"
 
 read_boot_id() {
-    boot_id="$(cat "$BOOT_ID_FILE" 2>/dev/null || true)"
-    if [ -z "$boot_id" ]; then
-        boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
-    fi
-    if [ -z "$boot_id" ]; then
-        boot_id="$(getprop ro.runtime.firstboot 2>/dev/null || true)"
-    fi
-    [ -n "$boot_id" ] || boot_id="unknown"
-    printf '%s\n' "$boot_id"
+    read_boot_id_from "$BOOT_ID_FILE"
 }
 
 CURRENT_BOOT_ID="$(read_boot_id)"
-LOCK_BOOT_ID="$(printf '%s' "$CURRENT_BOOT_ID" | tr -c 'A-Za-z0-9._-' '_')"
-[ -n "$LOCK_BOOT_ID" ] || LOCK_BOOT_ID="unknown"
+LOCK_BOOT_ID="$(sanitize_boot_id "$CURRENT_BOOT_ID")"
 LOCK_ROOT="$STATE_DIR/guard.lock"
 LOCK_DIR="$LOCK_ROOT/$LOCK_BOOT_ID"
 PID_FILE="$LOCK_DIR/pid"
@@ -155,9 +146,11 @@ run_health_cycle() {
         install_cleanup_helper "$CLEANUP_SOURCE" || true
     fi
     if ! repair_state; then
+        record_repair_result failed || true
         log_event "repair_cycle_failed"
         return 1
     fi
+    record_repair_result ok || true
     if [ "$HOME_LAUNCHED" -eq 0 ] && launch_home; then
         HOME_LAUNCHED=1
     fi

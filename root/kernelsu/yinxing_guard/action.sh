@@ -6,5 +6,9 @@ export PATH
 . "$MODDIR/bin/common.sh"
 
 install_cleanup_helper "$MODDIR/bin/uninstall-cleanup.sh" || true
-repair_state || exit 1
+if ! repair_state; then
+    record_repair_result failed || true
+    exit 1
+fi
+record_repair_result ok || true
 launch_home

@@ -46,6 +46,47 @@ ensure_state_dir() {
     }
 }
 
+read_boot_id_from() {
+    boot_id_file="$1"
+    boot_id="$(cat "$boot_id_file" 2>/dev/null || true)"
+    if [ -z "$boot_id" ]; then
+        boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
+    fi
+    if [ -z "$boot_id" ]; then
+        boot_id="$(getprop ro.runtime.firstboot 2>/dev/null || true)"
+    fi
+    [ -n "$boot_id" ] || boot_id="unknown"
+    printf '%s\n' "$boot_id"
+}
+
+sanitize_boot_id() {
+    sanitized="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
+    [ -n "$sanitized" ] || sanitized="unknown"
+    printf '%s\n' "$sanitized"
+}
+
+record_repair_result() {
+    result="$1"
+    case "$result" in
+        ok|failed) ;;
+        *)
+            log_event "repair_result_invalid"
+            return 1
+            ;;
+    esac
+    ensure_state_dir || return 1
+    temp_path="$STATE_DIR/last_repair.tmp.$$"
+    rm -f "$temp_path"
+    if ! printf '%s\n' "$result" > "$temp_path" 2>/dev/null || \
+        ! chmod 0600 "$temp_path" 2>/dev/null || \
+        ! mv -f "$temp_path" "$STATE_DIR/last_repair" 2>/dev/null; then
+        rm -f "$temp_path"
+        log_event "repair_result_write_failed"
+        return 1
+    fi
+    return 0
+}
+
 install_cleanup_helper() {
     source_path="$1"
     cleanup_dir=${CLEANUP_TARGET%/*}
