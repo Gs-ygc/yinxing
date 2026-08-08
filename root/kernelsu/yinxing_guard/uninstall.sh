@@ -16,7 +16,10 @@ rm -f \
 rm -rf "$STATE_DIR/guard.lock"
 
 if [ -f "$marker" ]; then
-    install_cleanup_helper "$cleanup_source" || true
+    if ! install_cleanup_helper "$cleanup_source"; then
+        log_event "uninstall_cleanup_schedule_failed"
+        exit 1
+    fi
 else
     rm -f "$cleanup_target"
     rmdir "$STATE_DIR" 2>/dev/null || true

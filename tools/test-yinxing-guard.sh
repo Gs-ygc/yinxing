@@ -509,6 +509,24 @@ test_uninstall_retains_malformed_marker() {
     pass "uninstall retains malformed marker"
 }
 
+test_uninstall_reports_cleanup_schedule_failure() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted"
+    blocked_target="$TEST_ROOT/blocked-parent/helper.sh"
+    printf 'blocked\n' > "$TEST_ROOT/blocked-parent"
+    export YINXING_GUARD_TEST_CLEANUP_TARGET="$blocked_target"
+    if run_module_script "$MODULE_ROOT/uninstall.sh"; then
+        fail "uninstall reported success without a cleanup helper"
+    fi
+    export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || fail "failed scheduling lost Doze ownership marker"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "failed scheduling changed Doze state"
+    [[ ! -e "$blocked_target" ]] || fail "failed scheduling left a partial helper"
+    pass "uninstall reports cleanup schedule failure"
+}
+
 test_uninstall_defers_cleanup_until_boot_completed() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
@@ -625,6 +643,7 @@ case "$MODE" in
         test_cleanup_helper_stays_for_first_boot
         test_cleanup_schedule_failure_preserves_existing_helper
         test_cleanup_directory_target_is_rejected
+        test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_retains_malformed_marker
@@ -654,6 +673,7 @@ case "$MODE" in
         test_cleanup_helper_stays_for_first_boot
         test_cleanup_schedule_failure_preserves_existing_helper
         test_cleanup_directory_target_is_rejected
+        test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_retains_malformed_marker
