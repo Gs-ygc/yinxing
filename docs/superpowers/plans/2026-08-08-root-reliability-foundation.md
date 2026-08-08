@@ -42,7 +42,7 @@
 - Consumes: test-only fake command directory and temporary state directory.
 - Produces: executable assertions for `repair_state`, `merge_accessibility_services`, and `launch_home` that later scripts must satisfy.
 
-- [ ] **Step 1: Write the failing test harness**
+- [x] **Step 1: Write the failing test harness**
 
 Create a Bash script that creates a temporary fake command directory and state files. The first line after setup sources `root/kernelsu/yinxing_guard/bin/common.sh`; the file is intentionally absent at this point. Add assertions for these behaviors:
 
@@ -59,7 +59,7 @@ assert_not_contains() { ! grep -F -- "$2" "$1" >/dev/null; }
 
 Fake commands must log argv to `$TEST_ROOT/calls.log`, maintain `$TEST_ROOT/accessibility_services`, and return controlled statuses through flags such as `$TEST_ROOT/fail_appops` and `$TEST_ROOT/package_missing`.
 
-- [ ] **Step 2: Run the focused test and verify the expected RED failure**
+- [x] **Step 2: Run the focused test and verify the expected RED failure**
 
 Run:
 
@@ -87,11 +87,11 @@ Expected: non-zero exit because `root/kernelsu/yinxing_guard/bin/common.sh` does
 - `launch_home()` runs only the fixed `com.yinxing.launcher/.feature.home.MainActivity` component for user 0.
 - `guard.sh` calls `repair_state` once after `sys.boot_completed=1`, launches HOME once, then repeats `repair_state` at `YINXING_GUARD_INTERVAL_SECONDS` (default 60).
 
-- [ ] **Step 1: Implement the smallest pure merge helper**
+- [x] **Step 1: Implement the smallest pure merge helper**
 
 Add `merge_accessibility_services` to `common.sh`. Treat `null`, empty output, and whitespace-only output as empty. Use exact colon-delimited membership (`case ":$current:"`) so a service named `...Service2` cannot match `...Service`. Quote the fixed component before passing it to `settings`.
 
-- [ ] **Step 2: Run the focused test and verify GREEN for merge cases**
+- [x] **Step 2: Run the focused test and verify GREEN for merge cases**
 
 Run:
 
@@ -101,7 +101,7 @@ bash tools/test-yinxing-guard.sh --merge-only
 
 Expected: empty, existing, duplicate, and substring-collision cases pass.
 
-- [ ] **Step 3: Implement package/component and accessibility repair**
+- [x] **Step 3: Implement package/component and accessibility repair**
 
 `repair_accessibility` must:
 
@@ -122,7 +122,7 @@ settings --user 0 put secure accessibility_enabled 1 || return 1
 
 The implementation must not clear or replace unrelated services. It must log each failed command with a stable action name, never command output containing user data.
 
-- [ ] **Step 4: Add optional keepalive policy and verify failure isolation**
+- [x] **Step 4: Add optional keepalive policy and verify failure isolation**
 
 Implement `repair_keepalive` with independent commands:
 
@@ -134,13 +134,13 @@ cmd appops set --user 0 com.yinxing.launcher RUN_ANY_IN_BACKGROUND allow >/dev/n
 
 `repair_state` calls accessibility repair first, then optional keepalive policy. The focused test must prove an app-op failure does not prevent accessibility repair or later checks.
 
-- [ ] **Step 5: Implement boot entry, lock, loop, action, and uninstall behavior**
+- [x] **Step 5: Implement boot entry, lock, loop, action, and uninstall behavior**
 
 `guard.sh` waits for `getprop sys.boot_completed` with a bounded sleep interval, writes a PID/boot marker under `/data/adb/yinxing_guard`, and exits if a live guard already owns the marker. It performs one repair and one HOME launch, then sleeps 60 seconds between health passes. Test-only overrides are accepted through `YINXING_GUARD_BOOT_WAIT_SECONDS`, `YINXING_GUARD_INTERVAL_SECONDS`, and `YINXING_GUARD_MAX_CYCLES`.
 
 `service.sh` sets a restricted Android command `PATH`, starts `guard.sh` once, and exits. `action.sh` performs one repair and HOME launch. `uninstall.sh` removes the Doze whitelist only when the module-owned marker says this module added it, then removes its exact runtime state directory; it does not touch accessibility settings.
 
-- [ ] **Step 6: Run all focused shell tests and syntax checks**
+- [x] **Step 6: Run all focused shell tests and syntax checks**
 
 Run:
 
@@ -163,17 +163,17 @@ Expected: all assertions pass and every syntax command exits 0.
 
 **Interfaces:**
 - Command: `bash tools/package-yinxing-guard.sh <output-zip> [module-version]`.
-- Produces: a ZIP whose root contains `module.prop`, `skip_mount`, `service.sh`, `action.sh`, `uninstall.sh`, and `bin/` scripts; no host tests or `.git` files.
+- Produces: a ZIP whose archive root contains `module.prop`, `skip_mount`, `service.sh`, `action.sh`, `uninstall.sh`, and `bin/` scripts; no extra `yinxing_guard/` directory, host tests, or `.git` files. KernelSU's installer extracts module files directly into `/data/adb/modules/<MODID>`.
 
-- [ ] **Step 1: Add a failing packaging assertion**
+- [x] **Step 1: Add a failing packaging assertion**
 
 Extend the test harness to call the packaging script with an explicit temporary output path and assert the ZIP contains the required files, executable script modes, and no `tools/` or test fixtures. Run it before creating the packager and verify the expected missing-script failure.
 
-- [ ] **Step 2: Implement packaging with explicit paths**
+- [x] **Step 2: Implement packaging with explicit paths**
 
 Use `zip -X -r` from the module's parent directory. Reject output paths that resolve inside the module source, remove only the exact requested output, and run `unzip -t` before returning success. If a version argument is supplied, write it into a temporary staged copy's `module.prop` rather than mutating the source.
 
-- [ ] **Step 3: Run packaging and content tests**
+- [x] **Step 3: Run packaging and content tests**
 
 Run:
 
@@ -189,15 +189,15 @@ Expected: ZIP content, permissions, and clean staging assertions pass.
 - Modify: `app/build.gradle.kts:43-47`
 - Create: `docs/release/yinxing-root-preview-1.md`
 
-- [ ] **Step 1: Bump the APK to `versionCode = 17`, `versionName = "1.10.0-root-preview.1"`**
+- [x] **Step 1: Bump the APK to `versionCode = 17`, `versionName = "1.10.0-root-preview.1"`**
 
 Keep the application ID and signing configuration unchanged. Do not update the stable `docs/app-release.apk` or `docs/update.json` because this preview is Debug-signed and may not upgrade over a private-key stable install.
 
-- [ ] **Step 2: Write exact installation and rollback instructions**
+- [x] **Step 2: Write exact installation and rollback instructions**
 
 Document APK-first installation, KernelSU module installation, reboot, expected log tag `YinxingGuard`, the six device checks from the design, the Debug-signing clean-install limitation, and the module disable/uninstall recovery path. State clearly that device behavior is not verified on the build host.
 
-- [ ] **Step 3: Run unit tests before implementation claims**
+- [x] **Step 3: Run unit tests before implementation claims**
 
 Run the focused shell tests and the existing Kotlin unit suite after the version change; record counts and failures in the progress log.
 
@@ -207,17 +207,21 @@ Run the focused shell tests and the existing Kotlin unit suite after the version
 - Create during verification only: `build/release-preview-1/` (ignored build output)
 - No committed APK or private key changes.
 
-- [ ] **Step 1: Package the module and calculate checksums**
+- [x] **Step 1: Package the module and calculate checksums**
 
 Run:
 
 ```bash
 mkdir -p build/release-preview-1
 bash tools/package-yinxing-guard.sh build/release-preview-1/yinxing-guard-1.10.0-root-preview.1.zip
-sha256sum app/build/outputs/apk/debug/app-debug.apk build/release-preview-1/yinxing-guard-1.10.0-root-preview.1.zip > build/release-preview-1/SHA256SUMS.txt
+cp app/build/outputs/apk/debug/app-debug.apk build/release-preview-1/yinxing-1.10.0-root-preview.1-debug.apk
+(
+  cd build/release-preview-1
+  sha256sum yinxing-1.10.0-root-preview.1-debug.apk yinxing-guard-1.10.0-root-preview.1.zip > SHA256SUMS.txt
+)
 ```
 
-- [ ] **Step 2: Run the full local verification set**
+- [x] **Step 2: Run the full local verification set**
 
 Run with the known Java proxy properties and `ANDROID_HOME`:
 
@@ -246,7 +250,7 @@ Create tag `v1.10.0-root-preview.1` and upload only the freshly verified Debug A
 git tag -a v1.10.0-root-preview.1 -m "Yinxing Root reliability preview 1"
 git push origin v1.10.0-root-preview.1
 gh release create v1.10.0-root-preview.1 \
-  app/build/outputs/apk/debug/app-debug.apk \
+  build/release-preview-1/yinxing-1.10.0-root-preview.1-debug.apk \
   build/release-preview-1/yinxing-guard-1.10.0-root-preview.1.zip \
   build/release-preview-1/SHA256SUMS.txt \
   --prerelease --title "银杏 Root 保活预览 1" --notes-file docs/release/yinxing-root-preview-1.md
