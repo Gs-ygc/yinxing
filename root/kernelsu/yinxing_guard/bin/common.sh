@@ -6,7 +6,7 @@ HOME_COMPONENT="com.yinxing.launcher/.feature.home.MainActivity"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 LOG_TAG="YinxingGuard"
-MODULE_VERSION="1.10.0-root-preview.2"
+MODULE_VERSION="1.10.0-root-preview.3"
 CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
 
 log_event() {

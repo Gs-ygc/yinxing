@@ -13,7 +13,7 @@ class RootHealthSnapshotTest {
 
         assertNotNull(snapshot)
         assertEquals(RootHealthState.HEALTHY, snapshot?.state)
-        assertEquals("1.10.0-root-preview.2", snapshot?.version)
+        assertEquals("1.10.0-root-preview.3", snapshot?.version)
         assertEquals("running", snapshot?.guard)
         assertEquals("enabled", snapshot?.accessibility)
         assertEquals("owned", snapshot?.doze)
@@ -80,7 +80,7 @@ class RootHealthSnapshotTest {
 
     private fun validSnapshot(): String = """
         schema=1
-        version=1.10.0-root-preview.2
+        version=1.10.0-root-preview.3
         module=active
         guard=running
         accessibility=enabled
