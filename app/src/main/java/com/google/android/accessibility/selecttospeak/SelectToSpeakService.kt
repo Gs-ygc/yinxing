@@ -28,6 +28,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 
@@ -101,7 +102,11 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
     private var wechatWaitJob: Job? = null
     private lateinit var timeoutManager: TimeoutManager
     private var floatingView: FloatingStatusView? = null
+    @Volatile
     private var currentSession: VideoCallSession? = null
+    private var postCallSession: VideoCallSession? = null
+    private var floatingHideJob: Job? = null
+    private var speakerAdjustmentJob: Job? = null
     private lateinit var kioskGuard: KioskLauncherGuard
 
 
@@ -121,6 +126,22 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
 
     override fun onServiceConnected() {
         super.onServiceConnected()
+        if (::kioskGuard.isInitialized) {
+            kioskGuard.shutdown()
+        }
+        if (currentSession != null) {
+            cancelSession(
+                notifyFailure = true,
+                message = "无障碍服务已重新连接，请重试",
+                restoreLauncher = false
+            )
+        } else {
+            // A reconnect can still leave a queued callback from a completed
+            // task. Invalidate all timers and cached nodes before accepting work.
+            cancelSession(notifyFailure = false)
+        }
+        cancelPostCallJobs()
+        floatingView?.hide()
         timeoutManager = TimeoutManager.getInstance(this)
         floatingView = FloatingStatusView(this)
         kioskGuard = KioskLauncherGuard(
@@ -193,6 +214,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         instance = null
         if (::kioskGuard.isInitialized) kioskGuard.shutdown()
         cancelSession(true, "无障碍服务已关闭，请重新开启后再试")
+        cancelPostCallJobs()
         floatingView?.hide()
         floatingView = null
         serviceScope.cancel()
@@ -267,6 +289,18 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
     }
 
     override fun consumePendingRequest() {
+        // Queue callbacks may arrive from a Binder/UI thread. Keep every
+        // state-machine mutation and Android accessibility call on the service
+        // main dispatcher.
+        // Use the non-immediate Main dispatcher so a terminal listener cannot
+        // re-enter this method while onServiceConnected/cancelSession is still
+        // replacing views and clearing the previous session.
+        serviceScope.launch(Dispatchers.Main) {
+            consumePendingRequestOnMain()
+        }
+    }
+
+    private fun consumePendingRequestOnMain() {
         val request = WeChatRequestQueue.takeNext() ?: return
         if (hasActiveSession()) {
             deliverProgress(
@@ -335,8 +369,8 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         }
         logStep(session, "launchWeChat", true)
 
-        armTotalTimeout(timeoutManager.getTimeout("total"), "微信视频流程整体超时")
-        armTimeout(Step.WAITING_HOME, timeoutManager.getTimeout("launch"), "微信启动或返回首页超时")
+        armTotalTimeout(session, timeoutManager.getTimeout("total"), "微信视频流程整体超时")
+        armTimeout(session, Step.WAITING_HOME, timeoutManager.getTimeout("launch"), "微信启动或返回首页超时")
         startWeChatWaitLoop(session)
     }
 
@@ -347,6 +381,9 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
             while (currentSession === session && session.step == Step.WAITING_HOME) {
                 session.actionAttempts["home_wait_loop"] = attempts
                 delay(adaptiveDelay(session, DelayProfile.WAIT_LOOP, attemptKey = "home_wait_loop"))
+                if (!coroutineContext.isActive || currentSession !== session || session.step != Step.WAITING_HOME) {
+                    return@launch
+                }
                 attempts++
                 val root = getWeChatRoot()
                 if (root == null) {
@@ -359,6 +396,9 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
                     "waitLoop[$attempts]: root class=$currentClass childCount=${root.childCount} page=$page"
                 }
                 if (page == WeChatPage.HOME) {
+                    if (!coroutineContext.isActive || currentSession !== session || session.step != Step.WAITING_HOME) {
+                        return@launch
+                    }
                     DebugLog.d(TAG) { "waitLoop: 首页确认加载完成，推进步骤" }
                     wechatWaitJob = null
                     session.launcherPrepared = false
@@ -380,7 +420,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
 
     private fun scheduleProcess(session: VideoCallSession, delayMillis: Long) {
         if (currentSession !== session) return
-        stepClock.scheduleProcess(delayMillis)
+        stepClock.scheduleProcess(delayMillis) { currentSession === session }
     }
 
     private fun getWeChatRoot(): AccessibilityNodeInfo? = rootProvider.acquireBestRoot()
@@ -648,6 +688,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         recovering: Boolean = false,
         launching: Boolean = false
     ) {
+        if (currentSession !== session) return
         recordStepHistory(session, nextStep)
         session.step = nextStep
         syncTaskState(session, nextStep)
@@ -663,7 +704,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
             else -> null
         }
         updateProgress(session, message)
-        armTimeout(nextStep, timeoutFor(nextStep), failureMessageFor(nextStep, session.contactName))
+        armTimeout(session, nextStep, timeoutFor(nextStep), failureMessageFor(nextStep, session.contactName))
         if (nextStep == Step.WAITING_HOME) {
             startWeChatWaitLoop(session)
         } else {
@@ -1334,6 +1375,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
     }
 
     private fun transitionTo(session: VideoCallSession, nextStep: Step, message: String) {
+        if (currentSession !== session) return
         val oldStep = session.step
         val duration = System.currentTimeMillis() - session.stepStartedAt
         session.stepDurations[oldStep.name.lowercase()] = duration
@@ -1356,7 +1398,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
             wechatWaitJob = null
         }
         updateProgress(session, message)
-        armTimeout(nextStep, timeoutFor(nextStep), failureMessageFor(nextStep, session.contactName))
+        armTimeout(session, nextStep, timeoutFor(nextStep), failureMessageFor(nextStep, session.contactName))
         scheduleAdaptiveProcess(session, DelayProfile.TRANSITION)
     }
 
@@ -1387,15 +1429,26 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         reportTerminalMetrics(session, success = true)
 
         logStep(session, "COMPLETED", "视频通话已发起", "totalElapsed=${totalElapsed}ms")
-        applyWeChatCallAudioStrategy()
+        postCallSession = session
+        speakerAdjustmentJob?.cancel()
+        speakerAdjustmentJob = null
+        floatingHideJob?.cancel()
+        floatingHideJob = null
+        applyWeChatCallAudioStrategy(session)
         floatingView?.updateMessage("视频通话已发起")
         notifyState(session, "视频通话已发起", success = true, terminal = true)
         currentSession = null
         stepClock.cancelAll()
         wechatWaitJob?.cancel()
-        serviceScope.launch {
+        val completedFloatingView = floatingView
+        floatingHideJob = serviceScope.launch {
             delay(1200)
-            floatingView?.hide()
+            if (postCallSession === session && currentSession == null && floatingView === completedFloatingView) {
+                completedFloatingView?.hide()
+            }
+            if (floatingHideJob === coroutineContext[Job]) {
+                floatingHideJob = null
+            }
         }
     }
 
@@ -1412,19 +1465,26 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         LobsterClient.reportMetrics(this, metrics)
     }
 
-    private fun applyWeChatCallAudioStrategy() {
+    private fun applyWeChatCallAudioStrategy(session: VideoCallSession) {
         val result = CallAudioStrategy.prepareVoipCall(this)
         if (result.keptPrivateOutput) {
             return
         }
-        serviceScope.launch {
-            clickWeChatSpeakerButtonIfNeeded(delayMillis = 400L)
-            clickWeChatSpeakerButtonIfNeeded(delayMillis = 1200L)
+        speakerAdjustmentJob = serviceScope.launch {
+            clickWeChatSpeakerButtonIfNeeded(session, delayMillis = 400L)
+            clickWeChatSpeakerButtonIfNeeded(session, delayMillis = 1200L)
+            if (speakerAdjustmentJob === coroutineContext[Job]) {
+                speakerAdjustmentJob = null
+            }
         }
     }
 
-    private suspend fun clickWeChatSpeakerButtonIfNeeded(delayMillis: Long) {
+    private suspend fun clickWeChatSpeakerButtonIfNeeded(
+        session: VideoCallSession,
+        delayMillis: Long
+    ) {
         delay(delayMillis)
+        if (postCallSession !== session) return
         val root = obtainSpeakerTargetRoot() ?: return
         try {
             if (elementLocator.hasContainingText(root, "扩声器已开") ||
@@ -1494,21 +1554,30 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         }
     }
 
-    private fun armTimeout(step: Step, timeoutMillis: Long, failureMessage: String) {
+    private fun armTimeout(
+        session: VideoCallSession,
+        step: Step,
+        timeoutMillis: Long,
+        failureMessage: String
+    ) {
         stepClock.armStepTimeout(timeoutMillis, failureMessage) {
-            currentSession?.step == step
+            currentSession === session && currentSession?.step == step
         }
     }
 
-    private fun armTotalTimeout(timeoutMillis: Long, failureMessage: String) {
-        stepClock.armTotalTimeout(timeoutMillis) {
-            val session = currentSession
-            if (session != null) {
-                "$failureMessage（当前步骤：${session.step}，联系人：${session.contactName}）"
+    private fun armTotalTimeout(
+        session: VideoCallSession,
+        timeoutMillis: Long,
+        failureMessage: String
+    ) {
+        stepClock.armTotalTimeout(timeoutMillis, {
+            val active = currentSession
+            if (active != null) {
+                "$failureMessage（当前步骤：${active.step}，联系人：${active.contactName}）"
             } else {
                 failureMessage
             }
-        }
+        }) { currentSession === session }
     }
 
     private fun cancelSession(
@@ -1517,6 +1586,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         restoreLauncher: Boolean = notifyFailure
     ) {
         val session = currentSession
+        cancelPostCallJobs()
         stepClock.cancelAll()
         wechatWaitJob?.cancel()
         wechatWaitJob = null
@@ -1536,6 +1606,14 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         if (restoreLauncher && session != null) {
             bringLauncherBackToForeground()
         }
+    }
+
+    private fun cancelPostCallJobs() {
+        floatingHideJob?.cancel()
+        floatingHideJob = null
+        speakerAdjustmentJob?.cancel()
+        speakerAdjustmentJob = null
+        postCallSession = null
     }
 
 

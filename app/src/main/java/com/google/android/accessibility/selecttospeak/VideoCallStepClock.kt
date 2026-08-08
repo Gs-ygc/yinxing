@@ -1,8 +1,10 @@
 package com.google.android.accessibility.selecttospeak
 
+import androidx.annotation.MainThread
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
@@ -18,8 +20,11 @@ import kotlinx.coroutines.launch
  * 该 Clock **不持有** session 数据，仅通过回调与服务交互：
  * - [onProcessTick]：到点了，请推进一次状态机（即原 `processCurrentWindow`）。
  * - [onTimeoutFailure]：步骤或总流程超时，请按失败处理。
- * - [sessionStillActive]：判断 "延迟到时之后，会话是否还存在"，用于总超时短路。
+ * - [sessionStillActive]：作为最后一道全局保护，判断 "延迟到时之后是否仍有会话"。
+ *
+ * The supplied scope and all callbacks are main-thread confined in production.
  */
+@MainThread
 internal class VideoCallStepClock(
     private val scope: CoroutineScope,
     private val onProcessTick: () -> Unit,
@@ -29,16 +34,33 @@ internal class VideoCallStepClock(
     private var processJob: Job? = null
     private var stepTimeoutJob: Job? = null
     private var totalTimeoutJob: Job? = null
+    private val processGeneration = AutomationCallbackGeneration()
+    private val stepTimeoutGeneration = AutomationCallbackGeneration()
+    private val totalTimeoutGeneration = AutomationCallbackGeneration()
 
-    fun scheduleProcess(delayMillis: Long) {
+    /**
+     * Schedules one state-machine tick owned by the caller's current session.
+     *
+     * Accessibility callbacks can be queued just as a session is cancelled. The
+     * ownership predicate is checked at execution time so a late callback cannot
+     * advance a replacement session.
+     */
+    fun scheduleProcess(delayMillis: Long, processStillCurrent: () -> Boolean) {
+        val generation = processGeneration.issue()
         processJob?.cancel()
         processJob = scope.launch {
             delay(delayMillis)
-            onProcessTick()
+            if (coroutineContext.isActive &&
+                processGeneration.isCurrent(generation) &&
+                processStillCurrent()
+            ) {
+                onProcessTick()
+            }
         }
     }
 
     fun cancelProcess() {
+        processGeneration.invalidate()
         processJob?.cancel()
         processJob = null
     }
@@ -51,31 +73,48 @@ internal class VideoCallStepClock(
         failureMessage: String,
         stepStillCurrent: () -> Boolean
     ) {
+        val generation = stepTimeoutGeneration.issue()
         stepTimeoutJob?.cancel()
         stepTimeoutJob = scope.launch {
             delay(timeoutMillis)
-            if (stepStillCurrent()) {
+            if (coroutineContext.isActive &&
+                stepTimeoutGeneration.isCurrent(generation) &&
+                stepStillCurrent()
+            ) {
                 onTimeoutFailure(failureMessage)
             }
         }
     }
 
     fun cancelStepTimeout() {
+        stepTimeoutGeneration.invalidate()
         stepTimeoutJob?.cancel()
         stepTimeoutJob = null
     }
 
-    fun armTotalTimeout(timeoutMillis: Long, failureMessage: () -> String) {
+    fun armTotalTimeout(
+        timeoutMillis: Long,
+        failureMessage: () -> String,
+        sessionStillCurrent: () -> Boolean
+    ) {
+        val generation = totalTimeoutGeneration.issue()
         totalTimeoutJob?.cancel()
         totalTimeoutJob = scope.launch {
             delay(timeoutMillis)
-            if (sessionStillActive()) {
+            if (coroutineContext.isActive &&
+                totalTimeoutGeneration.isCurrent(generation) &&
+                sessionStillActive() &&
+                sessionStillCurrent()
+            ) {
                 onTimeoutFailure(failureMessage())
             }
         }
     }
 
     fun cancelAll() {
+        processGeneration.invalidate()
+        stepTimeoutGeneration.invalidate()
+        totalTimeoutGeneration.invalidate()
         processJob?.cancel()
         stepTimeoutJob?.cancel()
         totalTimeoutJob?.cancel()

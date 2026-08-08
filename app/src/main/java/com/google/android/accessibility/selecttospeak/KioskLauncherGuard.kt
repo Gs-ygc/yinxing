@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import androidx.annotation.MainThread
 import androidx.annotation.RequiresApi
 import com.yinxing.launcher.automation.wechat.util.AccessibilityUtil
 import com.yinxing.launcher.common.util.DebugLog
@@ -28,7 +29,11 @@ import kotlinx.coroutines.launch
  * - 收到 [android.view.accessibility.AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED] 时调 [onWindowStateChanged]，
  *   返回值表示"是否吞掉本事件"——若 true，自动化主流程应直接 return 不再处理此事件。
  * - 服务销毁时调 [shutdown]。
+ *
+ * All entry points and the supplied [scope] are main-thread confined. This keeps
+ * generation checks and Android foreground side effects in one serialized actor.
  */
+@MainThread
 internal class KioskLauncherGuard(
     private val service: AccessibilityService,
     private val scope: CoroutineScope,
@@ -50,8 +55,11 @@ internal class KioskLauncherGuard(
     private var defaultLauncherPackage: String? = null
     private var lastLauncherOverviewAt = 0L
     private var bringBackJob: Job? = null
+    private var retryJob: Job? = null
+    private val callbackGeneration = AutomationCallbackGeneration()
 
     fun init() {
+        cancelPendingConfirm()
         systemLauncherPackages = resolveSystemLauncherPackages()
         defaultLauncherPackage = resolveDefaultLauncherPackage()
     }
@@ -64,7 +72,9 @@ internal class KioskLauncherGuard(
             scheduleLauncherBringBackConfirmation(triggerPkg = pkg, triggerClassName = className)
             return true
         }
-        cancelPendingConfirm()
+        // Do not cancel on transient SystemUI, IME, or permission windows. Both
+        // confirmation and retry inspect the real active package when they run,
+        // so a genuine user-app transition naturally becomes a no-op.
         return false
     }
 
@@ -73,8 +83,11 @@ internal class KioskLauncherGuard(
     }
 
     private fun cancelPendingConfirm() {
+        callbackGeneration.invalidate()
         bringBackJob?.cancel()
         bringBackJob = null
+        retryJob?.cancel()
+        retryJob = null
     }
 
     private fun shouldObserveLauncherForeground(pkg: String): Boolean {
@@ -89,8 +102,10 @@ internal class KioskLauncherGuard(
 
     private fun scheduleLauncherBringBackConfirmation(triggerPkg: String, triggerClassName: String?) {
         cancelPendingConfirm()
+        val generation = callbackGeneration.issue()
         bringBackJob = scope.launch {
             delay(LAUNCHER_STATE_SETTLE_DELAY_MS)
+            if (!callbackGeneration.isCurrent(generation)) return@launch
             if (!LauncherPreferences.getInstance(service).isKioskModeEnabled()) return@launch
             if (activeSession()) return@launch
 
@@ -187,6 +202,10 @@ internal class KioskLauncherGuard(
     }
 
     private fun bringLauncherToFront() {
+        val generation = callbackGeneration.issue()
+        retryJob?.cancel()
+        retryJob = null
+        if (!canExecuteRecovery(generation)) return
         val intent = Intent(service, launcherActivityClass).apply {
             addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK or
@@ -195,31 +214,60 @@ internal class KioskLauncherGuard(
             )
         }
 
-        val startSent = tryStartLauncherActivity(intent, source = "directStart")
+        val startSent = if (canExecuteRecovery(generation)) {
+            tryStartLauncherActivity(intent, source = "directStart")
+        } else {
+            false
+        }
 
         val pendingIntentSent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            trySendLauncherPendingIntent(intent)
+            if (canExecuteRecovery(generation)) {
+                trySendLauncherPendingIntent(intent)
+            } else {
+                false
+            }
         } else {
             false
         }
 
         if (startSent || pendingIntentSent) {
-            scope.launch {
+            retryJob = scope.launch {
                 delay(LAUNCHER_RETRY_DELAY_MS)
-                val activePackage = service.rootInActiveWindow?.packageName?.toString()
+                if (!canExecuteRecovery(generation)) return@launch
+                val activeRoot = service.rootInActiveWindow
+                val activePackage = try {
+                    activeRoot?.packageName?.toString()
+                } finally {
+                    AccessibilityUtil.safeRecycle(activeRoot)
+                }
+                if (!canExecuteRecovery(generation)) return@launch
                 if (activePackage != null && activePackage in systemLauncherPackages) {
                     DebugLog.d(TAG) { "bringLauncherToFront: retry after settle, activePackage=$activePackage" }
-                    tryStartLauncherActivity(intent, source = "retryStart")
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                        trySendLauncherPendingIntent(intent, source = "retryPendingIntent")
+                    if (canExecuteRecovery(generation)) {
+                        tryStartLauncherActivity(intent, source = "retryStart")
                     }
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                        if (canExecuteRecovery(generation)) {
+                            trySendLauncherPendingIntent(intent, source = "retryPendingIntent")
+                        }
+                    }
+                }
+                if (callbackGeneration.isCurrent(generation)) {
+                    retryJob = null
                 }
             }
             return
         }
 
+        if (!canExecuteRecovery(generation)) return
         val homeOk = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
         DebugLog.d(TAG) { "bringLauncherToFront: fallback globalHome=$homeOk" }
+    }
+
+    private fun canExecuteRecovery(generation: Long): Boolean {
+        return callbackGeneration.isCurrent(generation) &&
+            LauncherPreferences.getInstance(service).isKioskModeEnabled() &&
+            !activeSession()
     }
 
     private fun tryStartLauncherActivity(intent: Intent, source: String): Boolean {
