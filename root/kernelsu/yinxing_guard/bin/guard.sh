@@ -40,6 +40,7 @@ BOOT_MARKER_FILE="$LOCK_DIR/boot_id"
 RECLAIM_DIR="$LOCK_DIR/reclaim"
 RECLAIM_PID_FILE="$RECLAIM_DIR/pid"
 LOCK_RETRYABLE=0
+LOCK_OWNER_ACTIVE=0
 
 release_lock() {
     if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$$" ]; then
@@ -92,6 +93,7 @@ acquire_lock() {
                 ;;
             *)
                 if kill -0 "$previous_pid" 2>/dev/null; then
+                    LOCK_OWNER_ACTIVE=1
                     log_event "guard_already_running"
                     return 1
                 fi
@@ -116,6 +118,7 @@ acquire_lock() {
                 *)
                     if kill -0 "$checked_pid" 2>/dev/null; then
                         rm -rf "$RECLAIM_DIR"
+                        LOCK_OWNER_ACTIVE=1
                         log_event "guard_already_running"
                         return 1
                     fi
@@ -172,6 +175,7 @@ if ! acquire_lock; then
     # Keep an incomplete lock intact and let service.sh retry after its writer
     # has had time to finish publishing the owner PID.
     [ "$LOCK_RETRYABLE" -eq 1 ] && exit 75
+    [ "$LOCK_OWNER_ACTIVE" -eq 1 ] && exit "$GUARD_OWNER_ACTIVE_STATUS"
     exit 0
 fi
 trap release_lock EXIT

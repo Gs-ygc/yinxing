@@ -447,11 +447,16 @@ test_guard_respects_live_guard_same_boot() {
     printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/same-boot-id/pid"
     printf 'same-boot-id\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/boot_id"
     printf 'same-boot-id\n' > "$TEST_ROOT/boot_id"
+    local status
+    set +e
     YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
         YINXING_GUARD_INTERVAL_SECONDS=0 \
         YINXING_GUARD_MAX_CYCLES=1 \
         run_module_script "$MODULE_ROOT/bin/guard.sh"
+    status=$?
+    set -e
+    assert_equals "76" "$status" "live same-boot guard should report an active owner"
     assert_equals "0" "$(grep -c '^am start ' "$CALLS" || true)" "live same-boot guard must block duplicate"
     kill "$LIVE_PID" 2>/dev/null || true
     wait "$LIVE_PID" 2>/dev/null || true
@@ -623,8 +628,17 @@ test_guard_prevents_concurrent_processes() {
         YINXING_GUARD_MAX_CYCLES=1 \
         run_module_script "$MODULE_ROOT/bin/guard.sh" &
     SECOND_GUARD_PID=$!
+    local first_status second_status
+    set +e
     wait "$GUARD_PID"
+    first_status=$?
     wait "$SECOND_GUARD_PID"
+    second_status=$?
+    set -e
+    if ! { [ "$first_status" -eq 0 ] && [ "$second_status" -eq 76 ]; } && \
+        ! { [ "$first_status" -eq 76 ] && [ "$second_status" -eq 0 ]; }; then
+        fail "concurrent guards returned unexpected statuses ($first_status/$second_status)"
+    fi
     GUARD_PID=""
     SECOND_GUARD_PID=""
     assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "concurrent guards both performed health cycles"

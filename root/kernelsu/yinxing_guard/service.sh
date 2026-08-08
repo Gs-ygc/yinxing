@@ -36,6 +36,9 @@ module_is_active() {
         module_is_active || exit 0
         case "$guard_status" in
             0)
+                exit 0
+                ;;
+            "$GUARD_OWNER_ACTIVE_STATUS")
                 sleep "$OWNER_RETRY_SECONDS"
                 ;;
             75)

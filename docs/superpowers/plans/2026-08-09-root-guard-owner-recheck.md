@@ -4,14 +4,14 @@
 
 **Goal:** Keep the KernelSU Root Guard supervisor alive after a duplicate-owner exit so it can reclaim a dead owner and restore the existing repair loop.
 
-**Architecture:** Preserve `bin/guard.sh` as the only lock owner and leave its exit behavior unchanged. Extend `service.sh` with a validated owner-recheck delay; status `0` becomes a low-frequency retry, status `75` keeps the existing short retry, and other failures keep Preview 5's diagnostic/backoff path. The host/BusyBox harness proves a live owner disappearing and the supervisor taking ownership.
+**Architecture:** Preserve `bin/guard.sh` as the only lock owner and give a live same-boot owner collision a dedicated status (`76`). Extend `service.sh` with a validated owner-recheck delay; status `76` becomes a low-frequency retry, status `75` keeps the existing short retry, status `0` remains a terminal bounded completion, and other failures keep Preview 5's diagnostic/backoff path. The host/BusyBox harness proves a live owner disappearing and the supervisor taking ownership.
 
 **Tech Stack:** POSIX shell / KernelSU BusyBox `ash`, host Bash harness, `zip`, Android Gradle/Kotlin Debug build, GitHub CLI.
 
 ## Global Constraints
 
 - Target remains the user-controlled OnePlus 15 China ColorOS 16 KernelSU device.
-- Do not change `guard.sh` lock creation, PID validation, or dead-owner reclamation.
+- Do not change `guard.sh` lock creation, PID validation, or dead-owner reclamation. The live-owner result is explicitly separated from normal completion with status `76`.
 - Do not add arbitrary Root shell commands, coordinate input, package allowlists, or system-image changes.
 - Module state (`disable`/`remove`/directory absence) must stop the supervisor before another Guard launch.
 - Release assets must be a Debug APK, deterministic KernelSU ZIP, and basename-only SHA-256 file.
@@ -99,7 +99,9 @@ git commit -m "test: cover root guard owner recheck"
 
 - [ ] **Step 1: Add numeric owner-delay parsing**
 
-Immediately after `RESTART_SECONDS` parsing, add:
+Immediately after `RESTART_SECONDS` parsing, add the owner delay. Keep
+`GUARD_OWNER_ACTIVE_STATUS=76` in `bin/common.sh` and return it only when the
+lock PID is confirmed live.
 
 ```sh
 OWNER_RETRY_SECONDS=${YINXING_GUARD_OWNER_RETRY_SECONDS:-30}
@@ -110,10 +112,13 @@ esac
 
 - [ ] **Step 2: Change only the status-0 branch**
 
-Replace the `0) exit 0 ;;` branch with:
+Add a `GUARD_OWNER_ACTIVE_STATUS` branch beside the existing `0` branch:
 
 ```sh
             0)
+                exit 0
+                ;;
+            "$GUARD_OWNER_ACTIVE_STATUS")
                 sleep "$OWNER_RETRY_SECONDS"
                 ;;
 ```
@@ -234,4 +239,3 @@ Download all three assets into a new temporary directory, run checksum/archive/l
 - [ ] **Step 6: Update persistent logs**
 
 Append exact Preview 6 tests, timing, hashes, release URL, remote verification, and the owner-race finding to `.planning/2026-08-07-android-build-verification/{task_plan,progress,findings}.md`. Keep `.planning/` uncommitted and leave the goal active for device feedback.
-

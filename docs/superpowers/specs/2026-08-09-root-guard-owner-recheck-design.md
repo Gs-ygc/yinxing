@@ -28,7 +28,9 @@ https://kernelsu.org/guide/module.html.
 
 ## Non-goals
 
-- No change to `guard.sh` exit codes or lock acquisition/reclamation rules.
+- No change to lock acquisition/reclamation rules. `guard.sh` now gives a
+  live-owner collision its own internal supervisor status (`76`) so a normal
+  bounded completion (`0`) remains terminal and cannot be relaunched forever.
 - No arbitrary Root shell, new package/component, coordinate input, or
   firmware/system-app integration.
 - No foreground-app forcing or repeated launcher launches while a user is
@@ -36,6 +38,11 @@ https://kernelsu.org/guide/module.html.
 - No device-specific ColorOS private settings.
 
 ## Design
+
+`common.sh` defines `GUARD_OWNER_ACTIVE_STATUS=76`. When lock acquisition sees
+an already-live same-boot PID, `guard.sh` returns that status; incomplete lock
+publication continues to use `75`, and a normal bounded completion continues
+to use `0`.
 
 `service.sh` reads one additional numeric delay:
 
@@ -48,7 +55,8 @@ the existing Guard result as follows:
 
 | Guard result | Supervisor behavior |
 |---|---|
-| `0` | Recheck module state, sleep the owner-recheck delay, then invoke Guard again. |
+| `0` | Exit; the Guard completed its bounded run normally. |
+| `76` | Recheck module state, sleep the owner-recheck delay, then invoke Guard again. |
 | `75` | Recheck module state, sleep the existing short lock retry delay, then invoke Guard again. |
 | Any other non-zero | Recheck module state, log the fixed diagnostic, sleep the restart backoff, then invoke Guard again. |
 
@@ -78,4 +86,3 @@ The change only keeps an existing module-local supervisor alive longer. It
 does not add a privileged command or alter the module's state writes. Preview 6
 can be rolled back by disabling `yinxing_guard` or reinstalling Preview 5's
 module and APK.
-
