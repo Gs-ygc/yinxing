@@ -41,7 +41,11 @@ guard_state() {
             ;;
         *)
             if kill -0 "$guard_pid" 2>/dev/null; then
-                printf 'running\n'
+                if [ "$(guard_owner_identity_state "$LOCK_DIR" "$guard_pid")" = "mismatch" ]; then
+                    printf 'stale\n'
+                else
+                    printf 'running\n'
+                fi
             else
                 printf 'stale\n'
             fi

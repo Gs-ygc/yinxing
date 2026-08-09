@@ -6,7 +6,7 @@ HOME_COMPONENT="com.yinxing.launcher/.feature.home.MainActivity"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 LOG_TAG="YinxingGuard"
-MODULE_VERSION="1.10.0-root-preview.7"
+MODULE_VERSION="1.10.0-root-preview.8"
 GUARD_OWNER_ACTIVE_STATUS=76
 CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
 
@@ -38,6 +38,44 @@ merge_accessibility_services() {
             printf '%s:%s\n' "$current" "$component"
             ;;
     esac
+}
+
+process_start_time() {
+    process_pid="$1"
+    process_proc_root="${YINXING_GUARD_PROC_ROOT:-/proc}"
+    process_stat="$(cat "$process_proc_root/$process_pid/stat" 2>/dev/null || true)"
+    [ -n "$process_stat" ] || return 1
+    process_start="$(printf '%s\n' "$process_stat" | awk '{ sub(/^.*\) /, ""); print $20; exit }')"
+    case "$process_start" in
+        ''|*[!0-9]*) return 1 ;;
+        *) printf '%s\n' "$process_start" ;;
+    esac
+}
+
+guard_owner_identity_state() {
+    identity_lock_dir="$1"
+    identity_pid="$2"
+    identity_expected="$(cat "$identity_lock_dir/start_time" 2>/dev/null || true)"
+    [ -n "$identity_expected" ] || {
+        printf 'unknown\n'
+        return 0
+    }
+    case "$identity_expected" in
+        ''|*[!0-9]*)
+            printf 'unknown\n'
+            return 0
+            ;;
+    esac
+    identity_actual="$(process_start_time "$identity_pid" 2>/dev/null || true)"
+    [ -n "$identity_actual" ] || {
+        printf 'unknown\n'
+        return 0
+    }
+    if [ "$identity_expected" = "$identity_actual" ]; then
+        printf 'match\n'
+    else
+        printf 'mismatch\n'
+    fi
 }
 
 remove_accessibility_service() {

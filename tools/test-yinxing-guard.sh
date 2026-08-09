@@ -95,6 +95,22 @@ assert_not_contains() {
     fi
 }
 
+wait_for_guard_shutdown() {
+    local stable_absence=0
+    for _ in $(seq 1 200); do
+        if [[ ! -e "$TEST_ROOT/state/guard.lock" ]]; then
+            stable_absence=$((stable_absence + 1))
+            if [[ "$stable_absence" -ge 4 ]]; then
+                return 0
+            fi
+        else
+            stable_absence=0
+        fi
+        /bin/sleep 0.05
+    done
+    return 1
+}
+
 write_fake() {
     local name="$1"
     shift
@@ -202,13 +218,12 @@ reset_fixture() {
         "$TEST_ROOT/use_real_sleep" \
         "$TEST_ROOT/accessibility_dump" \
         "$TEST_ROOT/fail_accessibility_dump" \
-        "$TEST_ROOT/proc" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
         "$TEST_ROOT/component_disabled" \
         "$TEST_ROOT/log_noise"
-    rm -rf "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules"
+    rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules"
 }
 
 prepare_healthy_status_fixture() {
@@ -702,6 +717,7 @@ test_guard_publishes_owner_start_time_before_pid() {
     kill "$GUARD_PID" 2>/dev/null || true
     wait "$GUARD_PID" 2>/dev/null || true
     GUARD_PID=""
+    wait_for_guard_shutdown || fail "guard did not stop after owner publication check"
     pass "guard publishes owner start time before PID"
 }
 
@@ -753,6 +769,7 @@ test_service_retries_incomplete_lock() {
     wait "$remover_pid" 2>/dev/null || true
     assert_equals "1" "$found" "service did not retry an incomplete lock"
     assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "service retried more than once"
+    wait_for_guard_shutdown || fail "service did not stop after retrying an incomplete lock"
     pass "service retries incomplete lock"
 }
 
@@ -782,6 +799,7 @@ test_service_restarts_non_lock_guard_failure() {
     [[ "$boot_calls" -ge 2 ]] || fail "guard did not fail during boot readiness (calls=$boot_calls)"
     assert_equals "3" "$(grep -c '^getprop sys.boot_completed$' "$CALLS" || true)" \
         "supervisor should start a second guard after the first boot failure"
+    wait_for_guard_shutdown || fail "service did not stop after restarting a failed guard"
     pass "service restarts non-lock guard failure"
 }
 
@@ -816,12 +834,7 @@ test_service_reclaims_lock_after_owner_disappears() {
     kill "$LIVE_PID" 2>/dev/null || true
     wait "$LIVE_PID" 2>/dev/null || true
     LIVE_PID=""
-    for _ in $(seq 1 100); do
-        if [[ ! -e "$TEST_ROOT/state/guard.lock" ]]; then
-            break
-        fi
-        /bin/sleep 0.05
-    done
+    wait_for_guard_shutdown || fail "service did not stop after reclaiming the owner lock"
     pass "service reclaims lock after owner disappears"
 }
 
@@ -1046,11 +1059,11 @@ test_module_package() {
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
-    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=7'
+    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=8'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
-    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.7'
-    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=7'
+    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.8'
+    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=8'
     for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"

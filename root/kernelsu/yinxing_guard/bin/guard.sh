@@ -37,6 +37,7 @@ LOCK_ROOT="$STATE_DIR/guard.lock"
 LOCK_DIR="$LOCK_ROOT/$LOCK_BOOT_ID"
 PID_FILE="$LOCK_DIR/pid"
 BOOT_MARKER_FILE="$LOCK_DIR/boot_id"
+START_TIME_FILE="$LOCK_DIR/start_time"
 RECLAIM_DIR="$LOCK_DIR/reclaim"
 RECLAIM_PID_FILE="$RECLAIM_DIR/pid"
 LOCK_RETRYABLE=0
@@ -44,7 +45,7 @@ LOCK_OWNER_ACTIVE=0
 
 release_lock() {
     if [ -f "$PID_FILE" ] && [ "$(cat "$PID_FILE" 2>/dev/null)" = "$$" ]; then
-        rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
+        rm -f "$PID_FILE" "$BOOT_MARKER_FILE" "$START_TIME_FILE"
         rmdir "$LOCK_DIR" 2>/dev/null || true
         rmdir "$LOCK_ROOT" 2>/dev/null || true
     fi
@@ -58,9 +59,24 @@ acquire_lock() {
     attempts=0
     while [ "$attempts" -lt "$LOCK_ATTEMPTS" ]; do
         if mkdir "$LOCK_DIR" 2>/dev/null; then
-            if ! printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE" || \
-                ! printf '%s\n' "$$" > "$PID_FILE"; then
-                rm -f "$PID_FILE" "$BOOT_MARKER_FILE"
+            if ! printf '%s\n' "$CURRENT_BOOT_ID" > "$BOOT_MARKER_FILE"; then
+                rm -f "$PID_FILE" "$BOOT_MARKER_FILE" "$START_TIME_FILE"
+                rmdir "$LOCK_DIR" 2>/dev/null || true
+                rmdir "$LOCK_ROOT" 2>/dev/null || true
+                log_event "guard_lock_write_failed"
+                return 1
+            fi
+            owner_start_time="$(process_start_time "$$" 2>/dev/null || true)"
+            if [ -n "$owner_start_time" ] && \
+                ! printf '%s\n' "$owner_start_time" > "$START_TIME_FILE"; then
+                rm -f "$PID_FILE" "$BOOT_MARKER_FILE" "$START_TIME_FILE"
+                rmdir "$LOCK_DIR" 2>/dev/null || true
+                rmdir "$LOCK_ROOT" 2>/dev/null || true
+                log_event "guard_lock_write_failed"
+                return 1
+            fi
+            if ! printf '%s\n' "$$" > "$PID_FILE"; then
+                rm -f "$PID_FILE" "$BOOT_MARKER_FILE" "$START_TIME_FILE"
                 rmdir "$LOCK_DIR" 2>/dev/null || true
                 rmdir "$LOCK_ROOT" 2>/dev/null || true
                 log_event "guard_lock_write_failed"
@@ -93,9 +109,17 @@ acquire_lock() {
                 ;;
             *)
                 if kill -0 "$previous_pid" 2>/dev/null; then
-                    LOCK_OWNER_ACTIVE=1
-                    log_event "guard_already_running"
-                    return 1
+                    identity_state="$(guard_owner_identity_state "$LOCK_DIR" "$previous_pid")"
+                    case "$identity_state" in
+                        mismatch)
+                            ;;
+                        match|unknown)
+                            LOCK_RETRYABLE=0
+                            LOCK_OWNER_ACTIVE=1
+                            log_event "guard_already_running"
+                            return 1
+                            ;;
+                    esac
                 fi
                 ;;
         esac
@@ -117,10 +141,18 @@ acquire_lock() {
                     ;;
                 *)
                     if kill -0 "$checked_pid" 2>/dev/null; then
-                        rm -rf "$RECLAIM_DIR"
-                        LOCK_OWNER_ACTIVE=1
-                        log_event "guard_already_running"
-                        return 1
+                        checked_identity="$(guard_owner_identity_state "$LOCK_DIR" "$checked_pid")"
+                        case "$checked_identity" in
+                            mismatch)
+                                ;;
+                            match|unknown)
+                                rm -rf "$RECLAIM_DIR"
+                                LOCK_RETRYABLE=0
+                                LOCK_OWNER_ACTIVE=1
+                                log_event "guard_already_running"
+                                return 1
+                                ;;
+                        esac
                     fi
                     rm -rf "$LOCK_DIR"
                     attempts=$((attempts + 1))

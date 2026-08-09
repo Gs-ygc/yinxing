@@ -3,7 +3,7 @@
 PACKAGE_NAME="com.yinxing.launcher"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 LOG_TAG="YinxingGuard"
-MODULE_VERSION="1.10.0-root-preview.7"
+MODULE_VERSION="1.10.0-root-preview.8"
 MARKER="$STATE_DIR/doze_added_by_module"
 SELF_PATH="$0"
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
