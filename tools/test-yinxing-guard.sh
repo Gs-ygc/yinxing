@@ -153,6 +153,7 @@ write_fake settings \
     '      deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"' \
     '    elif [[ -e "$TEST_ROOT/accessibility_rebind_removed" && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then' \
     '      rm -f "$TEST_ROOT/accessibility_rebind_removed"; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_restore"' \
+    '      if [[ -e "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore" ]]; then printf "corrupt\\n" > "$TEST_ROOT/state/accessibility_binding_stall"; rm -f "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore"; fi' \
     '    fi' \
     '    if [[ ":$previous:" != *":$ACCESSIBILITY_COMPONENT:"* && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then' \
     '      deactivate_from "$TEST_ROOT/deactivate_during_accessibility_services_put"' \
@@ -206,6 +207,8 @@ write_fake yinxing-test-sync \
     'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync" && "$(tr -d "\\n" < "$TEST_ROOT/state/home_takeover_state" 2>/dev/null)" == released ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.yinxing.launcher/.feature.home.MainActivity\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* && -e "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.oplus.launcher/.Launcher\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* ]]; then [[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/accessibility_binding_stall "* && -e "$TEST_ROOT/fail_accessibility_binding_stall_sync" ]]; then exit 1; fi' \
+    'if [[ "$*" == "-f $TEST_ROOT/state" && -e "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once" ]]; then rm -f "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once"; exit 1; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state "* && -e "$TEST_ROOT/fail_second_home_state_dir_sync" ]]; then reads="$(cat "$TEST_ROOT/home_state_dir_sync_count" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/home_state_dir_sync_count"; [[ "$reads" -ge 2 ]] && exit 1; fi' \
     'exit 0'
 
@@ -383,6 +386,9 @@ reset_fixture() {
         "$TEST_ROOT/accessibility_dump" \
         "$TEST_ROOT/accessibility_dump_sequence_calls" \
         "$TEST_ROOT/fail_accessibility_dump" \
+        "$TEST_ROOT/fail_accessibility_binding_stall_sync" \
+        "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once" \
+        "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore" \
         "$TEST_ROOT/accessibility_binding_stall_marker_symlink" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
@@ -1836,9 +1842,14 @@ User state[
 EOF
 }
 
+run_binding_stall_repair() {
+    run_module_script -c '. "$1"; repair_accessibility' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh"
+}
+
 test_binding_stall_publishes_first_observation_without_toggle() {
     prepare_binding_stall_fixture
-    YINXING_GUARD_BINDING_STALL_THRESHOLD=2 repair_accessibility || \
+    run_binding_stall_repair || \
         fail "first binding observation should remain non-fatal"
     marker_value="$(cat "$ACCESSIBILITY_BINDING_STALL_MARKER" 2>/dev/null || true)"
     assert_equals "binding|fixture-boot|1|0" "$marker_value" \
@@ -1850,10 +1861,10 @@ test_binding_stall_publishes_first_observation_without_toggle() {
 
 test_binding_stall_rebinds_once_at_threshold() {
     prepare_binding_stall_fixture
-    YINXING_GUARD_BINDING_STALL_THRESHOLD=2 repair_accessibility || \
+    run_binding_stall_repair || \
         fail "first binding observation should succeed"
     : > "$CALLS"
-    YINXING_GUARD_BINDING_STALL_THRESHOLD=2 repair_accessibility || \
+    run_binding_stall_repair || \
         fail "threshold binding observation should rebind"
     assert_equals "2" \
         "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
@@ -1869,7 +1880,8 @@ test_binding_stall_resets_observation_after_unresolved_rebind() {
     mkdir -p "$TEST_ROOT/state"
     printf 'binding|fixture-boot|0|1\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     : > "$CALLS"
-    repair_accessibility || fail "observation after unresolved rebind should remain non-fatal"
+    run_binding_stall_repair || \
+        fail "observation after unresolved rebind should remain non-fatal"
     assert_not_contains "$CALLS" \
         "settings --user 0 put secure enabled_accessibility_services"
     assert_equals "binding|fixture-boot|1|1" \
@@ -1880,10 +1892,19 @@ test_binding_stall_resets_observation_after_unresolved_rebind() {
 
 test_binding_stall_stops_after_maximum_rebinds() {
     prepare_binding_stall_fixture
-    mkdir -p "$TEST_ROOT/state"
-    printf 'binding|fixture-boot|1|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    run_binding_stall_repair || fail "first binding observation should succeed"
+    run_binding_stall_repair || fail "first binding rebind should succeed"
+    run_binding_stall_repair || fail "second binding window should start"
+    run_binding_stall_repair || fail "second binding rebind should succeed"
+    assert_equals "4" \
+        "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "two binding stall windows should perform exactly two rebind pairs"
+    assert_equals "binding|fixture-boot|0|2" \
+        "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
+        "second unresolved rebind should exhaust the attempt budget"
     : > "$CALLS"
-    if repair_accessibility; then
+    run_binding_stall_repair || fail "final observation window should start without mutation"
+    if run_binding_stall_repair; then
         fail "binding stall at the retry budget should fail closed"
     fi
     assert_not_contains "$CALLS" \
@@ -1899,7 +1920,7 @@ test_binding_stall_resets_budget_on_new_boot() {
     mkdir -p "$TEST_ROOT/state"
     printf 'binding|fixture-boot|2|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     printf 'next-boot\n' > "$TEST_ROOT/boot_id"
-    repair_accessibility || fail "new boot should reset binding stall evidence"
+    run_binding_stall_repair || fail "new boot should reset binding stall evidence"
     assert_equals "binding|next-boot|1|0" \
         "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
         "new boot binding budget"
@@ -1921,7 +1942,8 @@ User state[
   Client list info:{}
 ]
 EOF
-    repair_accessibility || fail "bound accessibility service should clear stall evidence"
+    run_binding_stall_repair || \
+        fail "bound accessibility service should clear stall evidence"
     [[ ! -e "$ACCESSIBILITY_BINDING_STALL_MARKER" ]] || \
         fail "bound accessibility service retained stall evidence"
     assert_not_contains "$CALLS" \
@@ -1933,7 +1955,7 @@ test_binding_stall_rejects_unsafe_marker() {
     prepare_binding_stall_fixture
     mkdir -p "$TEST_ROOT/state"
     ln -s "$TEST_ROOT/unsafe-marker-target" "$ACCESSIBILITY_BINDING_STALL_MARKER"
-    if repair_accessibility; then
+    if run_binding_stall_repair; then
         fail "unsafe binding marker should fail closed"
     fi
     assert_not_contains "$CALLS" \
@@ -1941,6 +1963,185 @@ test_binding_stall_rejects_unsafe_marker() {
     [[ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]] || \
         fail "unsafe binding marker was overwritten"
     pass "binding stall rejects unsafe marker"
+}
+
+test_binding_stall_rejects_malformed_evidence() {
+    local evidence
+    for evidence in \
+        'binding|fixture-boot|1|0' \
+        'binding|fixture-boot|1|0\n\n' \
+        'binding|bad boot|1|0\n' \
+        'binding|fixture-boot|1|0|extra\n' \
+        'binding|fixture-boot|100001|0\n' \
+        'binding|fixture-boot|-1|0\n'; do
+        prepare_binding_stall_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%b' "$evidence" > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+        : > "$CALLS"
+        if run_binding_stall_repair; then
+            fail "malformed binding stall evidence unexpectedly succeeded"
+        fi
+        assert_not_contains "$CALLS" \
+            "settings --user 0 put secure enabled_accessibility_services"
+        [[ -f "$ACCESSIBILITY_BINDING_STALL_MARKER" ]] || \
+            fail "malformed binding stall evidence was removed"
+    done
+    pass "binding stall rejects malformed evidence"
+}
+
+test_binding_stall_rejects_noncanonical_counts_without_shell_exit() {
+    local evidence output
+    for evidence in \
+        'binding|fixture-boot|08|0\n' \
+        'binding|fixture-boot|0|08\n'; do
+        prepare_binding_stall_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%b' "$evidence" > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+        : > "$CALLS"
+        output="$(run_module_script -c '
+            . "$1"
+            if repair_accessibility; then
+                repair_status=0
+            else
+                repair_status=$?
+            fi
+            printf "continued:%s\n" "$repair_status"
+        ' yinxing-test "$MODULE_ROOT/bin/common.sh")" || \
+            fail "noncanonical binding count terminated the repair shell"
+        assert_equals "continued:1" "$output" \
+            "noncanonical binding count should fail through the function boundary"
+        assert_not_contains "$CALLS" \
+            "settings --user 0 put secure enabled_accessibility_services"
+        assert_equals "$(printf '%b' "$evidence" | tr -d '\n')" \
+            "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
+            "noncanonical binding evidence should remain untouched"
+    done
+    pass "binding stall rejects noncanonical counts without shell exit"
+}
+
+test_binding_stall_sanitizes_retry_overrides() {
+    local output override
+    for override in invalid -1 0 00 08 000002; do
+        output="$(run_module_script -c '
+            YINXING_GUARD_BINDING_STALL_THRESHOLD=$2
+            YINXING_GUARD_BINDING_STALL_MAX_REBINDS=$2
+            export YINXING_GUARD_BINDING_STALL_THRESHOLD
+            export YINXING_GUARD_BINDING_STALL_MAX_REBINDS
+            . "$1"
+            printf "%s:%s\n" \
+                "$(accessibility_binding_stall_threshold)" \
+                "$(accessibility_binding_stall_max_rebinds)"
+        ' yinxing-test "$MODULE_ROOT/bin/common.sh" "$override")"
+        assert_equals "2:2" "$output" \
+            "invalid binding stall override '$override' should use defaults"
+    done
+    output="$(run_module_script -c '
+        YINXING_GUARD_BINDING_STALL_THRESHOLD=100001
+        YINXING_GUARD_BINDING_STALL_MAX_REBINDS=9999999
+        export YINXING_GUARD_BINDING_STALL_THRESHOLD
+        export YINXING_GUARD_BINDING_STALL_MAX_REBINDS
+        . "$1"
+        printf "%s:%s\n" \
+            "$(accessibility_binding_stall_threshold)" \
+            "$(accessibility_binding_stall_max_rebinds)"
+    ' yinxing-test "$MODULE_ROOT/bin/common.sh")"
+    assert_equals "100000:100000" "$output" \
+        "binding stall overrides should stay within the marker range"
+    pass "binding stall sanitizes retry overrides"
+}
+
+test_binding_stall_validates_evidence_before_initial_enable() {
+    prepare_binding_stall_fixture
+    printf 'talkback:other\n' > "$SERVICES"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/state"
+    printf 'corrupt\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    : > "$CALLS"
+    if run_binding_stall_repair; then
+        fail "initial enable accepted malformed binding stall evidence"
+    fi
+    assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" \
+        "malformed stall evidence should preserve initial services"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "malformed stall evidence should preserve the initial global switch"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "preflight stall rejection published an accessibility transaction"
+    assert_equals "corrupt" \
+        "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
+        "preflight stall rejection should retain malformed evidence"
+    pass "binding stall validates evidence before initial enable"
+}
+
+test_binding_stall_clear_failure_compensates_initial_enable() {
+    prepare_binding_stall_fixture
+    printf 'talkback:other\n' > "$SERVICES"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/state"
+    printf 'binding|fixture-boot|1|0\n' > \
+        "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{$ACCESSIBILITY_COMPONENT}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    touch "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once"
+    : > "$CALLS"
+    if run_binding_stall_repair; then
+        fail "initial enable survived a binding stall clear failure"
+    fi
+    assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" \
+        "clear failure should compensate initial services"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "clear failure should compensate the initial global switch"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "clear failure retained a compensated accessibility transaction"
+    [[ ! -e "$ACCESSIBILITY_BINDING_STALL_MARKER" ]] || \
+        fail "clear failure retained a marker removed before sync failure"
+    pass "binding stall clear failure compensates initial enable"
+}
+
+test_binding_stall_rebind_preserves_concurrent_malformed_evidence() {
+    prepare_binding_stall_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'binding|fixture-boot|1|0\n' > \
+        "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    touch "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore"
+    : > "$CALLS"
+    if run_binding_stall_repair; then
+        fail "rebind overwrote malformed stall evidence published during restore"
+    fi
+    assert_equals "corrupt" \
+        "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
+        "rebind should retain concurrent malformed stall evidence"
+    assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
+        "failed post-rebind marker publication should preserve services"
+    assert_equals "1" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "failed post-rebind marker publication should preserve the global switch"
+    assert_equals "2" \
+        "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "concurrent malformed evidence must not cause another settings toggle"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "post-rebind marker failure retained a compensated transaction"
+    pass "binding stall rebind preserves concurrent malformed evidence"
+}
+
+test_binding_stall_sync_failure_blocks_rebind() {
+    prepare_binding_stall_fixture
+    touch "$TEST_ROOT/fail_accessibility_binding_stall_sync"
+    if run_binding_stall_repair; then
+        fail "binding stall marker sync failure unexpectedly succeeded"
+    fi
+    assert_not_contains "$CALLS" \
+        "settings --user 0 put secure enabled_accessibility_services"
+    assert_equals "binding|fixture-boot|1|0" \
+        "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
+        "failed sync should retain published non-mutating evidence"
+    pass "binding stall sync failure blocks rebind"
 }
 
 test_status_reports_persistent_binding_stall() {
@@ -1958,6 +2159,11 @@ User state[
 EOF
     printf 'binding|test-boot|2|0\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     output="$(YINXING_GUARD_BINDING_STALL_THRESHOLD=2 \
+        YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=stale"
+    printf 'binding|test-boot|0|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    output="$(YINXING_GUARD_BINDING_STALL_MAX_REBINDS=2 \
         YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
     assert_contains_text "$output" "accessibility=stale"
@@ -4481,6 +4687,13 @@ case "$MODE" in
         test_binding_stall_resets_budget_on_new_boot
         test_binding_stall_clears_when_bound
         test_binding_stall_rejects_unsafe_marker
+        test_binding_stall_rejects_malformed_evidence
+        test_binding_stall_rejects_noncanonical_counts_without_shell_exit
+        test_binding_stall_sanitizes_retry_overrides
+        test_binding_stall_validates_evidence_before_initial_enable
+        test_binding_stall_clear_failure_compensates_initial_enable
+        test_binding_stall_rebind_preserves_concurrent_malformed_evidence
+        test_binding_stall_sync_failure_blocks_rebind
         test_status_reports_persistent_binding_stall
         test_uninstall_removes_binding_stall_marker_only
         ;;
@@ -4766,6 +4979,13 @@ case "$MODE" in
         test_binding_stall_resets_budget_on_new_boot
         test_binding_stall_clears_when_bound
         test_binding_stall_rejects_unsafe_marker
+        test_binding_stall_rejects_malformed_evidence
+        test_binding_stall_rejects_noncanonical_counts_without_shell_exit
+        test_binding_stall_sanitizes_retry_overrides
+        test_binding_stall_validates_evidence_before_initial_enable
+        test_binding_stall_clear_failure_compensates_initial_enable
+        test_binding_stall_rebind_preserves_concurrent_malformed_evidence
+        test_binding_stall_sync_failure_blocks_rebind
         test_status_reports_persistent_binding_stall
         test_uninstall_removes_binding_stall_marker_only
         test_repair_ignores_unavailable_accessibility_diagnostic
