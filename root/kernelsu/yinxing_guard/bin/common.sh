@@ -457,7 +457,13 @@ record_home_previous_holder() {
 }
 
 rollback_home_after_inactive_takeover() {
-    if ! rollback_previous_home="$(read_home_previous_holder)"; then
+    rollback_previous_home="$1"
+    if [ "$rollback_previous_home" != "none" ] && \
+        ! valid_home_holder "$rollback_previous_home"; then
+        log_event "home_role_inactive_rollback_previous_invalid"
+        return 1
+    fi
+    if ! read_home_previous_holder >/dev/null; then
         log_event "home_role_inactive_rollback_marker_invalid"
         return 1
     fi
@@ -551,20 +557,20 @@ repair_home_role() {
     if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
         "$HOME_COMPONENT" >/dev/null 2>&1; then
         if ! module_is_active; then
-            rollback_home_after_inactive_takeover || \
+            rollback_home_after_inactive_takeover "$refreshed_home_holder" || \
                 log_event "home_role_inactive_rollback_failed"
         fi
         log_event "home_role_set_failed"
         return 1
     fi
     if ! module_is_active; then
-        rollback_home_after_inactive_takeover || \
+        rollback_home_after_inactive_takeover "$refreshed_home_holder" || \
             log_event "home_role_inactive_rollback_failed"
         return 1
     fi
     if ! confirmed_home_holder="$(read_home_role_holder)"; then
         if ! module_is_active; then
-            rollback_home_after_inactive_takeover || \
+            rollback_home_after_inactive_takeover "$refreshed_home_holder" || \
                 log_event "home_role_inactive_rollback_failed"
         fi
         log_event "home_role_confirm_failed"
@@ -575,7 +581,7 @@ repair_home_role() {
         return 1
     fi
     if ! module_is_active; then
-        rollback_home_after_inactive_takeover || \
+        rollback_home_after_inactive_takeover "$refreshed_home_holder" || \
             log_event "home_role_inactive_rollback_failed"
         return 1
     fi

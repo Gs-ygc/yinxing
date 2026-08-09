@@ -1785,6 +1785,32 @@ test_action_rolls_back_home_when_module_deactivates_during_set() {
     pass "action rolls back HOME after mid-set module deactivation"
 }
 
+test_action_rolls_back_latest_home_when_marker_predates_takeover() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after repeated takeover deactivated module"
+    fi
+
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "mid-set deactivation restores the latest caregiver HOME"
+    assert_contains "$CALLS" \
+        "cmd package set-home-activity --user 0 com.example.caregiverlauncher"
+    assert_not_contains "$CALLS" \
+        "cmd package set-home-activity --user 0 com.oplus.launcher"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "latest-HOME rollback retained stale ownership marker"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "cmd appops set"
+    assert_not_contains "$CALLS" "am start"
+    pass "action rolls back the latest HOME after repeated takeover interruption"
+}
+
 test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
@@ -2617,6 +2643,7 @@ case "$MODE" in
         test_guard_stops_home_enforcement_after_disable_or_remove
         test_action_rejects_disabled_or_removing_module
         test_action_rolls_back_home_when_module_deactivates_during_set
+        test_action_rolls_back_latest_home_when_marker_predates_takeover
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop
@@ -2732,6 +2759,7 @@ case "$MODE" in
         test_guard_stops_home_enforcement_after_disable_or_remove
         test_action_rejects_disabled_or_removing_module
         test_action_rolls_back_home_when_module_deactivates_during_set
+        test_action_rolls_back_latest_home_when_marker_predates_takeover
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop
