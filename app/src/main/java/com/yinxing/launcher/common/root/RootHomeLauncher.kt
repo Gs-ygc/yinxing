@@ -9,7 +9,7 @@ internal fun interface RootHomeLauncher {
 }
 
 internal class SuRootHomeLauncher(
-    private val runner: RootCommandRunner = SuRootCommandRunner(timeoutMillis = DEFAULT_TIMEOUT_MILLIS)
+    private val runner: RootCommandRunner = SuRootCommandRunner()
 ) : RootHomeLauncher {
 
     override suspend fun launchHome(): Boolean = runInterruptible(Dispatchers.IO) {
@@ -20,9 +20,5 @@ internal class SuRootHomeLauncher(
         } catch (_: Exception) {
             false
         }
-    }
-
-    private companion object {
-        const val DEFAULT_TIMEOUT_MILLIS = 1_200L
     }
 }

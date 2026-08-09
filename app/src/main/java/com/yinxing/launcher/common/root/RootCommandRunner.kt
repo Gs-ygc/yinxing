@@ -7,17 +7,22 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
-internal enum class RootCommand {
-    STATUS,
-    RECOVER,
-    KIOSK_HOME;
-
-    val shellPath: String
-        get() = when (this) {
-            STATUS -> "/data/adb/modules/yinxing_guard/bin/status.sh"
-            RECOVER -> "/data/adb/modules/yinxing_guard/action.sh"
-            KIOSK_HOME -> "/data/adb/modules/yinxing_guard/bin/kiosk-home.sh"
-        }
+internal enum class RootCommand(
+    val shellPath: String,
+    val timeoutMillis: Long
+) {
+    STATUS(
+        shellPath = "/data/adb/modules/yinxing_guard/bin/status.sh",
+        timeoutMillis = 3_000L
+    ),
+    RECOVER(
+        shellPath = "/data/adb/modules/yinxing_guard/action.sh",
+        timeoutMillis = 12_000L
+    ),
+    KIOSK_HOME(
+        shellPath = "/data/adb/modules/yinxing_guard/bin/kiosk-home.sh",
+        timeoutMillis = 1_200L
+    )
 }
 
 internal data class RootCommandResult(
@@ -35,13 +40,13 @@ internal fun interface RootCommandRunner {
 }
 
 internal class SuRootCommandRunner(
-    private val timeoutMillis: Long = DEFAULT_TIMEOUT_MILLIS,
+    private val timeoutMillis: Long? = null,
     private val maxOutputBytes: Int = MAX_OUTPUT_BYTES,
     private val suExecutable: String = "su"
 ) : RootCommandRunner {
 
     init {
-        require(timeoutMillis > 0) { "timeoutMillis must be positive" }
+        require(timeoutMillis == null || timeoutMillis > 0) { "timeoutMillis must be positive" }
         require(maxOutputBytes > 0) { "maxOutputBytes must be positive" }
         require(suExecutable.isNotBlank()) { "suExecutable must not be blank" }
     }
@@ -62,8 +67,9 @@ internal class SuRootCommandRunner(
             readResult.set(readBoundedOutput(process, maxOutputBytes))
         }
 
+        val commandTimeoutMillis = timeoutMillis ?: command.timeoutMillis
         val finished = try {
-            process.waitFor(timeoutMillis, TimeUnit.MILLISECONDS)
+            process.waitFor(commandTimeoutMillis, TimeUnit.MILLISECONDS)
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false
@@ -188,7 +194,6 @@ internal class SuRootCommandRunner(
     )
 
     private companion object {
-        const val DEFAULT_TIMEOUT_MILLIS = 3_000L
         const val MAX_OUTPUT_BYTES = 16 * 1024
         const val TERMINATION_GRACE_MILLIS = 100L
         const val READER_JOIN_MILLIS = 250L
