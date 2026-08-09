@@ -1074,6 +1074,14 @@ repair_owned_home_route_locked() {
     return 0
 }
 
+ensure_owned_home_route_locked() {
+    if ! owned_home_resolver="$(home_resolver_state)"; then
+        log_event "home_route_query_failed"
+        return 1
+    fi
+    repair_owned_home_route_locked "$owned_home_resolver"
+}
+
 record_home_holder_marker() {
     holder_value="$1"
     holder_marker="$2"
@@ -1446,13 +1454,7 @@ repair_home_role_locked() {
     esac
 
     if [ "$current_home_holder" = "$PACKAGE_NAME" ]; then
-        if ! current_home_resolver="$(home_resolver_state)"; then
-            log_event "home_route_query_failed"
-            return 1
-        fi
-        if [ "$current_home_resolver" != target ]; then
-            repair_owned_home_route_locked "$current_home_resolver" || return 1
-        fi
+        ensure_owned_home_route_locked || return 1
         case "$saved_takeover_state" in
             owned) return 0 ;;
             pending\|*)
@@ -1490,7 +1492,10 @@ repair_home_role_locked() {
                 log_event "home_role_post_pending_query_failed"
                 return 1
             fi
-            [ "$current_home_holder" = "$PACKAGE_NAME" ] && return 0
+            if [ "$current_home_holder" = "$PACKAGE_NAME" ]; then
+                ensure_owned_home_route_locked || return 1
+                return 0
+            fi
             ;;
     esac
     if ! cleanup_helper_ready "${CLEANUP_SOURCE:-}"; then
@@ -1510,6 +1515,7 @@ repair_home_role_locked() {
         return 1
     fi
     if [ "$refreshed_home_holder" = "$PACKAGE_NAME" ]; then
+        ensure_owned_home_route_locked || return 1
         if [ -z "$saved_takeover_state" ]; then
             clear_released_home_evidence || return 1
         fi

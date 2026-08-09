@@ -200,6 +200,7 @@ write_fake yinxing-test-sync \
     '#!/usr/bin/env bash' \
     'printf "sync %s\\n" "$*" >> "$CALLS"' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_after_takeover_state_sync" ]]; then printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/switch_home_after_takeover_state_sync"; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* && -e "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.oplus.launcher/.Launcher\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* ]]; then [[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1; fi' \
     'exit 0'
 
@@ -345,6 +346,7 @@ reset_fixture() {
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
         "$TEST_ROOT/switch_home_after_takeover_state_sync" \
+        "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_add_after_apply" \
         "$TEST_ROOT/pause_deviceidle_add" \
@@ -644,6 +646,43 @@ test_home_resolver_mismatch_is_degraded_and_repaired() {
     assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
         "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" "resolver repair"
     assert_equals owned "$(home_role_state)" "repaired resolver state"
+}
+
+test_home_resolver_rechecks_cross_boot_pending_transition() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|previous-boot|com.oplus.launcher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
+    printf 'com.oplus.launcher/.Launcher\n' > "$HOME_RESOLVED_COMPONENT"
+    printf 'com.yinxing.launcher\n' > "$TEST_ROOT/late_home_target"
+    printf '2\n' > "$TEST_ROOT/late_home_reads"
+    repair_state || fail "cross-boot HOME recovery should repair a late resolver mismatch"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS")" \
+        "cross-boot transition resolver repair count"
+    assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" "cross-boot resolver repair"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "cross-boot resolver repair retained stale rollback evidence"
+    pass "cross-boot transition rechecks HOME resolver"
+}
+
+test_home_resolver_rechecks_marker_sync_transition() {
+    reset_fixture
+    touch "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync"
+    repair_state || fail "marker-sync HOME transition should repair a resolver mismatch"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS")" \
+        "marker-sync transition resolver repair count"
+    assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" "marker-sync resolver repair"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "marker-sync resolver repair retained rollback evidence"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "marker-sync resolver repair retained takeover state"
+    pass "marker-sync transition rechecks HOME resolver"
 }
 
 test_home_resolver_unknown_is_safe() {
@@ -3971,6 +4010,8 @@ case "$MODE" in
         test_home_transaction_lock_serializes_concurrent_actions
         test_uninstall_waits_for_unpublished_home_transaction
         test_home_role_preserves_choice_after_takeover_state_publish
+        test_home_resolver_rechecks_cross_boot_pending_transition
+        test_home_resolver_rechecks_marker_sync_transition
         test_home_transaction_lock_reclaims_dead_owner
         test_home_transaction_lock_rejects_symlink
         test_guard_promotes_visible_pending_home_state
@@ -4007,6 +4048,8 @@ case "$MODE" in
         test_home_role_rejects_trailing_blank_marker
         test_home_resolver_target_is_owned
         test_home_resolver_mismatch_is_degraded_and_repaired
+        test_home_resolver_rechecks_cross_boot_pending_transition
+        test_home_resolver_rechecks_marker_sync_transition
         test_home_resolver_unknown_is_safe
         test_home_resolver_takeover_confirmation_retains_pending
         test_home_resolver_no_activity_found_is_empty
@@ -4163,6 +4206,8 @@ case "$MODE" in
         test_home_role_rejects_trailing_blank_marker
         test_home_resolver_target_is_owned
         test_home_resolver_mismatch_is_degraded_and_repaired
+        test_home_resolver_rechecks_cross_boot_pending_transition
+        test_home_resolver_rechecks_marker_sync_transition
         test_home_resolver_unknown_is_safe
         test_home_resolver_takeover_confirmation_retains_pending
         test_home_resolver_no_activity_found_is_empty
