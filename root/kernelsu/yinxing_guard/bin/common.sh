@@ -142,6 +142,45 @@ accessibility_service_binding_state() {
     '
 }
 
+confirm_accessibility_service_rebind() {
+    confirm_attempts="${YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS:-5}"
+    case "$confirm_attempts" in
+        ''|*[!0-9]*|0) confirm_attempts=5 ;;
+    esac
+    confirm_seconds="${YINXING_GUARD_REBIND_CONFIRM_SECONDS:-1}"
+    case "$confirm_seconds" in
+        ''|*[!0-9]*) confirm_seconds=1 ;;
+    esac
+
+    confirm_attempt=1
+    while [ "$confirm_attempt" -le "$confirm_attempts" ]; do
+        confirm_state="$(accessibility_service_binding_state)"
+        case "$confirm_state" in
+            bound|binding)
+                log_event "accessibility_service_rebind_confirmed"
+                return 0
+                ;;
+            unknown)
+                log_event "accessibility_service_rebind_unverified"
+                return 0
+                ;;
+            crashed)
+                if [ "$confirm_attempt" -ge "$confirm_attempts" ]; then
+                    log_event "accessibility_service_rebind_persisted"
+                    return 1
+                fi
+                sleep "$confirm_seconds"
+                ;;
+            *)
+                log_event "accessibility_service_rebind_unverified"
+                return 0
+                ;;
+        esac
+        confirm_attempt=$((confirm_attempt + 1))
+    done
+    return 1
+}
+
 rebind_accessibility_service() {
     current="$1"
     merged="$2"
@@ -163,6 +202,9 @@ rebind_accessibility_service() {
     fi
     if ! settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1; then
         log_event "accessibility_service_rebind_enable_failed"
+        return 1
+    fi
+    if ! confirm_accessibility_service_rebind; then
         return 1
     fi
     log_event "accessibility_service_rebound"
