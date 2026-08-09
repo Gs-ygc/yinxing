@@ -623,6 +623,8 @@ test_home_resolver_target_is_owned() {
     printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
         "$TEST_ROOT/home_resolved_component"
     assert_equals target "$(read_home_resolved_component)" "target resolver component"
+    assert_contains "$CALLS" \
+        "cmd package resolve-activity --brief --components --user 0 -a android.intent.action.MAIN -c android.intent.category.HOME"
     assert_equals owned "$(home_role_state)" "target resolver state"
 }
 
