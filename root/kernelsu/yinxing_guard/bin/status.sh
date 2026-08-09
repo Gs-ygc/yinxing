@@ -1,6 +1,7 @@
 #!/system/bin/sh
 
 MODDIR=${0%/*}
+CLEANUP_SOURCE="$MODDIR/uninstall-cleanup.sh"
 . "$MODDIR/common.sh"
 
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
@@ -158,9 +159,9 @@ doze_state() {
 }
 
 cleanup_state() {
-    if [ -f "$CLEANUP_TARGET" ] && [ -x "$CLEANUP_TARGET" ]; then
+    if cleanup_helper_ready "$CLEANUP_SOURCE"; then
         printf 'ready\n'
-    elif [ -e "$CLEANUP_TARGET" ]; then
+    elif [ -e "$CLEANUP_TARGET" ] || [ -L "$CLEANUP_TARGET" ]; then
         printf 'invalid\n'
     else
         printf 'missing\n'

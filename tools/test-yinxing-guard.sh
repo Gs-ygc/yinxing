@@ -244,6 +244,8 @@ read_host_proc_start_time() {
 }
 
 # The assertions describe observable state and command effects, not source text.
+CLEANUP_SOURCE="$MODULE_ROOT/bin/uninstall-cleanup.sh"
+export CLEANUP_SOURCE
 source "$MODULE_ROOT/bin/common.sh"
 export ACCESSIBILITY_COMPONENT
 
@@ -311,8 +313,6 @@ prepare_healthy_status_fixture() {
     printf '%s\n' "$$" > "$TEST_ROOT/state/guard.lock/test-boot/pid"
     printf 'ok\n' > "$TEST_ROOT/state/last_repair"
     printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
-    printf 'helper\n' > "$CLEANUP_TARGET"
-    chmod 0755 "$CLEANUP_TARGET"
     printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
     printf '1\n' > "$ACCESSIBILITY_ENABLED"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
@@ -343,6 +343,17 @@ test_status_reports_healthy_state() {
     assert_contains_text "$output" "cleanup=ready"
     assert_contains_text "$output" "last_repair=ok"
     pass "status reports healthy state"
+}
+
+test_status_reports_stale_cleanup_helper_as_invalid() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    printf '#!/system/bin/sh\nexit 0\n' > "$CLEANUP_TARGET"
+    chmod 0755 "$CLEANUP_TARGET"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "cleanup=invalid"
+    pass "status rejects stale cleanup helper"
 }
 
 test_status_reports_other_home_holder() {
@@ -581,6 +592,41 @@ test_home_role_multiple_holders_are_safe() {
     pass "multiple HOME role holders are safe"
 }
 
+test_home_role_rejects_invalid_android_package_names() {
+    local holder
+
+    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+        reset_fixture
+        printf '%s\n' "$holder" > "$TEST_ROOT/malformed_home_role_output"
+        if run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "invalid Android HOME package unexpectedly reported recovery success ($holder)"
+        fi
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "invalid Android HOME package preserves holder ($holder)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "HOME role rejects invalid Android package names"
+}
+
+test_home_marker_rejects_invalid_android_package_names() {
+    local holder
+
+    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%s\n' "$holder" > "$TEST_ROOT/state/home_previous_holder"
+        if run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "invalid Android HOME marker unexpectedly reported recovery success ($holder)"
+        fi
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "invalid Android HOME marker preserves holder ($holder)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "HOME rollback marker rejects invalid Android package names"
+}
+
 test_home_role_invalid_marker_is_safe() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
@@ -784,6 +830,36 @@ test_home_marker_sync_is_bounded() {
     pass "HOME rollback marker sync is bounded"
 }
 
+test_home_marker_uses_default_busybox_applets() {
+    local busybox_path default_bin default_state
+
+    busybox_path="$(command -v busybox 2>/dev/null || true)"
+    [[ -n "$busybox_path" ]] || {
+        pass "default BusyBox marker applets unavailable"
+        return
+    }
+    reset_fixture
+    default_bin="$TEST_ROOT/default-busybox-bin"
+    default_state="$TEST_ROOT/default-busybox-state"
+    mkdir -p "$default_bin"
+    ln -s "$busybox_path" "$default_bin/ln"
+    ln -s "$busybox_path" "$default_bin/sync"
+    PATH="$default_bin:$PATH" \
+        YINXING_GUARD_BUSYBOX_BIN="$busybox_path" \
+        YINXING_GUARD_STATE_DIR="$default_state" \
+        YINXING_GUARD_HOME_MARKER_LINK_COMMAND=ln \
+        YINXING_GUARD_HOME_MARKER_SYNC_COMMAND=sync \
+        busybox ash -c '. "$1"; record_home_previous_holder com.oplus.launcher' \
+            yinxing-test "$MODULE_ROOT/bin/common.sh"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$default_state/home_previous_holder")" \
+        "default BusyBox marker publication"
+    assert_equals "600" "$(stat -c '%a' "$default_state/home_previous_holder")" \
+        "default BusyBox marker mode"
+    assert_not_contains "$CALLS" "sync -f $default_state/home_previous_holder"
+    pass "HOME marker uses default BusyBox applets"
+}
+
 test_guard_requires_cleanup_helper_before_home_takeover() {
     reset_fixture
     rm -f "$CLEANUP_TARGET"
@@ -797,6 +873,31 @@ test_guard_requires_cleanup_helper_before_home_takeover() {
     assert_not_contains "$CALLS" "cmd package set-home-activity"
     assert_not_contains "$CALLS" "am start"
     pass "Guard requires rollback cleanup before HOME takeover"
+}
+
+test_guard_rejects_stale_cleanup_helper_when_refresh_fails() {
+    local cleanup_dir guard_status
+
+    reset_fixture
+    cleanup_dir=${CLEANUP_TARGET%/*}
+    printf '#!/system/bin/sh\nexit 0\n' > "$CLEANUP_TARGET"
+    chmod 0755 "$CLEANUP_TARGET"
+    chmod 0500 "$cleanup_dir"
+    set +e
+    YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    guard_status=$?
+    set -e
+    chmod 0700 "$cleanup_dir"
+    [[ "$guard_status" -eq 0 || "$guard_status" -eq 1 ]] || \
+        fail "Guard returned unexpected stale-helper status ($guard_status)"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stale cleanup helper blocks HOME takeover"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "Guard rejects stale cleanup helper when refresh fails"
 }
 
 test_repair_preserves_and_enables() {
@@ -2144,6 +2245,28 @@ test_uninstall_rejects_trailing_blank_home_query() {
     pass "uninstall rejects trailing-blank HOME query"
 }
 
+test_uninstall_rejects_invalid_android_home_markers() {
+    local holder
+
+    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%s\n' "$holder" > "$TEST_ROOT/state/home_previous_holder"
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "invalid Android HOME marker cleanup unexpectedly succeeded ($holder)"
+        fi
+        assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "invalid uninstall HOME marker preserves holder ($holder)"
+        [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+            fail "invalid uninstall HOME marker was removed ($holder)"
+        [[ -x "$CLEANUP_TARGET" ]] || fail "invalid uninstall HOME marker lost helper ($holder)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+    done
+    pass "uninstall rejects invalid Android HOME markers"
+}
+
 test_uninstall_preserves_choice_made_during_previous_home_validation() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
@@ -2294,6 +2417,7 @@ case "$MODE" in
         ;;
     --status-only)
         test_status_reports_healthy_state
+        test_status_reports_stale_cleanup_helper_as_invalid
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
         test_status_reports_unknown_home_holder
@@ -2318,6 +2442,8 @@ case "$MODE" in
         test_home_role_query_failure_is_safe
         test_home_role_malformed_output_is_safe
         test_home_role_multiple_holders_are_safe
+        test_home_role_rejects_invalid_android_package_names
+        test_home_marker_rejects_invalid_android_package_names
         test_home_role_invalid_marker_is_safe
         test_home_role_marker_write_failure_is_safe
         test_home_role_set_failure_retains_marker
@@ -2329,7 +2455,9 @@ case "$MODE" in
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_marker_sync_is_bounded
+        test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
+        test_guard_rejects_stale_cleanup_helper_when_refresh_fails
         test_repair_confirms_binding_after_confirmed_unbound
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
@@ -2380,6 +2508,7 @@ case "$MODE" in
         test_uninstall_retains_nonregular_doze_markers
         test_uninstall_rejects_trailing_blank_home_marker
         test_uninstall_rejects_trailing_blank_home_query
+        test_uninstall_rejects_invalid_android_home_markers
         test_uninstall_preserves_choice_made_during_previous_home_validation
         test_uninstall_retries_failed_or_unconfirmed_home_removal
         test_uninstall_bounds_stalled_home_removal
@@ -2388,6 +2517,7 @@ case "$MODE" in
     all)
         test_merge_cases
         test_status_reports_healthy_state
+        test_status_reports_stale_cleanup_helper_as_invalid
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
         test_status_reports_unknown_home_holder
@@ -2407,6 +2537,8 @@ case "$MODE" in
         test_home_role_query_failure_is_safe
         test_home_role_malformed_output_is_safe
         test_home_role_multiple_holders_are_safe
+        test_home_role_rejects_invalid_android_package_names
+        test_home_marker_rejects_invalid_android_package_names
         test_home_role_invalid_marker_is_safe
         test_home_role_marker_write_failure_is_safe
         test_home_role_set_failure_retains_marker
@@ -2418,7 +2550,9 @@ case "$MODE" in
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_marker_sync_is_bounded
+        test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
+        test_guard_rejects_stale_cleanup_helper_when_refresh_fails
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_repair_confirms_binding_after_crash
@@ -2484,6 +2618,7 @@ case "$MODE" in
         test_uninstall_retains_nonregular_doze_markers
         test_uninstall_rejects_trailing_blank_home_marker
         test_uninstall_rejects_trailing_blank_home_query
+        test_uninstall_rejects_invalid_android_home_markers
         test_uninstall_preserves_choice_made_during_previous_home_validation
         test_uninstall_retries_failed_or_unconfirmed_home_removal
         test_uninstall_bounds_stalled_home_removal

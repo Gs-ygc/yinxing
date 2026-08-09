@@ -4,8 +4,9 @@ MODDIR=${0%/*}
 PATH="/data/adb/ksu/bin:/system/bin:/system/xbin:${PATH:-}"
 export PATH
 
+CLEANUP_SOURCE="$MODDIR/bin/uninstall-cleanup.sh"
 . "$MODDIR/bin/common.sh"
-install_cleanup_helper "$MODDIR/bin/uninstall-cleanup.sh" || true
+install_cleanup_helper "$CLEANUP_SOURCE" || true
 
 LOCK_RETRY_SECONDS=${YINXING_GUARD_LOCK_RETRY_SECONDS:-5}
 case "$LOCK_RETRY_SECONDS" in

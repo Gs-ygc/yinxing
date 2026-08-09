@@ -1,8 +1,8 @@
 #!/system/bin/sh
 
 MODDIR=${0%/*}
-. "$MODDIR/common.sh"
 CLEANUP_SOURCE="$MODDIR/uninstall-cleanup.sh"
+. "$MODDIR/common.sh"
 
 BOOT_WAIT_SECONDS=${YINXING_GUARD_BOOT_WAIT_SECONDS:-5}
 BOOT_WAIT_MAX_CYCLES=${YINXING_GUARD_BOOT_WAIT_MAX_CYCLES:-0}
@@ -191,8 +191,9 @@ run_health_cycle() {
         log_event "guard_module_inactive"
         return 2
     fi
-    if ! cleanup_helper_ready; then
-        if ! install_cleanup_helper "$CLEANUP_SOURCE" || ! cleanup_helper_ready; then
+    if ! cleanup_helper_ready "$CLEANUP_SOURCE"; then
+        if ! install_cleanup_helper "$CLEANUP_SOURCE" || \
+            ! cleanup_helper_ready "$CLEANUP_SOURCE"; then
             record_repair_result failed || true
             log_event "uninstall_cleanup_unavailable"
             return 1

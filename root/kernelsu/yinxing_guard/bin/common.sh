@@ -300,12 +300,38 @@ record_repair_result() {
     return 0
 }
 
+valid_android_package_name() {
+    package_value="$1"
+    package_has_separator=0
+    [ -n "$package_value" ] || return 1
+
+    while :; do
+        case "$package_value" in
+            *.*)
+                package_segment=${package_value%%.*}
+                package_value=${package_value#*.}
+                package_has_separator=1
+                [ -n "$package_value" ] || return 1
+                ;;
+            *)
+                package_segment=$package_value
+                package_value=""
+                ;;
+        esac
+        case "$package_segment" in
+            [A-Za-z]*) ;;
+            *) return 1 ;;
+        esac
+        case "$package_segment" in
+            *[!A-Za-z0-9_]*) return 1 ;;
+        esac
+        [ -n "$package_value" ] || break
+    done
+    [ "$package_has_separator" -eq 1 ]
+}
+
 valid_home_holder() {
-    case "$1" in
-        ''|none|.*|*.|*..*|*[!A-Za-z0-9_.]*) return 1 ;;
-        *.*) [ "$1" != "$PACKAGE_NAME" ] ;;
-        *) return 1 ;;
-    esac
+    [ "$1" != "$PACKAGE_NAME" ] && valid_android_package_name "$1"
 }
 
 read_home_role_holder() {
@@ -334,13 +360,8 @@ read_home_role_holder() {
             [ -n "$home_output" ] || return 1
             ;;
     esac
-    case "$home_output" in
-        *[!A-Za-z0-9_.]*|.*|*.|*..*) return 1 ;;
-    esac
-    case "$home_output" in
-        *.*) printf '%s\n' "$home_output" ;;
-        *) return 1 ;;
-    esac
+    valid_android_package_name "$home_output" || return 1
+    printf '%s\n' "$home_output"
 }
 
 read_home_previous_holder() {
@@ -371,9 +392,14 @@ read_home_previous_holder() {
 }
 
 cleanup_helper_ready() {
-    [ ! -L "$CLEANUP_TARGET" ] && \
+    helper_source="${1:-${CLEANUP_SOURCE:-}}"
+    [ -n "$helper_source" ] && \
+        [ ! -L "$helper_source" ] && \
+        [ -f "$helper_source" ] && \
+        [ ! -L "$CLEANUP_TARGET" ] && \
         [ -f "$CLEANUP_TARGET" ] && \
-        [ -x "$CLEANUP_TARGET" ]
+        [ -x "$CLEANUP_TARGET" ] && \
+        cmp -s "$helper_source" "$CLEANUP_TARGET"
 }
 
 home_role_state() {
@@ -445,7 +471,7 @@ repair_home_role() {
     fi
 
     [ "$current_home_holder" = "$PACKAGE_NAME" ] && return 0
-    if ! cleanup_helper_ready; then
+    if ! cleanup_helper_ready "${CLEANUP_SOURCE:-}"; then
         log_event "home_role_cleanup_helper_unavailable"
         return 1
     fi
@@ -502,7 +528,7 @@ install_cleanup_helper() {
         log_event "uninstall_cleanup_schedule_failed"
         return 1
     fi
-    cleanup_helper_ready
+    cleanup_helper_ready "$source_path"
 }
 
 repair_accessibility() {
@@ -594,7 +620,7 @@ repair_keepalive() {
     if [ "$doze_status" -eq 1 ]; then
         if [ "$state_ready" -ne 1 ]; then
             log_event "doze_whitelist_skipped_no_state"
-        elif [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
+        elif ! cleanup_helper_ready "${CLEANUP_SOURCE:-}"; then
             log_event "doze_whitelist_skipped_no_cleanup"
         elif run_guard_command cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
             marker_tmp="$STATE_DIR/doze_added_by_module.tmp.$$"

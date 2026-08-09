@@ -88,12 +88,38 @@ cleanup_runtime_state() {
     rmdir "$STATE_DIR" 2>/dev/null || true
 }
 
+valid_android_package_name() {
+    package_value="$1"
+    package_has_separator=0
+    [ -n "$package_value" ] || return 1
+
+    while :; do
+        case "$package_value" in
+            *.*)
+                package_segment=${package_value%%.*}
+                package_value=${package_value#*.}
+                package_has_separator=1
+                [ -n "$package_value" ] || return 1
+                ;;
+            *)
+                package_segment=$package_value
+                package_value=""
+                ;;
+        esac
+        case "$package_segment" in
+            [A-Za-z]*) ;;
+            *) return 1 ;;
+        esac
+        case "$package_segment" in
+            *[!A-Za-z0-9_]*) return 1 ;;
+        esac
+        [ -n "$package_value" ] || break
+    done
+    [ "$package_has_separator" -eq 1 ]
+}
+
 valid_home_holder() {
-    case "$1" in
-        ''|none|.*|*.|*..*|*[!A-Za-z0-9_.]*) return 1 ;;
-        *.*) [ "$1" != "$PACKAGE_NAME" ] ;;
-        *) return 1 ;;
-    esac
+    [ "$1" != "$PACKAGE_NAME" ] && valid_android_package_name "$1"
 }
 
 read_home_role_holder() {
@@ -122,13 +148,8 @@ read_home_role_holder() {
             [ -n "$home_output" ] || return 1
             ;;
     esac
-    case "$home_output" in
-        *[!A-Za-z0-9_.]*|.*|*.|*..*) return 1 ;;
-    esac
-    case "$home_output" in
-        *.*) printf '%s\n' "$home_output" ;;
-        *) return 1 ;;
-    esac
+    valid_android_package_name "$home_output" || return 1
+    printf '%s\n' "$home_output"
 }
 
 cleanup_home_role() {
