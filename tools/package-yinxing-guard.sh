@@ -34,7 +34,7 @@ esac
 OUTPUT_DIR="$(dirname "$OUTPUT_ABS")"
 mkdir -p "$OUTPUT_DIR"
 
-for required in module.prop skip_mount service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh; do
+for required in module.prop skip_mount service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
     [ -f "$MODULE_DIR/$required" ] || die "required module file is missing: $required"
 done
 
@@ -68,7 +68,8 @@ chmod 0755 \
     "$STAGING/bin/common.sh" \
     "$STAGING/bin/guard.sh" \
     "$STAGING/bin/status.sh" \
-    "$STAGING/bin/uninstall-cleanup.sh"
+    "$STAGING/bin/uninstall-cleanup.sh" \
+    "$STAGING/bin/kiosk-home.sh"
 
 find "$STAGING" -exec touch -t 198001010000 {} +
 
@@ -84,7 +85,8 @@ find "$STAGING" -exec touch -t 198001010000 {} +
         bin/common.sh \
         bin/guard.sh \
         bin/status.sh \
-        bin/uninstall-cleanup.sh
+        bin/uninstall-cleanup.sh \
+        bin/kiosk-home.sh
 )
 
 unzip -t "$OUTPUT_TMP" >/dev/null || die "created ZIP failed integrity check"

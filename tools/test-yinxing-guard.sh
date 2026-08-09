@@ -521,6 +521,32 @@ test_home_launch_is_fixed() {
     pass "home launch is fixed"
 }
 
+test_kiosk_home_command_requires_active_module() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/modules/yinxing_guard"
+    run_module_script "$MODULE_ROOT/bin/kiosk-home.sh" || fail "active kiosk home command should succeed"
+    [[ -e "$TEST_ROOT/home_launched" ]] || fail "active kiosk home command did not launch HOME"
+    assert_equals "1" "$(grep -c '^am start --user 0 -n com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS" || true)" \
+        "kiosk home command should launch the fixed HOME component once"
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/modules/yinxing_guard"
+    touch "$TEST_ROOT/modules/yinxing_guard/disable"
+    if run_module_script "$MODULE_ROOT/bin/kiosk-home.sh"; then
+        fail "disabled module must reject kiosk home command"
+    fi
+    [[ ! -e "$TEST_ROOT/home_launched" ]] || fail "disabled module launched HOME"
+    assert_not_contains "$CALLS" "am start"
+
+    reset_fixture
+    if run_module_script "$MODULE_ROOT/bin/kiosk-home.sh"; then
+        fail "missing module must reject kiosk home command"
+    fi
+    [[ ! -e "$TEST_ROOT/home_launched" ]] || fail "missing module launched HOME"
+    assert_not_contains "$CALLS" "am start"
+    pass "kiosk home command requires active module"
+}
+
 test_guard_runs_initial_repair_and_one_health_cycle() {
     reset_fixture
     YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
@@ -1056,15 +1082,16 @@ test_module_package() {
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/guard.sh' >/dev/null
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/uninstall-cleanup.sh' >/dev/null
     unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/status.sh' >/dev/null
+    unzip -Z1 "$TEST_ROOT/module.zip" | grep -Fx 'bin/kiosk-home.sh' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
-    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=8'
+    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=9'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
-    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.8'
-    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=8'
-    for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh; do
+    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.9'
+    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=9'
+    for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"
     done
@@ -1150,6 +1177,7 @@ case "$MODE" in
         test_doze_query_failure_is_safe
         test_doze_add_claims_ownership
         test_home_launch_is_fixed
+        test_kiosk_home_command_requires_active_module
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
