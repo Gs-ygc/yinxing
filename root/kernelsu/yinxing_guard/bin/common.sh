@@ -267,14 +267,22 @@ parse_accessibility_transaction_state() {
         *'|'*) return 1 ;;
     esac
     case "$accessibility_original_enabled:$accessibility_temporary_enabled" in
-        0:0|0:1|1:0|1:1) ;;
+        0:1|1:1) ;;
         *) return 1 ;;
     esac
     valid_accessibility_services_snapshot "$accessibility_original_services" || \
         return 1
     valid_accessibility_services_snapshot "$accessibility_primary_services" || \
         return 1
-    valid_accessibility_services_snapshot "$accessibility_alternate_services"
+    valid_accessibility_services_snapshot "$accessibility_alternate_services" || \
+        return 1
+    expected_primary_services="$(merge_accessibility_services \
+        "$accessibility_original_services" "$ACCESSIBILITY_COMPONENT")"
+    [ "$expected_primary_services" = "$accessibility_primary_services" ] || \
+        return 1
+    expected_alternate_services="$(remove_accessibility_service \
+        "$accessibility_primary_services" "$ACCESSIBILITY_COMPONENT")"
+    [ "$expected_alternate_services" = "$accessibility_alternate_services" ]
 }
 
 read_accessibility_transaction() {
@@ -603,6 +611,50 @@ rebind_accessibility_service() {
             log_event "accessibility_service_rebind_compensation_failed"
         return 1
     fi
+    if ! pre_restore_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled" || \
+            log_event "accessibility_service_rebind_compensation_failed"
+        log_event "accessibility_service_rebind_pre_restore_read_failed"
+        return 1
+    fi
+    case "$pre_restore_services" in
+        null|NULL) pre_restore_services="" ;;
+    esac
+    module_is_active || {
+        restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled" || \
+            log_event "accessibility_service_rebind_compensation_failed"
+        return 1
+    }
+    if ! confirmed_pre_restore_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled" || \
+            log_event "accessibility_service_rebind_compensation_failed"
+        log_event "accessibility_service_rebind_pre_restore_confirm_failed"
+        return 1
+    fi
+    case "$confirmed_pre_restore_services" in
+        null|NULL) confirmed_pre_restore_services="" ;;
+    esac
+    if [ "$pre_restore_services" != "$without" ] || \
+        [ "$confirmed_pre_restore_services" != "$without" ]; then
+        restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled" || \
+            log_event "accessibility_service_rebind_compensation_failed"
+        log_event "accessibility_service_rebind_preserved_new_choice"
+        return 1
+    fi
+    module_is_active || {
+        restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled" || \
+            log_event "accessibility_service_rebind_compensation_failed"
+        return 1
+    }
     if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
         enabled_accessibility_services "$merged" >/dev/null 2>&1; then
         if ! restore_accessibility_after_interrupted_rebind "$without" "$current" \

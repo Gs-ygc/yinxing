@@ -1234,6 +1234,38 @@ EOF
     pass "rebind preserves caregiver change after module deactivation"
 }
 
+test_rebind_preserves_caregiver_change_while_module_remains_active() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'caregiver.reader/service\n' > \
+        "$TEST_ROOT/caregiver_services_during_rebind_remove"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    if YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=1 repair_state; then
+        fail "rebind overwrote a caregiver change while the module remained active"
+    fi
+    assert_equals "caregiver.reader/service" "$(tr -d '\n' < "$SERVICES")" \
+        "active rebind preserves newer caregiver services"
+    assert_equals "1" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "active rebind preserves the original global switch"
+    assert_equals "1" \
+        "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "active rebind only performs the temporary service removal"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "active caregiver preservation retained transaction evidence"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    pass "rebind preserves caregiver change while module remains active"
+}
+
 test_rebind_stops_after_module_deactivates_during_restore() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
@@ -2770,19 +2802,26 @@ test_uninstall_recovers_global_only_accessibility_transaction() {
 }
 
 test_uninstall_retains_malformed_accessibility_transaction() {
-    reset_fixture
-    mkdir -p "$TEST_ROOT/state"
-    printf 'pending|0|1|original|primary|alternate|extra\n' > \
-        "$TEST_ROOT/state/accessibility_transaction"
-    run_module_script "$MODULE_ROOT/uninstall.sh"
-    if run_module_script "$CLEANUP_TARGET"; then
-        fail "malformed accessibility transaction unexpectedly cleaned"
-    fi
-    [[ -f "$TEST_ROOT/state/accessibility_transaction" ]] || \
-        fail "malformed accessibility transaction lost evidence"
-    [[ -x "$CLEANUP_TARGET" ]] || \
-        fail "malformed accessibility transaction lost helper"
-    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    local journal marker="$TEST_ROOT/state/accessibility_transaction"
+
+    for journal in \
+        'pending|0|1|original|primary|alternate|extra' \
+        "pending|0|0|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|talkback:other" \
+        'pending|0|1|talkback:other|caregiver.reader/service|talkback:other' \
+        "pending|0|1|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|caregiver.reader/service"; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%s\n' "$journal" > "$marker"
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "malformed accessibility transaction unexpectedly cleaned"
+        fi
+        [[ -f "$marker" ]] || \
+            fail "malformed accessibility transaction lost evidence"
+        [[ -x "$CLEANUP_TARGET" ]] || \
+            fail "malformed accessibility transaction lost helper"
+        assert_not_contains "$CALLS" "settings --user 0 put secure"
+    done
     pass "uninstall retains malformed accessibility transaction"
 }
 
@@ -3256,6 +3295,45 @@ test_uninstall_completes_home_when_doze_cleanup_needs_retry() {
     pass "uninstall completes HOME while Doze cleanup retries"
 }
 
+test_uninstall_retains_nonregular_accessibility_transactions() {
+    local shape marker="$TEST_ROOT/state/accessibility_transaction"
+
+    for shape in directory symlink dangling; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        case "$shape" in
+            directory)
+                mkdir "$marker"
+                ;;
+            symlink)
+                printf 'pending|0|1||%s|\n' "$ACCESSIBILITY_COMPONENT" > \
+                    "$TEST_ROOT/external-accessibility-transaction"
+                ln -s "$TEST_ROOT/external-accessibility-transaction" "$marker"
+                ;;
+            dangling)
+                ln -s "$TEST_ROOT/missing-accessibility-transaction" "$marker"
+                ;;
+        esac
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        [[ -x "$CLEANUP_TARGET" ]] || \
+            fail "nonregular accessibility transaction lost helper ($shape)"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "nonregular accessibility transaction unexpectedly cleaned ($shape)"
+        fi
+        if [[ "$shape" == "directory" ]]; then
+            [[ -d "$marker" ]] || \
+                fail "accessibility transaction directory was removed"
+        else
+            [[ -L "$marker" ]] || \
+                fail "accessibility transaction symlink was removed ($shape)"
+        fi
+        [[ -x "$CLEANUP_TARGET" ]] || \
+            fail "nonregular accessibility transaction removed helper ($shape)"
+        assert_not_contains "$CALLS" "settings --user 0 put secure"
+    done
+    pass "uninstall retains nonregular accessibility transactions"
+}
+
 test_uninstall_retains_nonregular_home_markers() {
     local shape marker="$TEST_ROOT/state/home_previous_holder"
 
@@ -3575,6 +3653,7 @@ case "$MODE" in
         test_accessibility_initial_writes_roll_back_after_module_deactivation
         test_accessibility_failed_compensation_is_recovered_on_uninstall
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
+        test_rebind_preserves_caregiver_change_while_module_remains_active
         test_rebind_restores_original_enabled_state_after_interruption
         test_doze_same_boot_pending_absence_does_not_redispatch
         test_doze_visible_pending_state_promotes_to_owned
@@ -3597,6 +3676,7 @@ case "$MODE" in
         test_uninstall_waits_for_live_home_transaction
         test_uninstall_recovers_global_only_accessibility_transaction
         test_uninstall_retains_malformed_accessibility_transaction
+        test_uninstall_retains_nonregular_accessibility_transactions
         ;;
     --guard-only)
         test_home_role_owned_is_idempotent
@@ -3628,6 +3708,7 @@ case "$MODE" in
         test_accessibility_failed_compensation_is_recovered_on_uninstall
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
+        test_rebind_preserves_caregiver_change_while_module_remains_active
         test_rebind_stops_after_module_deactivates_during_restore
         test_rebind_restores_original_enabled_state_after_interruption
         test_action_marks_persistent_confirmed_unbound_failed
@@ -3700,6 +3781,7 @@ case "$MODE" in
         test_uninstall_waits_for_live_home_transaction
         test_uninstall_recovers_global_only_accessibility_transaction
         test_uninstall_retains_malformed_accessibility_transaction
+        test_uninstall_retains_nonregular_accessibility_transactions
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none
@@ -3769,6 +3851,7 @@ case "$MODE" in
         test_repair_confirms_binding_after_crash
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
+        test_rebind_preserves_caregiver_change_while_module_remains_active
         test_rebind_stops_after_module_deactivates_during_restore
         test_rebind_restores_original_enabled_state_after_interruption
         test_action_marks_persistent_accessibility_crash_failed
@@ -3853,6 +3936,7 @@ case "$MODE" in
         test_uninstall_waits_for_live_home_transaction
         test_uninstall_recovers_global_only_accessibility_transaction
         test_uninstall_retains_malformed_accessibility_transaction
+        test_uninstall_retains_nonregular_accessibility_transactions
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none

@@ -1,6 +1,7 @@
 #!/system/bin/sh
 
 PACKAGE_NAME="com.yinxing.launcher"
+ACCESSIBILITY_COMPONENT="com.yinxing.launcher/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
 HOME_ROLE_NAME="android.app.role.HOME"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
@@ -138,6 +139,44 @@ valid_accessibility_services_snapshot() {
     return 0
 }
 
+merge_accessibility_services() {
+    current_services="$1"
+    component="$2"
+    case "$current_services" in
+        null|NULL|"") current_services="" ;;
+        *[![:space:]]*) ;;
+        *) current_services="" ;;
+    esac
+    case ":$current_services:" in
+        *":$component:"*) printf '%s\n' "$current_services" ;;
+        "::") printf '%s\n' "$component" ;;
+        *) printf '%s:%s\n' "$current_services" "$component" ;;
+    esac
+}
+
+remove_accessibility_service() {
+    current_services="$1"
+    component="$2"
+    case "$current_services" in
+        null|NULL|"") current_services="" ;;
+    esac
+    printf '%s\n' "$current_services" | awk -v target="$component" -F: '
+        {
+            result = ""
+            for (i = 1; i <= NF; i++) {
+                if ($i == "" || $i == target) {
+                    continue
+                }
+                if (result != "") {
+                    result = result ":"
+                }
+                result = result $i
+            }
+            print result
+        }
+    '
+}
+
 parse_accessibility_transaction_state() {
     accessibility_transaction_state="$1"
     case "$accessibility_transaction_state" in
@@ -157,14 +196,22 @@ parse_accessibility_transaction_state() {
         *'|'*) return 1 ;;
     esac
     case "$accessibility_original_enabled:$accessibility_temporary_enabled" in
-        0:0|0:1|1:0|1:1) ;;
+        0:1|1:1) ;;
         *) return 1 ;;
     esac
     valid_accessibility_services_snapshot "$accessibility_original_services" || \
         return 1
     valid_accessibility_services_snapshot "$accessibility_primary_services" || \
         return 1
-    valid_accessibility_services_snapshot "$accessibility_alternate_services"
+    valid_accessibility_services_snapshot "$accessibility_alternate_services" || \
+        return 1
+    expected_primary_services="$(merge_accessibility_services \
+        "$accessibility_original_services" "$ACCESSIBILITY_COMPONENT")"
+    [ "$expected_primary_services" = "$accessibility_primary_services" ] || \
+        return 1
+    expected_alternate_services="$(remove_accessibility_service \
+        "$accessibility_primary_services" "$ACCESSIBILITY_COMPONENT")"
+    [ "$expected_alternate_services" = "$accessibility_alternate_services" ]
 }
 
 normalize_accessibility_enabled() {
