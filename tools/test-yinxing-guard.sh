@@ -10,6 +10,7 @@ CALLS="$TEST_ROOT/calls.log"
 SERVICES="$TEST_ROOT/accessibility_services"
 ACCESSIBILITY_ENABLED="$TEST_ROOT/accessibility_enabled"
 HOME_HOLDER="$TEST_ROOT/home_holder"
+HOME_RESOLVED_COMPONENT="$TEST_ROOT/home_resolved_component"
 CLEANUP_TARGET="$TEST_ROOT/boot-completed.d/yinxing-guard-uninstall-cleanup.sh"
 PACKAGE_NESTED_DIR="$MODULE_ROOT/.package-test-output"
 
@@ -47,7 +48,7 @@ mkdir -p "$FAKE_BIN"
 : > "$SERVICES"
 printf '0\n' > "$ACCESSIBILITY_ENABLED"
 printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
-export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER
+export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER HOME_RESOLVED_COMPONENT
 export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
@@ -184,7 +185,8 @@ write_fake cmd \
     'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
     'apply_late_home_set() { [[ -f "$TEST_ROOT/late_home_target" ]] || return 0; reads="$(cat "$TEST_ROOT/late_home_reads" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/late_home_reads"; if [[ "$reads" -ge 4 ]]; then cat "$TEST_ROOT/late_home_target" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/late_home_target"; fi; }' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then apply_late_home_set; [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
-    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; if [[ -e "$TEST_ROOT/pause_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then touch "$TEST_ROOT/home_role_set_entered"; for _ in $(seq 1 200); do [[ -e "$TEST_ROOT/allow_home_role_set" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_role_set" ]] || exit 89; fi; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "resolve-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_resolver_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_resolver_query" ]] && exit 1; if [[ -f "$TEST_ROOT/malformed_home_resolver_output" ]]; then cat "$TEST_ROOT/malformed_home_resolver_output"; exit 0; fi; if [[ -f "$TEST_ROOT/home_resolved_component" ]]; then cat "$TEST_ROOT/home_resolved_component"; exit 0; fi; holder="$(tr -d "\\n" < "$HOME_HOLDER" 2>/dev/null || true)"; if [[ -z "$holder" ]]; then printf "No activity found\\n"; elif [[ "$holder" == "com.yinxing.launcher" ]]; then printf "com.yinxing.launcher/.feature.home.MainActivity\\n"; else printf "%s/.Launcher\\n" "$holder"; fi; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; if [[ -e "$TEST_ROOT/pause_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then touch "$TEST_ROOT/home_role_set_entered"; for _ in $(seq 1 200); do [[ -e "$TEST_ROOT/allow_home_role_set" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_role_set" ]] || exit 89; fi; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; holder="${target%%/*}"; if [[ ! -e "$TEST_ROOT/ignore_home_role_set" ]]; then holder_tmp="$HOME_HOLDER.tmp.$$"; printf "%s\\n" "$holder" > "$holder_tmp" && mv -f "$holder_tmp" "$HOME_HOLDER"; fi; if [[ ! -e "$TEST_ROOT/ignore_home_resolver_set" ]]; then resolver_tmp="$TEST_ROOT/home_resolved_component.tmp.$$"; printf "%s\\n" "$target" > "$resolver_tmp" && mv -f "$resolver_tmp" "$TEST_ROOT/home_resolved_component"; fi; exit 0; fi' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
@@ -302,9 +304,11 @@ reset_fixture() {
         "$TEST_ROOT/fail_home_role_set" \
         "$TEST_ROOT/fail_home_role_restore" \
         "$TEST_ROOT/fail_home_role_remove" \
+        "$TEST_ROOT/fail_home_resolver_query" \
         "$TEST_ROOT/hang_home_role_query" \
         "$TEST_ROOT/hang_home_role_set" \
         "$TEST_ROOT/hang_home_role_remove" \
+        "$TEST_ROOT/hang_home_resolver_query" \
         "$TEST_ROOT/pause_home_role_set" \
         "$TEST_ROOT/home_role_set_entered" \
         "$TEST_ROOT/allow_home_role_set" \
@@ -313,6 +317,7 @@ reset_fixture() {
         "$TEST_ROOT/allow_home_marker_publish" \
         "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
+        "$TEST_ROOT/ignore_home_resolver_set" \
         "$TEST_ROOT/ignore_home_role_remove" \
         "$TEST_ROOT/fail_home_marker_sync" \
         "$TEST_ROOT/concurrent_home_marker_publish" \
@@ -333,6 +338,8 @@ reset_fixture() {
         "$TEST_ROOT/late_home_target" \
         "$TEST_ROOT/late_home_reads" \
         "$TEST_ROOT/malformed_home_role_output" \
+        "$TEST_ROOT/malformed_home_resolver_output" \
+        "$TEST_ROOT/home_resolved_component" \
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
         "$TEST_ROOT/switch_home_after_takeover_state_sync" \
@@ -381,6 +388,8 @@ prepare_healthy_status_fixture() {
     printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
     printf '1\n' > "$ACCESSIBILITY_ENABLED"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
     touch "$TEST_ROOT/doze_whitelisted"
 }
 
@@ -449,6 +458,27 @@ test_status_reports_unknown_home_holder() {
         run_module_script "$MODULE_ROOT/bin/status.sh")"
     assert_contains_text "$output" "home=unknown"
     pass "status reports unknown HOME holder"
+}
+
+test_status_reports_unknown_when_home_resolver_query_fails() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/fail_home_resolver_query"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=unknown"
+    pass "status reports unknown when HOME resolver query fails"
+}
+
+test_status_reports_unknown_when_home_resolver_output_is_malformed() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\ncom.oplus.launcher/.Launcher\n' > \
+        "$TEST_ROOT/malformed_home_resolver_output"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=unknown"
+    pass "status reports unknown when HOME resolver output is malformed"
 }
 
 test_status_reports_disabled_package_as_disabled() {
@@ -586,6 +616,107 @@ test_home_role_owned_is_idempotent() {
     assert_not_contains "$CALLS" "cmd package set-home-activity"
     [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "manual HOME ownership was claimed"
     pass "owned HOME role is idempotent"
+}
+
+test_home_resolver_target_is_owned() {
+    reset_fixture
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    assert_equals target "$(read_home_resolved_component)" "target resolver component"
+    assert_equals owned "$(home_role_state)" "target resolver state"
+}
+
+test_home_resolver_mismatch_is_degraded_and_repaired() {
+    reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.oplus.launcher/.Launcher\n' > "$TEST_ROOT/home_resolved_component"
+    repair_state || fail "known resolver mismatch should be repaired"
+    assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
+        "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" "resolver repair"
+    assert_equals owned "$(home_role_state)" "repaired resolver state"
+}
+
+test_home_resolver_unknown_is_safe() {
+    reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/fail_home_resolver_query"
+    if repair_state; then
+        fail "unknown resolver must not report repair success"
+    fi
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+}
+
+test_home_resolver_no_activity_found_is_empty() {
+    reset_fixture
+    : > "$HOME_HOLDER"
+    rm -f "$TEST_ROOT/home_resolved_component"
+    assert_equals none "$(read_home_resolved_component)" "empty resolver result"
+    repair_state || fail "No activity found should be repairable"
+    assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
+        "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" "empty resolver repair"
+    assert_equals owned "$(home_role_state)" "empty resolver state"
+}
+
+test_home_resolver_accepts_fully_qualified_target_class() {
+    reset_fixture
+    printf 'com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    assert_equals target "$(read_home_resolved_component)" \
+        "fully-qualified target resolver component"
+    assert_equals owned "$(home_role_state)" "fully-qualified target resolver state"
+}
+
+test_home_resolver_rejects_invalid_package() {
+    local component
+
+    for component in 'bad package/.Launcher' 'com.bad-name/.Launcher' '1.2/.Launcher'; do
+        reset_fixture
+        printf '%s\n' "$component" > "$TEST_ROOT/home_resolved_component"
+        assert_equals unknown "$(read_home_resolved_component)" \
+            "invalid resolver package ($component)"
+        if repair_state; then
+            fail "invalid resolver package unexpectedly reported repair success ($component)"
+        fi
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+    done
+    pass "HOME resolver rejects invalid packages"
+}
+
+test_home_resolver_rejects_multiple_lines_and_trailing_blank() {
+    local output
+
+    for output in \
+        $'com.yinxing.launcher/.feature.home.MainActivity\ncom.oplus.launcher/.Launcher\n' \
+        $'com.yinxing.launcher/.feature.home.MainActivity\n\n'; do
+        reset_fixture
+        printf '%s' "$output" > "$TEST_ROOT/malformed_home_resolver_output"
+        assert_equals unknown "$(read_home_resolved_component)" \
+            "malformed resolver evidence"
+        if repair_state; then
+            fail "malformed resolver evidence unexpectedly reported repair success"
+        fi
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+    done
+    pass "HOME resolver rejects multiple lines and trailing blank evidence"
+}
+
+test_home_resolver_bounds_stalled_query() {
+    local started_at elapsed output
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_home_resolver_query"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "stalled HOME resolver unexpectedly reported recovery success"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled HOME resolver exceeded bound (${elapsed}s)"
+    output="$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=unknown"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "HOME resolver query is bounded"
 }
 
 test_home_role_reconciles_other_holder() {
@@ -3655,6 +3786,8 @@ case "$MODE" in
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
         test_status_reports_unknown_home_holder
+        test_status_reports_unknown_when_home_resolver_query_fails
+        test_status_reports_unknown_when_home_resolver_output_is_malformed
         test_status_reports_disabled_package_as_disabled
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
@@ -3727,6 +3860,14 @@ case "$MODE" in
         test_home_role_bounds_stalled_set
         test_home_role_rejects_trailing_blank_query_output
         test_home_role_rejects_trailing_blank_marker
+        test_home_resolver_target_is_owned
+        test_home_resolver_mismatch_is_degraded_and_repaired
+        test_home_resolver_unknown_is_safe
+        test_home_resolver_no_activity_found_is_empty
+        test_home_resolver_accepts_fully_qualified_target_class
+        test_home_resolver_rejects_invalid_package
+        test_home_resolver_rejects_multiple_lines_and_trailing_blank
+        test_home_resolver_bounds_stalled_query
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
@@ -3841,6 +3982,8 @@ case "$MODE" in
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
         test_status_reports_unknown_home_holder
+        test_status_reports_unknown_when_home_resolver_query_fails
+        test_status_reports_unknown_when_home_resolver_output_is_malformed
         test_status_reports_disabled_package_as_disabled
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
@@ -3868,6 +4011,14 @@ case "$MODE" in
         test_home_role_bounds_stalled_set
         test_home_role_rejects_trailing_blank_query_output
         test_home_role_rejects_trailing_blank_marker
+        test_home_resolver_target_is_owned
+        test_home_resolver_mismatch_is_degraded_and_repaired
+        test_home_resolver_unknown_is_safe
+        test_home_resolver_no_activity_found_is_empty
+        test_home_resolver_accepts_fully_qualified_target_class
+        test_home_resolver_rejects_invalid_package
+        test_home_resolver_rejects_multiple_lines_and_trailing_blank
+        test_home_resolver_bounds_stalled_query
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
