@@ -8,8 +8,12 @@ LOG_TAG="YinxingGuard"
 MODULE_VERSION="1.10.0-root-preview.14"
 MARKER="$STATE_DIR/doze_added_by_module"
 HOME_MARKER="$STATE_DIR/home_previous_holder"
+HOME_STATE_MARKER="$STATE_DIR/home_takeover_state"
+HOME_TRANSACTION_LOCK_DIR="$STATE_DIR/home_transaction.lock"
+HOME_TRANSACTION_RECLAIM_DIR="$STATE_DIR/home_transaction.reclaim"
 SELF_PATH="$0"
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
+HOME_MARKER_SYNC_COMMAND="${YINXING_GUARD_HOME_MARKER_SYNC_COMMAND:-sync}"
 GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
 case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
     ''|*[!0-9]*) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
@@ -83,8 +87,10 @@ cleanup_runtime_state() {
         "$STATE_DIR/last_repair" \
         "$STATE_DIR/last_repair.tmp."* \
         "$STATE_DIR/doze_added_by_module.tmp."* \
-        "$STATE_DIR/home_previous_holder.tmp."*
-    rm -rf "$STATE_DIR/guard.lock"
+        "$STATE_DIR/home_previous_holder.tmp."* \
+        "$STATE_DIR/home_takeover_state.tmp."*
+    rm -rf "$STATE_DIR/guard.lock" "$HOME_TRANSACTION_LOCK_DIR" \
+        "$HOME_TRANSACTION_RECLAIM_DIR"
     rmdir "$STATE_DIR" 2>/dev/null || true
 }
 
@@ -92,6 +98,7 @@ valid_android_package_name() {
     package_value="$1"
     package_has_separator=0
     [ -n "$package_value" ] || return 1
+    [ "${#package_value}" -le 223 ] || return 1
 
     while :; do
         case "$package_value" in
@@ -118,8 +125,267 @@ valid_android_package_name() {
     [ "$package_has_separator" -eq 1 ]
 }
 
+valid_doze_marker_value() {
+    case "$1" in
+        added) return 0 ;;
+        pending\|*)
+            pending_boot_id=${1#pending|}
+            [ -n "$pending_boot_id" ] || return 1
+            case "$pending_boot_id" in
+                *[!A-Za-z0-9._-]*) return 1 ;;
+            esac
+            [ "${#pending_boot_id}" -le 128 ]
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+read_current_boot_id() {
+    boot_id_file="${YINXING_GUARD_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
+    boot_id="$(cat "$boot_id_file" 2>/dev/null || true)"
+    if [ -z "$boot_id" ]; then
+        boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
+    fi
+    if [ -z "$boot_id" ]; then
+        boot_id="$(run_guard_command getprop ro.runtime.firstboot 2>/dev/null || true)"
+    fi
+    boot_id="$(printf '%s' "$boot_id" | tr -c 'A-Za-z0-9._-' '_')"
+    [ -n "$boot_id" ] || boot_id=unknown
+    printf '%s\n' "$boot_id"
+}
+
+process_start_time() {
+    process_pid="$1"
+    process_proc_root="${YINXING_GUARD_PROC_ROOT:-/proc}"
+    process_stat="$(cat "$process_proc_root/$process_pid/stat" 2>/dev/null || true)"
+    [ -n "$process_stat" ] || return 1
+    process_start="$(printf '%s\n' "$process_stat" | \
+        awk '{ sub(/^.*\) /, ""); print $20; exit }')"
+    case "$process_start" in
+        ''|*[!0-9]*) return 1 ;;
+        *) printf '%s\n' "$process_start" ;;
+    esac
+}
+
+home_transaction_owner_is_active() {
+    home_lock_pid="$(cat "$HOME_TRANSACTION_LOCK_DIR/pid" 2>/dev/null || true)"
+    home_lock_boot="$(cat "$HOME_TRANSACTION_LOCK_DIR/boot_id" 2>/dev/null || true)"
+    case "$home_lock_pid" in
+        ''|*[!0-9]*) return 2 ;;
+    esac
+    kill -0 "$home_lock_pid" 2>/dev/null || return 1
+    [ -n "$home_lock_boot" ] || return 0
+    [ "$home_lock_boot" = "$(read_current_boot_id)" ] || return 1
+    home_expected_start="$(cat "$HOME_TRANSACTION_LOCK_DIR/start_time" \
+        2>/dev/null || true)"
+    case "$home_expected_start" in
+        '') return 0 ;;
+        *[!0-9]*) return 0 ;;
+    esac
+    home_actual_start="$(process_start_time "$home_lock_pid" 2>/dev/null || true)"
+    [ -n "$home_actual_start" ] || return 0
+    [ "$home_expected_start" = "$home_actual_start" ]
+}
+
+release_home_transaction_reclaim() {
+    if [ -f "$HOME_TRANSACTION_RECLAIM_DIR/pid" ] && \
+        [ "$(cat "$HOME_TRANSACTION_RECLAIM_DIR/pid" 2>/dev/null)" = "$$" ]; then
+        rm -f "$HOME_TRANSACTION_RECLAIM_DIR/pid"
+        rmdir "$HOME_TRANSACTION_RECLAIM_DIR" 2>/dev/null || true
+    fi
+}
+
+release_home_transaction_lock() {
+    home_unlock_status=0
+    if [ -f "$HOME_TRANSACTION_LOCK_DIR/pid" ] && \
+        [ "$(cat "$HOME_TRANSACTION_LOCK_DIR/pid" 2>/dev/null)" = "$$" ]; then
+        rm -f "$HOME_TRANSACTION_LOCK_DIR/pid" \
+            "$HOME_TRANSACTION_LOCK_DIR/boot_id" \
+            "$HOME_TRANSACTION_LOCK_DIR/start_time" || home_unlock_status=1
+        rmdir "$HOME_TRANSACTION_LOCK_DIR" 2>/dev/null || home_unlock_status=1
+    fi
+    return "$home_unlock_status"
+}
+
+acquire_home_transaction_lock() {
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    home_lock_attempt_limit="${YINXING_GUARD_HOME_LOCK_ATTEMPTS:-5}"
+    case "$home_lock_attempt_limit" in
+        ''|*[!0-9]*|0) home_lock_attempt_limit=5 ;;
+    esac
+    home_lock_attempt=0
+    while [ "$home_lock_attempt" -lt "$home_lock_attempt_limit" ]; do
+        if [ -L "$HOME_TRANSACTION_LOCK_DIR" ] || \
+            [ -L "$HOME_TRANSACTION_RECLAIM_DIR" ]; then
+            log_event "uninstall_home_lock_invalid"
+            return 1
+        fi
+        if [ -d "$HOME_TRANSACTION_RECLAIM_DIR" ]; then
+            home_reclaim_pid="$(cat "$HOME_TRANSACTION_RECLAIM_DIR/pid" \
+                2>/dev/null || true)"
+            case "$home_reclaim_pid" in
+                ''|*[!0-9]*) ;;
+                *)
+                    if kill -0 "$home_reclaim_pid" 2>/dev/null; then
+                        home_lock_attempt=$((home_lock_attempt + 1))
+                        sleep 1
+                        continue
+                    fi
+                    ;;
+            esac
+            rm -rf "$HOME_TRANSACTION_RECLAIM_DIR" 2>/dev/null || return 1
+        fi
+        if mkdir "$HOME_TRANSACTION_LOCK_DIR" 2>/dev/null; then
+            if [ -d "$HOME_TRANSACTION_RECLAIM_DIR" ]; then
+                rmdir "$HOME_TRANSACTION_LOCK_DIR" 2>/dev/null || true
+                home_lock_attempt=$((home_lock_attempt + 1))
+                sleep 1
+                continue
+            fi
+            home_lock_boot="$(read_current_boot_id)"
+            home_lock_start="$(process_start_time "$$" 2>/dev/null || true)"
+            if ! printf '%s\n' "$$" > "$HOME_TRANSACTION_LOCK_DIR/pid" \
+                    2>/dev/null || \
+                ! printf '%s\n' "$home_lock_boot" > \
+                    "$HOME_TRANSACTION_LOCK_DIR/boot_id" 2>/dev/null || \
+                { [ -n "$home_lock_start" ] && \
+                    ! printf '%s\n' "$home_lock_start" > \
+                        "$HOME_TRANSACTION_LOCK_DIR/start_time" 2>/dev/null; }; then
+                release_home_transaction_lock
+                rm -f "$HOME_TRANSACTION_LOCK_DIR/boot_id" \
+                    "$HOME_TRANSACTION_LOCK_DIR/start_time" 2>/dev/null || true
+                rmdir "$HOME_TRANSACTION_LOCK_DIR" 2>/dev/null || true
+                return 1
+            fi
+            return 0
+        fi
+        [ -d "$HOME_TRANSACTION_LOCK_DIR" ] || return 1
+        home_transaction_owner_is_active
+        home_owner_status=$?
+        case "$home_owner_status" in
+            0)
+                log_event "uninstall_home_lock_busy"
+                return 1
+                ;;
+            2)
+                if [ "$home_lock_attempt" -lt $((home_lock_attempt_limit - 1)) ]; then
+                    home_lock_attempt=$((home_lock_attempt + 1))
+                    sleep 1
+                    continue
+                fi
+                ;;
+        esac
+        if mkdir "$HOME_TRANSACTION_RECLAIM_DIR" 2>/dev/null; then
+            if ! printf '%s\n' "$$" > "$HOME_TRANSACTION_RECLAIM_DIR/pid" \
+                    2>/dev/null; then
+                release_home_transaction_reclaim
+                return 1
+            fi
+            home_transaction_owner_is_active
+            home_checked_status=$?
+            case "$home_checked_status" in
+                0)
+                    release_home_transaction_reclaim
+                    log_event "uninstall_home_lock_busy"
+                    return 1
+                    ;;
+                2)
+                    sleep 1
+                    home_transaction_owner_is_active
+                    home_checked_status=$?
+                    if [ "$home_checked_status" -eq 0 ]; then
+                        release_home_transaction_reclaim
+                        return 1
+                    fi
+                    ;;
+            esac
+            rm -rf "$HOME_TRANSACTION_LOCK_DIR" 2>/dev/null || {
+                release_home_transaction_reclaim
+                return 1
+            }
+            release_home_transaction_reclaim
+            home_lock_attempt=$((home_lock_attempt + 1))
+            continue
+        fi
+        home_lock_attempt=$((home_lock_attempt + 1))
+        sleep 1
+    done
+    return 1
+}
+
 valid_home_holder() {
     [ "$1" != "$PACKAGE_NAME" ] && valid_android_package_name "$1"
+}
+
+valid_home_takeover_state() {
+    case "$1" in
+        owned|released) return 0 ;;
+        pending\|*\|*)
+            pending_remainder=${1#pending|}
+            pending_boot_id=${pending_remainder%%|*}
+            pending_holder=${pending_remainder#*|}
+            [ -n "$pending_boot_id" ] || return 1
+            case "$pending_boot_id" in
+                *[!A-Za-z0-9._-]*) return 1 ;;
+            esac
+            [ "${#pending_boot_id}" -le 128 ] || return 1
+            [ "$pending_holder" = none ] || valid_home_holder "$pending_holder"
+            ;;
+        *) return 1 ;;
+    esac
+}
+
+write_home_takeover_state() {
+    takeover_state="$1"
+    valid_home_takeover_state "$takeover_state" || return 1
+    mkdir -p "$STATE_DIR" 2>/dev/null || return 1
+    if path_exists "$HOME_STATE_MARKER" && \
+        { [ -L "$HOME_STATE_MARKER" ] || [ ! -f "$HOME_STATE_MARKER" ]; }; then
+        return 1
+    fi
+    state_tmp="$HOME_STATE_MARKER.tmp.$$"
+    rm -f "$state_tmp" 2>/dev/null || true
+    if ! { printf '%s\n' "$takeover_state" > "$state_tmp"; } 2>/dev/null || \
+        ! chmod 0600 "$state_tmp" 2>/dev/null || \
+        ! mv -f "$state_tmp" "$HOME_STATE_MARKER" 2>/dev/null; then
+        rm -f "$state_tmp" 2>/dev/null || true
+        return 1
+    fi
+    if ! published_state="$(read_marker_line "$HOME_STATE_MARKER")" || \
+        [ "$published_state" != "$takeover_state" ]; then
+        return 1
+    fi
+    run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f \
+        "$HOME_STATE_MARKER" "$STATE_DIR" >/dev/null 2>&1 || return 1
+    synced_state="$(read_marker_line "$HOME_STATE_MARKER")" || return 1
+    [ "$synced_state" = "$takeover_state" ]
+}
+
+clear_home_evidence() {
+    if path_exists "$HOME_MARKER"; then
+        marker_holder="$(read_marker_line "$HOME_MARKER")" || return 1
+        [ "$marker_holder" = none ] || valid_home_holder "$marker_holder" || return 1
+    fi
+    if path_exists "$HOME_STATE_MARKER"; then
+        marker_state="$(read_marker_line "$HOME_STATE_MARKER")" || return 1
+        [ "$marker_state" = released ] || return 1
+    fi
+    if path_exists "$HOME_MARKER"; then
+        rm -f "$HOME_MARKER" 2>/dev/null || return 1
+        run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f "$STATE_DIR" \
+            >/dev/null 2>&1 || return 1
+    fi
+    if path_exists "$HOME_STATE_MARKER"; then
+        rm -f "$HOME_STATE_MARKER" 2>/dev/null || return 1
+        run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f "$STATE_DIR" \
+            >/dev/null 2>&1 || return 1
+    fi
+    return 0
+}
+
+release_home_evidence() {
+    write_home_takeover_state released || return 1
+    clear_home_evidence
 }
 
 read_home_role_holder() {
@@ -152,25 +418,81 @@ read_home_role_holder() {
     printf '%s\n' "$home_output"
 }
 
-cleanup_home_role() {
-    path_exists "$HOME_MARKER" || return 0
-    if ! previous_home="$(read_marker_line "$HOME_MARKER")"; then
-        log_event "uninstall_home_marker_invalid"
-        return 1
+cleanup_home_role_locked() {
+    if ! path_exists "$HOME_MARKER" && ! path_exists "$HOME_STATE_MARKER"; then
+        return 0
     fi
-    if [ "$previous_home" != "none" ] && ! valid_home_holder "$previous_home"; then
-        log_event "uninstall_home_marker_invalid"
-        return 1
+    original_home=""
+    takeover_state=""
+    if path_exists "$HOME_MARKER"; then
+        if ! original_home="$(read_marker_line "$HOME_MARKER")" || \
+            { [ "$original_home" != none ] && ! valid_home_holder "$original_home"; }; then
+            log_event "uninstall_home_marker_invalid"
+            return 1
+        fi
     fi
+    if path_exists "$HOME_STATE_MARKER"; then
+        if ! takeover_state="$(read_marker_line "$HOME_STATE_MARKER")" || \
+            ! valid_home_takeover_state "$takeover_state"; then
+            log_event "uninstall_home_state_marker_invalid"
+            return 1
+        fi
+    fi
+    case "$takeover_state" in
+        owned|pending\|*)
+            if [ -z "$original_home" ]; then
+                log_event "uninstall_home_state_without_marker"
+                return 1
+            fi
+            ;;
+        released)
+            clear_home_evidence || return 1
+            log_event "uninstall_home_released_state_cleared"
+            return 0
+            ;;
+        "")
+            release_home_evidence || return 1
+            log_event "uninstall_home_unarmed_marker_cleared"
+            return 0
+            ;;
+    esac
+    previous_home="$original_home"
+    pending_boot=""
+    case "$takeover_state" in
+        owned) ;;
+        pending\|*)
+            pending_remainder=${takeover_state#pending|}
+            pending_boot=${pending_remainder%%|*}
+            previous_home=${pending_remainder#*|}
+            ;;
+        *) return 1 ;;
+    esac
     if ! current_home="$(read_home_role_holder)"; then
         log_event "uninstall_home_query_failed"
         return 1
     fi
 
     if [ "$current_home" != "$PACKAGE_NAME" ]; then
-        rm -f "$HOME_MARKER" || return 1
-        log_event "uninstall_home_preserved_new_choice"
-        return 0
+        sleep 1
+        if ! confirmed_new_home="$(read_home_role_holder)"; then
+            log_event "uninstall_home_preserve_confirm_failed"
+            return 1
+        fi
+        if [ "$confirmed_new_home" != "$PACKAGE_NAME" ]; then
+            if [ "$confirmed_new_home" != "$current_home" ]; then
+                log_event "uninstall_home_preserve_unstable"
+                return 1
+            fi
+            if [ -n "$pending_boot" ] && \
+                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                log_event "uninstall_home_pending_same_boot"
+                return 1
+            fi
+            release_home_evidence || return 1
+            log_event "uninstall_home_preserved_new_choice"
+            return 0
+        fi
+        current_home="$confirmed_new_home"
     fi
 
     if [ "$previous_home" = "none" ]; then
@@ -179,7 +501,12 @@ cleanup_home_role() {
             return 1
         fi
         if [ "$current_before_remove" != "$PACKAGE_NAME" ]; then
-            rm -f "$HOME_MARKER" || return 1
+            if [ -n "$pending_boot" ] && \
+                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                log_event "uninstall_home_pending_same_boot"
+                return 1
+            fi
+            release_home_evidence || return 1
             log_event "uninstall_home_preserved_new_choice"
             return 0
         fi
@@ -204,7 +531,12 @@ cleanup_home_role() {
             return 1
         fi
         if [ "$current_before_restore" != "$PACKAGE_NAME" ]; then
-            rm -f "$HOME_MARKER" || return 1
+            if [ -n "$pending_boot" ] && \
+                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                log_event "uninstall_home_pending_same_boot"
+                return 1
+            fi
+            release_home_evidence || return 1
             log_event "uninstall_home_preserved_new_choice"
             return 0
         fi
@@ -220,24 +552,82 @@ cleanup_home_role() {
         fi
     fi
 
-    rm -f "$HOME_MARKER" || return 1
+    if [ -n "$pending_boot" ] && \
+        [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+        log_event "uninstall_home_pending_compensated_same_boot"
+        return 1
+    fi
+    release_home_evidence || return 1
     log_event "uninstall_home_cleanup_complete"
     return 0
+}
+
+cleanup_home_role() {
+    if ! path_exists "$HOME_MARKER" && ! path_exists "$HOME_STATE_MARKER"; then
+        return 0
+    fi
+    if ! acquire_home_transaction_lock; then
+        log_event "uninstall_home_lock_failed"
+        return 1
+    fi
+    if cleanup_home_role_locked; then
+        home_cleanup_status=0
+    else
+        home_cleanup_status=$?
+    fi
+    release_home_transaction_lock || home_cleanup_status=1
+    return "$home_cleanup_status"
 }
 
 cleanup_doze() {
     path_exists "$MARKER" || return 0
     if ! marker_value="$(read_marker_line "$MARKER")" || \
-        [ "$marker_value" != "added" ]; then
+        ! valid_doze_marker_value "$marker_value"; then
         log_event "uninstall_marker_invalid"
         return 1
     fi
-    if ! run_guard_command cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1; then
-        log_event "uninstall_doze_cleanup_deferred"
+    marker_kind="$marker_value"
+    marker_boot=""
+    case "$marker_value" in
+        pending\|*)
+            marker_kind=pending
+            marker_boot=${marker_value#pending|}
+            ;;
+    esac
+    if ! doze_output="$(run_guard_command cmd deviceidle whitelist 2>/dev/null)"; then
+        log_event "uninstall_doze_query_deferred"
+        return 1
+    fi
+    if printf '%s\n' "$doze_output" | tr ',[:space:]' '\n' | \
+        grep -Fx "$PACKAGE_NAME" >/dev/null 2>&1; then
+        run_guard_command cmd deviceidle whitelist "-$PACKAGE_NAME" \
+            >/dev/null 2>&1
+        doze_remove_status=$?
+        if ! doze_after_remove="$(run_guard_command cmd deviceidle whitelist \
+            2>/dev/null)"; then
+            log_event "uninstall_doze_remove_confirmation_deferred"
+            return 1
+        fi
+        if printf '%s\n' "$doze_after_remove" | tr ',[:space:]' '\n' | \
+            grep -Fx "$PACKAGE_NAME" >/dev/null 2>&1; then
+            log_event "uninstall_doze_remove_unconfirmed"
+            return 1
+        fi
+        [ "$doze_remove_status" -eq 0 ] || \
+            log_event "uninstall_doze_removed_after_error"
+    elif [ "$marker_kind" = pending ] && \
+        [ "$marker_boot" = "$(read_current_boot_id)" ]; then
+        log_event "uninstall_doze_pending_same_boot"
         return 1
     fi
     rm -f "$MARKER" || return 1
-    log_event "uninstall_doze_cleanup_complete"
+    run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f "$STATE_DIR" \
+        >/dev/null 2>&1 || return 1
+    if [ "$marker_kind" = pending ]; then
+        log_event "uninstall_doze_pending_resolved"
+    else
+        log_event "uninstall_doze_cleanup_complete"
+    fi
     return 0
 }
 
@@ -249,7 +639,8 @@ cleanup_failed=0
 cleanup_home_role || cleanup_failed=1
 cleanup_doze || cleanup_failed=1
 
-if [ "$cleanup_failed" -ne 0 ] || path_exists "$HOME_MARKER" || path_exists "$MARKER"; then
+if [ "$cleanup_failed" -ne 0 ] || path_exists "$HOME_MARKER" || \
+    path_exists "$HOME_STATE_MARKER" || path_exists "$MARKER"; then
     exit 1
 fi
 

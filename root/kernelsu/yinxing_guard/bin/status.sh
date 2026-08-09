@@ -146,7 +146,7 @@ doze_state() {
             printf 'unknown\n'
             ;;
         0)
-            if [ "$(cat "$STATE_DIR/doze_added_by_module" 2>/dev/null || true)" = "added" ]; then
+            if [ "$(read_doze_ownership_marker 2>/dev/null || true)" = "added" ]; then
                 printf 'owned\n'
             else
                 printf 'present\n'

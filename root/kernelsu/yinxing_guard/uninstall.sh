@@ -7,6 +7,7 @@ export PATH
 
 doze_marker="$STATE_DIR/doze_added_by_module"
 home_marker="$STATE_DIR/home_previous_holder"
+home_takeover_state_marker="$STATE_DIR/home_takeover_state"
 cleanup_source="$MODDIR/bin/uninstall-cleanup.sh"
 cleanup_target="$CLEANUP_TARGET"
 
@@ -20,10 +21,12 @@ rm -f \
     "$STATE_DIR/last_repair" \
     "$STATE_DIR/last_repair.tmp."* \
     "$STATE_DIR/doze_added_by_module.tmp."* \
-    "$STATE_DIR/home_previous_holder.tmp."*
+    "$STATE_DIR/home_previous_holder.tmp."* \
+    "$STATE_DIR/home_takeover_state.tmp."*
 rm -rf "$STATE_DIR/guard.lock"
 
-if path_exists "$doze_marker" || path_exists "$home_marker"; then
+if path_exists "$doze_marker" || path_exists "$home_marker" || \
+    path_exists "$home_takeover_state_marker"; then
     if ! install_cleanup_helper "$cleanup_source"; then
         log_event "uninstall_cleanup_schedule_failed"
         exit 1

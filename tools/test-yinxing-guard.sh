@@ -52,6 +52,7 @@ export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
 export YINXING_GUARD_MODULE_STATE_DIR="$MODULE_ROOT"
+export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id"
 export YINXING_GUARD_HOME_MARKER_LINK_COMMAND="yinxing-test-ln"
 export YINXING_GUARD_HOME_MARKER_SYNC_COMMAND="yinxing-test-sync"
 export PATH="$FAKE_BIN:$PATH"
@@ -138,7 +139,7 @@ write_fake settings \
     'shift_if_user() { if [[ "${1:-}" == "--user" ]]; then shift 2; fi; printf "%s" "$*"; }' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
     'if [[ "${args[0]:-}" == "get" ]]; then [[ -e "$TEST_ROOT/fail_settings_get" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_accessibility_read"; [[ -s "$SERVICES" ]] && cat "$SERVICES" || printf "null\\n"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then cat "$ACCESSIBILITY_ENABLED"; else exit 2; fi; exit 0; fi' \
-    'if [[ "${args[0]:-}" == "put" ]]; then [[ -e "$TEST_ROOT/fail_settings_put" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then printf "%s\\n" "${args[3]:-}" > "$SERVICES"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then printf "%s\\n" "${args[3]:-}" > "$ACCESSIBILITY_ENABLED"; fi; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "put" ]]; then [[ -e "$TEST_ROOT/fail_settings_put" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then previous="$(cat "$SERVICES" 2>/dev/null || true)"; value="${args[3]:-}"; printf "%s\\n" "$value" > "$SERVICES"; if [[ ":$previous:" == *":$ACCESSIBILITY_COMPONENT:"* && ":$value:" != *":$ACCESSIBILITY_COMPONENT:"* ]]; then touch "$TEST_ROOT/accessibility_rebind_removed"; if [[ -f "$TEST_ROOT/caregiver_services_during_rebind_remove" ]]; then cat "$TEST_ROOT/caregiver_services_during_rebind_remove" > "$SERVICES"; fi; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"; elif [[ -e "$TEST_ROOT/accessibility_rebind_removed" && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then rm -f "$TEST_ROOT/accessibility_rebind_removed"; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_restore"; fi; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then printf "%s\\n" "${args[3]:-}" > "$ACCESSIBILITY_ENABLED"; fi; exit 0; fi' \
     'exit 2'
 
 write_fake pm \
@@ -160,14 +161,14 @@ write_fake cmd \
     'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
     'apply_late_home_set() { [[ -f "$TEST_ROOT/late_home_target" ]] || return 0; reads="$(cat "$TEST_ROOT/late_home_reads" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/late_home_reads"; if [[ "$reads" -ge 4 ]]; then cat "$TEST_ROOT/late_home_target" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/late_home_target"; fi; }' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then apply_late_home_set; [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
-    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; if [[ -e "$TEST_ROOT/pause_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then touch "$TEST_ROOT/home_role_set_entered"; for _ in $(seq 1 200); do [[ -e "$TEST_ROOT/allow_home_role_set" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_role_set" ]] || exit 89; fi; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
-    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then deactivate_from "$TEST_ROOT/deactivate_during_doze_add"; printf added > "$TEST_ROOT/doze_whitelisted"; fi' \
-    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_remove" ]] && exit 1; rm -f "$TEST_ROOT/doze_whitelisted"; fi' \
+    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then deactivate_from "$TEST_ROOT/deactivate_during_doze_add"; printf added > "$TEST_ROOT/doze_whitelisted"; [[ -e "$TEST_ROOT/fail_deviceidle_add_after_apply" ]] && exit 1; fi' \
+    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_deviceidle_remove" ]] || rm -f "$TEST_ROOT/doze_whitelisted"; [[ -e "$TEST_ROOT/fail_deviceidle_remove_after_apply" ]] && exit 1; fi' \
     'exit 0'
 
 write_fake yinxing-test-sync \
@@ -181,6 +182,7 @@ write_fake mv \
     '#!/usr/bin/env bash' \
     'target="${!#}"' \
     'if [[ -e "$TEST_ROOT/concurrent_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then if mkdir "$TEST_ROOT/home_publish_slot_one" 2>/dev/null; then touch "$TEST_ROOT/home_publish_first_ready"; for _ in $(seq 1 500); do [[ -e "$TEST_ROOT/home_publish_second_ready" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/home_publish_second_ready" ]] || exit 90; /bin/sleep 0.1; else touch "$TEST_ROOT/home_publish_second_ready"; fi; fi' \
+    'if [[ -e "$TEST_ROOT/doze_marker_directory_race" && "$target" == "$TEST_ROOT/state/doze_added_by_module" ]]; then rm -f "$target"; mkdir -p "$target"; fi' \
     'exec /bin/mv "$@"'
 
 write_fake yinxing-test-ln \
@@ -276,6 +278,9 @@ reset_fixture() {
         "$TEST_ROOT/hang_home_role_query" \
         "$TEST_ROOT/hang_home_role_set" \
         "$TEST_ROOT/hang_home_role_remove" \
+        "$TEST_ROOT/pause_home_role_set" \
+        "$TEST_ROOT/home_role_set_entered" \
+        "$TEST_ROOT/allow_home_role_set" \
         "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
         "$TEST_ROOT/ignore_home_role_remove" \
@@ -288,6 +293,10 @@ reset_fixture() {
         "$TEST_ROOT/deactivate_during_first_appops" \
         "$TEST_ROOT/deactivate_during_package_path" \
         "$TEST_ROOT/deactivate_during_accessibility_read" \
+        "$TEST_ROOT/deactivate_during_accessibility_rebind_remove" \
+        "$TEST_ROOT/deactivate_during_accessibility_rebind_restore" \
+        "$TEST_ROOT/caregiver_services_during_rebind_remove" \
+        "$TEST_ROOT/accessibility_rebind_removed" \
         "$TEST_ROOT/late_home_role_set" \
         "$TEST_ROOT/late_home_target" \
         "$TEST_ROOT/late_home_reads" \
@@ -295,7 +304,12 @@ reset_fixture() {
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
         "$TEST_ROOT/fail_deviceidle_query" \
+        "$TEST_ROOT/fail_deviceidle_add_after_apply" \
         "$TEST_ROOT/fail_deviceidle_remove" \
+        "$TEST_ROOT/fail_deviceidle_remove_after_apply" \
+        "$TEST_ROOT/ignore_deviceidle_remove" \
+        "$TEST_ROOT/doze_marker_directory_race" \
+        "$TEST_ROOT/cleanup_boot_id" \
         "$TEST_ROOT/fail_home_once" \
         "$TEST_ROOT/hang_dumpsys" \
         "$TEST_ROOT/hang_pm_path" \
@@ -314,6 +328,7 @@ reset_fixture() {
         "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
         "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one"
+    printf 'fixture-boot\n' > "$TEST_ROOT/boot_id"
     printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
     install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install baseline cleanup helper"
 }
@@ -545,6 +560,8 @@ test_home_role_reconciles_other_holder() {
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" "prior HOME marker"
     assert_equals "600" "$(stat -c '%a' "$TEST_ROOT/state/home_previous_holder")" \
         "prior HOME marker mode"
+    assert_equals "owned" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "confirmed HOME takeover state"
     assert_equals "1" \
         "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS")" \
         "fixed HOME takeover count"
@@ -607,9 +624,10 @@ test_home_role_multiple_holders_are_safe() {
 }
 
 test_home_role_rejects_invalid_android_package_names() {
-    local holder
+    local holder long_holder
 
-    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+    long_holder="com.$(printf '%220s' '' | tr ' ' a)"
+    for holder in 1.2 _bad.home com.2launcher com.bad-name "$long_holder"; do
         reset_fixture
         printf '%s\n' "$holder" > "$TEST_ROOT/malformed_home_role_output"
         if run_module_script "$MODULE_ROOT/action.sh"; then
@@ -624,9 +642,10 @@ test_home_role_rejects_invalid_android_package_names() {
 }
 
 test_home_marker_rejects_invalid_android_package_names() {
-    local holder
+    local holder long_holder
 
-    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+    long_holder="com.$(printf '%220s' '' | tr ' ' a)"
+    for holder in 1.2 _bad.home com.2launcher com.bad-name "$long_holder"; do
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
         printf '%s\n' "$holder" > "$TEST_ROOT/state/home_previous_holder"
@@ -639,6 +658,23 @@ test_home_marker_rejects_invalid_android_package_names() {
         assert_not_contains "$CALLS" "am start"
     done
     pass "HOME rollback marker rejects invalid Android package names"
+}
+
+test_android_package_name_length_boundary() {
+    local max_holder oversized_holder
+
+    max_holder="com.$(printf '%219s' '' | tr ' ' a)"
+    oversized_holder="com.$(printf '%220s' '' | tr ' ' a)"
+    assert_equals "223" "${#max_holder}" "maximum Android package name fixture"
+    assert_equals "224" "${#oversized_holder}" "oversized Android package name fixture"
+    run_module_script -c '. "$1"; valid_android_package_name "$2"' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh" "$max_holder" || \
+        fail "223-byte Android package name was rejected"
+    if run_module_script -c '. "$1"; valid_android_package_name "$2"' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh" "$oversized_holder"; then
+        fail "224-byte Android package name was accepted"
+    fi
+    pass "Android package name length is bounded"
 }
 
 test_home_role_invalid_marker_is_safe() {
@@ -683,6 +719,9 @@ test_home_role_set_failure_retains_marker() {
     assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
         "failed HOME set retains prior holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "failed HOME set retains pending holder"
     assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
         "failed HOME set repair result"
     assert_not_contains "$CALLS" "am start"
@@ -700,6 +739,9 @@ test_home_role_unconfirmed_set_retains_marker() {
     assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
         "unconfirmed HOME set retains prior holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "unconfirmed HOME set retains pending holder"
     assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
         "unconfirmed HOME set repair result"
     assert_not_contains "$CALLS" "am start"
@@ -742,6 +784,9 @@ test_home_role_bounds_stalled_set() {
     assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
         "stalled HOME set retains prior holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "stalled HOME set retains pending holder"
     assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
         "stalled HOME set repair result"
     assert_not_contains "$CALLS" "am start"
@@ -845,7 +890,7 @@ test_home_marker_sync_is_bounded() {
 }
 
 test_home_marker_uses_default_busybox_applets() {
-    local busybox_path default_bin default_state
+    local busybox_path default_state
 
     busybox_path="$(command -v busybox 2>/dev/null || true)"
     [[ -n "$busybox_path" ]] || {
@@ -853,25 +898,21 @@ test_home_marker_uses_default_busybox_applets() {
         return
     }
     reset_fixture
-    default_bin="$TEST_ROOT/default-busybox-bin"
     default_state="$TEST_ROOT/default-busybox-state"
-    mkdir -p "$default_bin"
-    ln -s "$busybox_path" "$default_bin/ln"
-    ln -s "$busybox_path" "$default_bin/sync"
-    PATH="$default_bin:$PATH" \
+    PATH=/nonexistent \
+        ASH_STANDALONE=1 \
         YINXING_GUARD_BUSYBOX_BIN="$busybox_path" \
         YINXING_GUARD_STATE_DIR="$default_state" \
         YINXING_GUARD_HOME_MARKER_LINK_COMMAND=ln \
         YINXING_GUARD_HOME_MARKER_SYNC_COMMAND=sync \
-        busybox ash -c '. "$1"; record_home_previous_holder com.oplus.launcher' \
+        "$busybox_path" ash -c '. "$1"; record_home_previous_holder com.oplus.launcher' \
             yinxing-test "$MODULE_ROOT/bin/common.sh"
     assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$default_state/home_previous_holder")" \
         "default BusyBox marker publication"
     assert_equals "600" "$(stat -c '%a' "$default_state/home_previous_holder")" \
         "default BusyBox marker mode"
-    assert_not_contains "$CALLS" "sync -f $default_state/home_previous_holder"
-    pass "HOME marker uses default BusyBox applets"
+    pass "HOME marker uses actual standalone BusyBox applets"
 }
 
 test_guard_requires_cleanup_helper_before_home_takeover() {
@@ -972,7 +1013,7 @@ EOF
         "binding confirmation must not repeat the remove/restore pair"
     assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other"
     assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other:$ACCESSIBILITY_COMPONENT"
-    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_not_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
     assert_contains "$CALLS" "accessibility_service_rebind_confirmed"
     assert_contains "$CALLS" "accessibility_service_rebound"
     pass "repair confirms accessibility binding after crash"
@@ -1013,6 +1054,98 @@ EOF
     assert_contains "$CALLS" "accessibility_service_rebind_confirmed"
     assert_contains "$CALLS" "accessibility_service_rebound"
     pass "repair confirms accessibility binding after confirmed unbound state"
+}
+
+test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'caregiver.reader/service\n' > "$TEST_ROOT/caregiver_services_during_rebind_remove"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=1 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "rebind succeeded after module deactivated during temporary removal"
+    fi
+    assert_equals "caregiver.reader/service" "$(tr -d '\n' < "$SERVICES")" \
+        "interrupted rebind preserves newer caregiver services"
+    assert_not_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "am start"
+    pass "rebind preserves caregiver change after module deactivation"
+}
+
+test_rebind_stops_after_module_deactivates_during_restore() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_accessibility_rebind_restore"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=1 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "rebind succeeded after module deactivated during service-list restore"
+    fi
+    assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
+        "interrupted restore leaves the original service list"
+    assert_not_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_equals "1" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "interrupted restore must not enter confirmation polling"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "am start"
+    pass "rebind stops after module deactivates during restore"
+}
+
+test_rebind_restores_original_enabled_state_after_interruption() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=1 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "rebind succeeded after interruption with an originally disabled service"
+    fi
+    assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" \
+        "$(tr -d '\n' < "$SERVICES")" \
+        "interrupted rebind restores the original service list"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "interrupted rebind restores the original accessibility switch"
+    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 0"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "rebind restores original accessibility enabled state"
 }
 
 test_action_marks_persistent_accessibility_crash_failed() {
@@ -1263,6 +1396,81 @@ test_doze_add_claims_ownership() {
     repair_state || fail "idempotent Doze repair should succeed"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     pass "Doze add claims ownership"
+}
+
+test_doze_add_nonzero_after_apply_retains_ownership() {
+    reset_fixture
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || \
+        fail "could not install applied-error Doze cleanup helper"
+    touch "$TEST_ROOT/fail_deviceidle_add_after_apply"
+    repair_state || fail "applied Doze add with a client error should remain recoverable"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "applied-error Doze add lost whitelist state"
+    assert_equals "added" "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "applied-error Doze add ownership marker"
+    pass "Doze add retains ownership after an applied client error"
+}
+
+test_doze_marker_directory_race_blocks_add() {
+    reset_fixture
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || \
+        fail "could not install Doze marker-race cleanup helper"
+    touch "$TEST_ROOT/doze_marker_directory_race"
+    if repair_state; then
+        fail "Doze marker directory race unexpectedly reported full repair success"
+    fi
+    [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || \
+        fail "Doze add ran without a validated pending ownership marker"
+    [[ -d "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "Doze marker race fixture did not replace the target with a directory"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    pass "Doze marker directory race blocks add"
+}
+
+test_doze_same_boot_pending_absence_does_not_redispatch() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'pending|fixture-boot\n' > "$TEST_ROOT/state/doze_added_by_module"
+    if repair_state; then
+        fail "same-boot pending Doze absence unexpectedly resolved"
+    fi
+    assert_equals "pending|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "same-boot Doze pending state"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "cmd appops set"
+    pass "same-boot pending Doze absence does not redispatch"
+}
+
+test_doze_visible_pending_state_promotes_to_owned() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'pending|fixture-boot\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted"
+    repair_state || fail "visible pending Doze state should resolve"
+    assert_equals "added" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "visible pending Doze ownership"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_contains "$CALLS" "cmd appops set"
+    pass "visible pending Doze state promotes to ownership"
+}
+
+test_doze_cross_boot_pending_absence_retries_once() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'next-boot\n' > "$TEST_ROOT/boot_id"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'pending|previous-boot\n' > "$TEST_ROOT/state/doze_added_by_module"
+    repair_state || fail "cross-boot pending Doze absence should retry"
+    assert_equals "added" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "cross-boot Doze retry ownership"
+    assert_equals "1" \
+        "$(grep -c '^cmd deviceidle whitelist +com.yinxing.launcher$' "$CALLS" || true)" \
+        "cross-boot Doze retry count"
+    pass "cross-boot pending Doze absence retries once"
 }
 
 test_home_launch_is_fixed() {
@@ -1781,9 +1989,9 @@ test_action_rolls_back_home_when_module_deactivates_during_set() {
             "mid-set deactivation takeover/rollback count ($marker)"
         assert_contains "$CALLS" \
             "cmd package set-home-activity --user 0 com.oplus.launcher"
-        assert_equals "com.oplus.launcher" \
-            "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
-            "mid-set rollback retains HOME marker ($marker)"
+        assert_equals "released" \
+            "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+            "successful mid-set rollback releases ownership ($marker)"
         assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
         assert_not_contains "$CALLS" "cmd appops set"
         assert_not_contains "$CALLS" "am start"
@@ -1795,6 +2003,7 @@ test_action_rolls_back_latest_home_when_marker_predates_takeover() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
     printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
 
@@ -1809,9 +2018,8 @@ test_action_rolls_back_latest_home_when_marker_predates_takeover() {
         "cmd package set-home-activity --user 0 com.example.caregiverlauncher"
     assert_not_contains "$CALLS" \
         "cmd package set-home-activity --user 0 com.oplus.launcher"
-    assert_equals "com.example.caregiverlauncher" \
-        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
-        "latest-HOME rollback retains current ownership marker"
+    assert_equals "released" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "successful latest-HOME rollback releases ownership"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     assert_not_contains "$CALLS" "cmd appops set"
     assert_not_contains "$CALLS" "am start"
@@ -1822,6 +2030,7 @@ test_action_persists_latest_home_when_inactive_rollback_fails() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
     printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
     touch "$TEST_ROOT/fail_home_role_restore"
@@ -1832,18 +2041,33 @@ test_action_persists_latest_home_when_inactive_rollback_fails() {
     fi
     assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
         "failed inactive rollback leaves observable HOME for retry"
-    assert_equals "com.example.caregiverlauncher" \
+    assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
-        "failed inactive rollback persists latest HOME target"
+        "failed inactive rollback preserves original HOME target"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "failed inactive rollback persists latest pending HOME target"
 
     rm -f "$TEST_ROOT/fail_home_role_restore"
     touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
     run_module_script "$MODULE_ROOT/uninstall.sh"
-    run_module_script "$CLEANUP_TARGET"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "same-boot pending HOME evidence was released too early"
+    fi
     assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
-        "cleanup restores latest HOME after failed inactive rollback"
+        "same-boot cleanup compensates the interrupted HOME takeover"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "same-boot compensation lost original HOME evidence"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "same-boot compensation lost pending HOME evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "same-boot compensation lost cleanup helper"
+
+    printf 'next-boot\n' > "$TEST_ROOT/boot_id"
+    run_module_script "$CLEANUP_TARGET"
     [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
         fail "cleanup retained recovered latest HOME marker"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "cleanup retained recovered HOME takeover state"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "cleanup retained itself after latest HOME recovery"
     pass "inactive HOME rollback failure remains recoverable"
 }
@@ -1852,6 +2076,7 @@ test_uninstall_recovers_latest_home_after_late_set_completion() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
     printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
     touch "$TEST_ROOT/late_home_role_set"
@@ -1861,10 +2086,14 @@ test_uninstall_recovers_latest_home_after_late_set_completion() {
         run_module_script "$MODULE_ROOT/action.sh"; then
         fail "action succeeded after timed-out HOME takeover"
     fi
-    assert_equals "com.example.caregiverlauncher" \
+    assert_equals "com.oplus.launcher" \
         "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
-        "timed-out takeover retained latest HOME evidence"
+        "timed-out takeover preserves original HOME evidence"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "timed-out takeover retains latest pending HOME evidence"
 
+    printf 'next-boot\n' > "$TEST_ROOT/boot_id"
     touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
     run_module_script "$MODULE_ROOT/uninstall.sh"
     run_module_script "$CLEANUP_TARGET"
@@ -1872,6 +2101,8 @@ test_uninstall_recovers_latest_home_after_late_set_completion() {
         "cleanup repairs a late HOME takeover to latest holder"
     [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
         fail "late HOME cleanup retained marker"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "late HOME cleanup retained takeover state"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "late HOME cleanup retained itself"
     pass "late HOME takeover remains recoverable after client timeout"
 }
@@ -1889,13 +2120,182 @@ test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
         "mid-set deactivation restores no-holder HOME"
     assert_contains "$CALLS" \
         "cmd role remove-role-holder --user 0 android.app.role.HOME com.yinxing.launcher"
-    assert_equals "none" \
-        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
-        "no-holder rollback retains HOME marker"
+    assert_equals "released" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "successful no-holder rollback releases ownership"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     assert_not_contains "$CALLS" "cmd appops set"
     assert_not_contains "$CALLS" "am start"
     pass "action restores no-holder HOME after mid-set deactivation"
+}
+
+test_repeated_home_takeover_never_clobbers_original_holder() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    repair_state || fail "initial HOME takeover should succeed"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    repair_state || fail "repeated HOME takeover should succeed"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "repeated HOME takeover"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "repeated takeover preserves immutable original HOME"
+    assert_equals "owned" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "confirmed repeated takeover owns HOME"
+
+    touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "uninstall restores immutable original HOME"
+    pass "repeated HOME takeover never clobbers original holder"
+}
+
+test_manual_yinxing_choice_after_inactive_rollback_is_preserved() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "interrupted HOME takeover unexpectedly succeeded"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "inactive rollback restores caregiver HOME"
+    assert_equals "released" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "inactive rollback records released ownership"
+
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "released HOME state did not retain cleanup helper"
+    run_module_script "$CLEANUP_TARGET"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "released HOME cleanup retained helper"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "manual Yinxing choice after inactive rollback"
+    pass "manual Yinxing choice after inactive rollback is preserved"
+}
+
+test_home_transaction_lock_serializes_concurrent_actions() {
+    local first_status second_status
+
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    touch "$TEST_ROOT/pause_home_role_set"
+    YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh" &
+    GUARD_PID=$!
+    for _ in $(seq 1 200); do
+        [[ -e "$TEST_ROOT/home_role_set_entered" ]] && break
+        /bin/sleep 0.01
+    done
+    [[ -e "$TEST_ROOT/home_role_set_entered" ]] || \
+        fail "first HOME transaction did not reach the mutation boundary"
+
+    set +e
+    YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"
+    second_status=$?
+    touch "$TEST_ROOT/allow_home_role_set"
+    wait "$GUARD_PID"
+    first_status=$?
+    set -e
+    GUARD_PID=""
+
+    assert_equals "0" "$first_status" "first concurrent HOME action status"
+    [[ "$second_status" -ne 0 ]] || fail "second concurrent HOME action acquired the writer lock"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS" || true)" \
+        "concurrent HOME takeover count"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "concurrent actions preserve the immutable original HOME"
+    assert_equals "owned" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "concurrent HOME transaction state"
+    [[ ! -e "$TEST_ROOT/state/home_transaction.lock" ]] || \
+        fail "successful HOME action retained its transaction lock"
+    pass "HOME transaction lock serializes concurrent actions"
+}
+
+test_home_transaction_lock_reclaims_dead_owner() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/home_transaction.lock"
+    printf '999999\n' > "$TEST_ROOT/state/home_transaction.lock/pid"
+    printf 'fixture-boot\n' > "$TEST_ROOT/state/home_transaction.lock/boot_id"
+    run_module_script "$MODULE_ROOT/action.sh" || fail "dead HOME lock should be reclaimed"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME takeover after dead lock reclaim"
+    [[ ! -e "$TEST_ROOT/state/home_transaction.lock" ]] || \
+        fail "dead HOME transaction lock survived repair"
+    pass "HOME transaction lock reclaims a dead owner"
+}
+
+test_home_transaction_lock_rejects_symlink() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state" "$TEST_ROOT/external-home-lock"
+    ln -s "$TEST_ROOT/external-home-lock" "$TEST_ROOT/state/home_transaction.lock"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "symlink HOME transaction lock unexpectedly allowed repair"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "symlink HOME lock preserves current HOME"
+    [[ -L "$TEST_ROOT/state/home_transaction.lock" ]] || \
+        fail "symlink HOME transaction lock was modified"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "HOME transaction lock rejects symlink state"
+}
+
+test_guard_promotes_visible_pending_home_state() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|fixture-boot|com.example.caregiverlauncher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    repair_state || fail "visible pending HOME should be promoted"
+    assert_equals "owned" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "visible pending HOME promotion"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "visible pending HOME preserves original holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "Guard promotes visible pending HOME state"
+}
+
+test_guard_waits_for_same_boot_pending_home_absence() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|fixture-boot|com.example.caregiverlauncher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    if repair_state; then
+        fail "same-boot pending HOME absence unexpectedly retried"
+    fi
+    assert_equals "pending|fixture-boot|com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "same-boot pending HOME state"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    pass "Guard waits for same-boot pending HOME uncertainty"
+}
+
+test_guard_rebaselines_cross_boot_pending_home() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'next-boot\n' > "$TEST_ROOT/boot_id"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|previous-boot|com.example.caregiverlauncher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    repair_state || fail "cross-boot pending HOME should rebaseline and repair"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "cross-boot pending HOME takeover"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "cross-boot pending HOME rebaseline"
+    assert_equals "owned" "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "cross-boot pending HOME ownership"
+    pass "Guard rebaselines cross-boot pending HOME"
 }
 
 test_action_stops_after_module_deactivates_during_doze_add() {
@@ -2190,10 +2590,205 @@ test_uninstall_cleanup_bounds_stalled_doze_remove() {
     pass "uninstall cleanup bounds stalled Doze remove"
 }
 
+test_uninstall_resolves_pending_doze_state() {
+    local state marker_boot cleanup_boot_file
+
+    for state in absent present; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        cleanup_boot_file="$TEST_ROOT/cleanup_boot_id"
+        printf 'current-boot\n' > "$cleanup_boot_file"
+        if [[ "$state" == "present" ]]; then
+            marker_boot=current-boot
+        else
+            marker_boot=previous-boot
+        fi
+        printf 'pending|%s\n' "$marker_boot" > "$TEST_ROOT/state/doze_added_by_module"
+        if [[ "$state" == "present" ]]; then
+            touch "$TEST_ROOT/doze_whitelisted"
+        fi
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        YINXING_GUARD_BOOT_ID_FILE="$cleanup_boot_file" run_module_script "$CLEANUP_TARGET"
+        [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || \
+            fail "resolved pending Doze marker was retained ($state)"
+        [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || \
+            fail "resolved pending Doze whitelist was retained ($state)"
+        if [[ "$state" == "present" ]]; then
+            assert_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+        else
+            assert_not_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+        fi
+        [[ ! -e "$CLEANUP_TARGET" ]] || fail "resolved pending Doze cleanup retained helper ($state)"
+    done
+    pass "uninstall resolves pending Doze state"
+}
+
+test_uninstall_retains_same_boot_pending_doze_absence() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'same-boot\n' > "$TEST_ROOT/cleanup_boot_id"
+    printf 'pending|same-boot\n' > "$TEST_ROOT/state/doze_added_by_module"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/cleanup_boot_id" \
+        run_module_script "$CLEANUP_TARGET"; then
+        fail "same-boot pending Doze absence was released before late mutation became impossible"
+    fi
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "same-boot pending Doze marker was lost"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "same-boot pending Doze helper was lost"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+    pass "uninstall retains same-boot pending Doze absence"
+}
+
+test_uninstall_accepts_nonzero_after_applied_doze_remove() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/fail_deviceidle_remove_after_apply"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || \
+        fail "applied-error Doze removal retained whitelist entry"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "applied-error Doze removal retained marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || \
+        fail "applied-error Doze removal retained helper"
+    pass "uninstall accepts nonzero after confirmed Doze removal"
+}
+
+test_uninstall_retries_unconfirmed_doze_remove() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/ignore_deviceidle_remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "unconfirmed Doze removal unexpectedly succeeded"
+    fi
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || \
+        fail "unconfirmed Doze fixture lost whitelist entry"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "unconfirmed Doze removal lost ownership marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "unconfirmed Doze removal lost helper"
+    pass "uninstall retries unconfirmed Doze removal"
+}
+
+test_uninstall_clears_absent_owned_doze_state() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "absent owned Doze marker was retained"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "absent owned Doze cleanup retained helper"
+    pass "uninstall clears absent owned Doze state"
+}
+
+test_uninstall_clears_unarmed_home_evidence_without_mutation() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "unarmed HOME evidence preserves manual Yinxing choice"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "unarmed original HOME evidence was retained"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "unarmed HOME cleanup retained phase state"
+    pass "uninstall clears unarmed HOME evidence without mutation"
+}
+
+test_uninstall_rejects_owned_home_state_without_original() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "HOME ownership without original evidence unexpectedly cleaned"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME state without original preserves current holder"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "HOME state without original was removed"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "HOME state without original lost helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    pass "uninstall rejects owned HOME state without original"
+}
+
+test_uninstall_retains_same_boot_pending_home_absence() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|fixture-boot|com.example.caregiverlauncher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "same-boot pending HOME absence was released too early"
+    fi
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "same-boot pending HOME preserves caregiver choice"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "same-boot pending HOME lost phase evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "same-boot pending HOME lost helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+
+    printf 'next-boot\n' > "$TEST_ROOT/boot_id"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "cross-boot pending HOME preserves caregiver choice"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "cross-boot pending HOME retained original evidence"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "cross-boot pending HOME retained phase evidence"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "cross-boot pending HOME retained helper"
+    pass "uninstall retains same-boot pending HOME absence"
+}
+
+test_uninstall_waits_for_live_home_transaction() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/home_transaction.lock"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    /bin/sleep 30 &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/home_transaction.lock/pid"
+    printf 'fixture-boot\n' > "$TEST_ROOT/state/home_transaction.lock/boot_id"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "uninstall cleanup entered a live HOME transaction"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "live HOME transaction blocks cleanup mutation"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "live HOME transaction lost phase evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "live HOME transaction lost cleanup helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity --user 0 com.oplus.launcher"
+
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME cleanup after lock owner exits"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "reclaimed HOME transaction retained helper"
+    pass "uninstall waits for a live HOME transaction"
+}
+
 test_uninstall_restores_previous_home_holder() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'stale\n' > "$TEST_ROOT/state/home_previous_holder.tmp.999"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2217,6 +2812,7 @@ test_uninstall_removes_owned_home_when_previous_was_none() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     run_module_script "$MODULE_ROOT/uninstall.sh"
     [[ -x "$CLEANUP_TARGET" ]] || fail "empty HOME rollback helper was not scheduled"
@@ -2234,6 +2830,7 @@ test_uninstall_preserves_newer_home_choice() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
     run_module_script "$MODULE_ROOT/uninstall.sh"
     [[ -x "$CLEANUP_TARGET" ]] || fail "new HOME choice cleanup helper was not scheduled"
@@ -2265,6 +2862,7 @@ test_uninstall_retains_home_marker_when_previous_package_is_missing() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/previous_home_missing"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2283,6 +2881,7 @@ test_uninstall_retains_home_marker_when_restore_fails() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/fail_home_role_set"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2321,6 +2920,7 @@ test_uninstall_bounds_stalled_home_restore() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/hang_home_role_set"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2341,6 +2941,7 @@ test_uninstall_completes_home_when_doze_cleanup_needs_retry() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/fail_deviceidle_remove"
@@ -2455,6 +3056,7 @@ test_uninstall_rejects_trailing_blank_home_query() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n\n' > "$TEST_ROOT/malformed_home_role_output"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2470,9 +3072,10 @@ test_uninstall_rejects_trailing_blank_home_query() {
 }
 
 test_uninstall_rejects_invalid_android_home_markers() {
-    local holder
+    local holder long_holder
 
-    for holder in 1.2 _bad.home com.2launcher com.bad-name; do
+    long_holder="com.$(printf '%220s' '' | tr ' ' a)"
+    for holder in 1.2 _bad.home com.2launcher com.bad-name "$long_holder"; do
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
         printf '%s\n' "$holder" > "$TEST_ROOT/state/home_previous_holder"
@@ -2495,6 +3098,7 @@ test_uninstall_preserves_choice_made_during_previous_home_validation() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/switch_home_during_previous_path"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2514,6 +3118,7 @@ test_uninstall_retries_failed_or_unconfirmed_home_removal() {
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
         printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+        printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
         printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
         case "$mode" in
             failed) control="$TEST_ROOT/fail_home_role_remove" ;;
@@ -2538,6 +3143,7 @@ test_uninstall_bounds_stalled_home_removal() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/hang_home_role_remove"
     run_module_script "$MODULE_ROOT/uninstall.sh"
@@ -2558,6 +3164,7 @@ test_uninstall_completes_doze_when_home_removal_needs_retry() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
     printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/fail_home_role_remove"
@@ -2659,6 +3266,34 @@ case "$MODE" in
     --package-only)
         test_module_package
         ;;
+    --home-lifecycle-only)
+        test_action_rolls_back_home_when_module_deactivates_during_set
+        test_action_rolls_back_latest_home_when_marker_predates_takeover
+        test_action_persists_latest_home_when_inactive_rollback_fails
+        test_uninstall_recovers_latest_home_after_late_set_completion
+        test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_repeated_home_takeover_never_clobbers_original_holder
+        test_manual_yinxing_choice_after_inactive_rollback_is_preserved
+        ;;
+    --review-regressions-only)
+        test_rebind_restores_original_enabled_state_after_interruption
+        test_doze_same_boot_pending_absence_does_not_redispatch
+        test_doze_visible_pending_state_promotes_to_owned
+        test_doze_cross_boot_pending_absence_retries_once
+        test_home_transaction_lock_serializes_concurrent_actions
+        test_home_transaction_lock_reclaims_dead_owner
+        test_home_transaction_lock_rejects_symlink
+        test_guard_promotes_visible_pending_home_state
+        test_guard_waits_for_same_boot_pending_home_absence
+        test_guard_rebaselines_cross_boot_pending_home
+        test_uninstall_accepts_nonzero_after_applied_doze_remove
+        test_uninstall_retries_unconfirmed_doze_remove
+        test_uninstall_clears_absent_owned_doze_state
+        test_uninstall_clears_unarmed_home_evidence_without_mutation
+        test_uninstall_rejects_owned_home_state_without_original
+        test_uninstall_retains_same_boot_pending_home_absence
+        test_uninstall_waits_for_live_home_transaction
+        ;;
     --guard-only)
         test_home_role_owned_is_idempotent
         test_home_role_reconciles_other_holder
@@ -2668,6 +3303,7 @@ case "$MODE" in
         test_home_role_multiple_holders_are_safe
         test_home_role_rejects_invalid_android_package_names
         test_home_marker_rejects_invalid_android_package_names
+        test_android_package_name_length_boundary
         test_home_role_invalid_marker_is_safe
         test_home_role_marker_write_failure_is_safe
         test_home_role_set_failure_retains_marker
@@ -2683,6 +3319,9 @@ case "$MODE" in
         test_guard_requires_cleanup_helper_before_home_takeover
         test_guard_rejects_stale_cleanup_helper_when_refresh_fails
         test_repair_confirms_binding_after_confirmed_unbound
+        test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
+        test_rebind_stops_after_module_deactivates_during_restore
+        test_rebind_restores_original_enabled_state_after_interruption
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
         test_repair_ignores_partial_accessibility_diagnostic
@@ -2691,6 +3330,11 @@ case "$MODE" in
         test_kiosk_home_bounds_stalled_launch
         test_kiosk_home_cleans_stalled_descendant_after_caller_exit
         test_command_timeout_sanitizes_non_positive_overrides
+        test_doze_add_nonzero_after_apply_retains_ownership
+        test_doze_marker_directory_race_blocks_add
+        test_doze_same_boot_pending_absence_does_not_redispatch
+        test_doze_visible_pending_state_promotes_to_owned
+        test_doze_cross_boot_pending_absence_retries_once
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -2713,6 +3357,14 @@ case "$MODE" in
         test_action_persists_latest_home_when_inactive_rollback_fails
         test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_repeated_home_takeover_never_clobbers_original_holder
+        test_manual_yinxing_choice_after_inactive_rollback_is_preserved
+        test_home_transaction_lock_serializes_concurrent_actions
+        test_home_transaction_lock_reclaims_dead_owner
+        test_home_transaction_lock_rejects_symlink
+        test_guard_promotes_visible_pending_home_state
+        test_guard_waits_for_same_boot_pending_home_absence
+        test_guard_rebaselines_cross_boot_pending_home
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop
         test_action_stops_after_module_deactivates_during_package_probe
@@ -2727,6 +3379,15 @@ case "$MODE" in
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_cleanup_bounds_stalled_doze_remove
+        test_uninstall_resolves_pending_doze_state
+        test_uninstall_retains_same_boot_pending_doze_absence
+        test_uninstall_accepts_nonzero_after_applied_doze_remove
+        test_uninstall_retries_unconfirmed_doze_remove
+        test_uninstall_clears_absent_owned_doze_state
+        test_uninstall_clears_unarmed_home_evidence_without_mutation
+        test_uninstall_rejects_owned_home_state_without_original
+        test_uninstall_retains_same_boot_pending_home_absence
+        test_uninstall_waits_for_live_home_transaction
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none
@@ -2772,6 +3433,7 @@ case "$MODE" in
         test_home_role_multiple_holders_are_safe
         test_home_role_rejects_invalid_android_package_names
         test_home_marker_rejects_invalid_android_package_names
+        test_android_package_name_length_boundary
         test_home_role_invalid_marker_is_safe
         test_home_role_marker_write_failure_is_safe
         test_home_role_set_failure_retains_marker
@@ -2790,6 +3452,9 @@ case "$MODE" in
         test_repair_is_idempotent
         test_repair_confirms_binding_after_crash
         test_repair_confirms_binding_after_confirmed_unbound
+        test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
+        test_rebind_stops_after_module_deactivates_during_restore
+        test_rebind_restores_original_enabled_state_after_interruption
         test_action_marks_persistent_accessibility_crash_failed
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
@@ -2805,6 +3470,11 @@ case "$MODE" in
         test_package_enable_failure_is_reported
         test_doze_query_failure_is_safe
         test_doze_add_claims_ownership
+        test_doze_add_nonzero_after_apply_retains_ownership
+        test_doze_marker_directory_race_blocks_add
+        test_doze_same_boot_pending_absence_does_not_redispatch
+        test_doze_visible_pending_state_promotes_to_owned
+        test_doze_cross_boot_pending_absence_retries_once
         test_home_launch_is_fixed
         test_kiosk_home_command_requires_active_module
         test_kiosk_home_bounds_stalled_launch
@@ -2831,6 +3501,14 @@ case "$MODE" in
         test_action_persists_latest_home_when_inactive_rollback_fails
         test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_repeated_home_takeover_never_clobbers_original_holder
+        test_manual_yinxing_choice_after_inactive_rollback_is_preserved
+        test_home_transaction_lock_serializes_concurrent_actions
+        test_home_transaction_lock_reclaims_dead_owner
+        test_home_transaction_lock_rejects_symlink
+        test_guard_promotes_visible_pending_home_state
+        test_guard_waits_for_same_boot_pending_home_absence
+        test_guard_rebaselines_cross_boot_pending_home
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop
         test_action_stops_after_module_deactivates_during_package_probe
@@ -2846,6 +3524,15 @@ case "$MODE" in
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_cleanup_bounds_stalled_doze_remove
+        test_uninstall_resolves_pending_doze_state
+        test_uninstall_retains_same_boot_pending_doze_absence
+        test_uninstall_accepts_nonzero_after_applied_doze_remove
+        test_uninstall_retries_unconfirmed_doze_remove
+        test_uninstall_clears_absent_owned_doze_state
+        test_uninstall_clears_unarmed_home_evidence_without_mutation
+        test_uninstall_rejects_owned_home_state_without_original
+        test_uninstall_retains_same_boot_pending_home_absence
+        test_uninstall_waits_for_live_home_transaction
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none
