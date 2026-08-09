@@ -100,4 +100,3 @@ fully-enabled precondition. No command authority expands. Preview 12 is ready
 for packaging only after shell syntax checks, host/BusyBox tests, the complete
 Android JVM suite, a Debug build, deterministic module packaging, APK metadata
 and v2 signature checks, and fresh GitHub asset verification all pass.
-
