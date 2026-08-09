@@ -158,8 +158,9 @@ write_fake cmd \
     '#!/usr/bin/env bash' \
     'printf "cmd %s\\n" "$*" >> "$CALLS"' \
     'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
-    'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
-    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; target="${!#}"; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
+    'apply_late_home_set() { [[ -f "$TEST_ROOT/late_home_target" ]] || return 0; reads="$(cat "$TEST_ROOT/late_home_reads" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/late_home_reads"; if [[ "$reads" -ge 4 ]]; then cat "$TEST_ROOT/late_home_target" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/late_home_target"; fi; }' \
+    'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then apply_late_home_set; [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
@@ -270,6 +271,7 @@ reset_fixture() {
         "$TEST_ROOT/fail_pm_enable" \
         "$TEST_ROOT/fail_home_role_query" \
         "$TEST_ROOT/fail_home_role_set" \
+        "$TEST_ROOT/fail_home_role_restore" \
         "$TEST_ROOT/fail_home_role_remove" \
         "$TEST_ROOT/hang_home_role_query" \
         "$TEST_ROOT/hang_home_role_set" \
@@ -286,6 +288,9 @@ reset_fixture() {
         "$TEST_ROOT/deactivate_during_first_appops" \
         "$TEST_ROOT/deactivate_during_package_path" \
         "$TEST_ROOT/deactivate_during_accessibility_read" \
+        "$TEST_ROOT/late_home_role_set" \
+        "$TEST_ROOT/late_home_target" \
+        "$TEST_ROOT/late_home_reads" \
         "$TEST_ROOT/malformed_home_role_output" \
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
@@ -1776,8 +1781,9 @@ test_action_rolls_back_home_when_module_deactivates_during_set() {
             "mid-set deactivation takeover/rollback count ($marker)"
         assert_contains "$CALLS" \
             "cmd package set-home-activity --user 0 com.oplus.launcher"
-        [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
-            fail "successful mid-set rollback retained HOME marker ($marker)"
+        assert_equals "com.oplus.launcher" \
+            "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+            "mid-set rollback retains HOME marker ($marker)"
         assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
         assert_not_contains "$CALLS" "cmd appops set"
         assert_not_contains "$CALLS" "am start"
@@ -1803,12 +1809,71 @@ test_action_rolls_back_latest_home_when_marker_predates_takeover() {
         "cmd package set-home-activity --user 0 com.example.caregiverlauncher"
     assert_not_contains "$CALLS" \
         "cmd package set-home-activity --user 0 com.oplus.launcher"
-    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
-        fail "latest-HOME rollback retained stale ownership marker"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "latest-HOME rollback retains current ownership marker"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     assert_not_contains "$CALLS" "cmd appops set"
     assert_not_contains "$CALLS" "am start"
     pass "action rolls back the latest HOME after repeated takeover interruption"
+}
+
+test_action_persists_latest_home_when_inactive_rollback_fails() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    touch "$TEST_ROOT/fail_home_role_restore"
+
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after inactive HOME rollback failed"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "failed inactive rollback leaves observable HOME for retry"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "failed inactive rollback persists latest HOME target"
+
+    rm -f "$TEST_ROOT/fail_home_role_restore"
+    touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "cleanup restores latest HOME after failed inactive rollback"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "cleanup retained recovered latest HOME marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "cleanup retained itself after latest HOME recovery"
+    pass "inactive HOME rollback failure remains recoverable"
+}
+
+test_uninstall_recovers_latest_home_after_late_set_completion() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR" "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    touch "$TEST_ROOT/late_home_role_set"
+
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after timed-out HOME takeover"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "timed-out takeover retained latest HOME evidence"
+
+    touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "cleanup repairs a late HOME takeover to latest holder"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "late HOME cleanup retained marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "late HOME cleanup retained itself"
+    pass "late HOME takeover remains recoverable after client timeout"
 }
 
 test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
@@ -1824,8 +1889,9 @@ test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
         "mid-set deactivation restores no-holder HOME"
     assert_contains "$CALLS" \
         "cmd role remove-role-holder --user 0 android.app.role.HOME com.yinxing.launcher"
-    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
-        fail "successful no-holder rollback retained HOME marker"
+    assert_equals "none" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "no-holder rollback retains HOME marker"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     assert_not_contains "$CALLS" "cmd appops set"
     assert_not_contains "$CALLS" "am start"
@@ -2644,6 +2710,8 @@ case "$MODE" in
         test_action_rejects_disabled_or_removing_module
         test_action_rolls_back_home_when_module_deactivates_during_set
         test_action_rolls_back_latest_home_when_marker_predates_takeover
+        test_action_persists_latest_home_when_inactive_rollback_fails
+        test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop
@@ -2760,6 +2828,8 @@ case "$MODE" in
         test_action_rejects_disabled_or_removing_module
         test_action_rolls_back_home_when_module_deactivates_during_set
         test_action_rolls_back_latest_home_when_marker_predates_takeover
+        test_action_persists_latest_home_when_inactive_rollback_fails
+        test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
         test_action_stops_after_module_deactivates_during_doze_add
         test_action_stops_after_module_deactivates_during_first_appop

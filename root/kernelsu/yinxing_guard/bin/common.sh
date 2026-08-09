@@ -456,6 +456,45 @@ record_home_previous_holder() {
     return 0
 }
 
+replace_home_previous_holder() {
+    replacement_holder="$1"
+    if [ "$replacement_holder" != "none" ] && \
+        ! valid_home_holder "$replacement_holder"; then
+        log_event "home_role_replacement_invalid"
+        return 1
+    fi
+    if [ ! -e "$HOME_PREVIOUS_HOLDER_MARKER" ] && \
+        [ ! -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        record_home_previous_holder "$replacement_holder"
+        return $?
+    fi
+    if ! existing_holder="$(read_home_previous_holder)"; then
+        log_event "home_role_marker_invalid"
+        return 1
+    fi
+    [ "$existing_holder" = "$replacement_holder" ] && return 0
+    marker_tmp="$HOME_PREVIOUS_HOLDER_MARKER.tmp.$$"
+    rm -f "$marker_tmp" 2>/dev/null || true
+    if ! { printf '%s\n' "$replacement_holder" > "$marker_tmp"; } 2>/dev/null || \
+        ! chmod 0600 "$marker_tmp" 2>/dev/null || \
+        ! mv -f "$marker_tmp" "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null; then
+        rm -f "$marker_tmp" 2>/dev/null || true
+        log_event "home_role_replacement_write_failed"
+        return 1
+    fi
+    if ! run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f \
+        "$HOME_PREVIOUS_HOLDER_MARKER" "$STATE_DIR" >/dev/null 2>&1; then
+        log_event "home_role_replacement_sync_failed"
+        return 1
+    fi
+    if ! replaced_holder="$(read_home_previous_holder)" || \
+        [ "$replaced_holder" != "$replacement_holder" ]; then
+        log_event "home_role_replacement_changed"
+        return 1
+    fi
+    return 0
+}
+
 rollback_home_after_inactive_takeover() {
     rollback_previous_home="$1"
     if [ "$rollback_previous_home" != "none" ] && \
@@ -472,8 +511,7 @@ rollback_home_after_inactive_takeover() {
         return 1
     fi
     if [ "$rollback_current_home" != "$PACKAGE_NAME" ]; then
-        rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
-        log_event "home_role_inactive_rollback_preserved_new_choice"
+        log_event "home_role_inactive_rollback_preserved_new_choice_marker_retained"
         return 0
     fi
 
@@ -499,8 +537,7 @@ rollback_home_after_inactive_takeover() {
             return 1
         fi
         if [ "$rollback_current_home" != "$PACKAGE_NAME" ]; then
-            rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
-            log_event "home_role_inactive_rollback_preserved_new_choice"
+            log_event "home_role_inactive_rollback_preserved_new_choice_marker_retained"
             return 0
         fi
         if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
@@ -515,8 +552,7 @@ rollback_home_after_inactive_takeover() {
         fi
     fi
 
-    rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
-    log_event "home_role_inactive_rollback_complete"
+    log_event "home_role_inactive_rollback_complete_marker_retained"
     return 0
 }
 
@@ -551,6 +587,10 @@ repair_home_role() {
     [ "$refreshed_home_holder" = "$PACKAGE_NAME" ] && return 0
     if [ "$refreshed_home_holder" != "$current_home_holder" ]; then
         log_event "home_role_changed_before_set"
+        return 1
+    fi
+    if ! replace_home_previous_holder "$refreshed_home_holder"; then
+        log_event "home_role_replacement_failed"
         return 1
     fi
     module_is_active || return 1
