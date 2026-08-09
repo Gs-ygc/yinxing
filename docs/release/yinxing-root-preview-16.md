@@ -47,18 +47,18 @@ Preview 15 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 ## 验证记录
 
 - 所有 KernelSU Shell 脚本通过 `sh -n` 和 standalone BusyBox `ash -n`；固定命令扫描确认 Root bridge 未扩权。
-- `bash tools/test-yinxing-guard.sh all` 退出码为 0，包含 host 与递归 BusyBox harness，共 384 个 PASS、0 个 FAIL，耗时 218.92 秒。
+- `bash tools/test-yinxing-guard.sh all` 退出码为 0，包含 host 与递归 BusyBox harness，共 384 个 PASS、0 个 FAIL，耗时 216.88 秒。
 - `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon` 构建成功，48 个任务重新执行，耗时 84.46 秒。43 个 JUnit XML 合计 353 tests、0 failures、0 errors、0 skipped。
 - `aapt2` 确认 APK 为 `com.yinxing.launcher`、`versionCode=32`、`versionName=1.10.0-root-preview.16`、`minSdk=24`、`targetSdk=36`；`apksigner` 确认单一 Android Debug 签名和 v2 签名有效。
-- `unzip -t` 验证模块 ZIP 无错误；独立重新打包与发布 ZIP 逐字节一致，ZIP 内 `common.sh` 和 `uninstall-cleanup.sh` 与源码 SHA-256 完全一致（分别为 `37f51c7fd8a0f9bd27256da9da54f93909a2ef2ce69ea5376067d17bece24674`、`3834ca99f6199149f80a44b2cf419933591d6c7425bdcca34f6d6303d8b74afb`）。
+- `unzip -t` 验证模块 ZIP 无错误；独立重新打包与发布 ZIP 逐字节一致，ZIP 内 `common.sh` 和 `uninstall-cleanup.sh` 与源码 SHA-256 完全一致（分别为 `d8353b8b6b40e27c6db1942b3fdbb18405fd2fad64008e487f2e9685743e0714`、`3834ca99f6199149f80a44b2cf419933591d6c7425bdcca34f6d6303d8b74afb`）。
 - 当前环境没有连接真实一加 15；不会把本地 fixture 或 AOSP 行为表述为 ColorOS 16 真机验证。
 
 ## SHA-256
 
 ```text
 d6889a1d0d90866ddd3b08dd33392460ab50bc84a43a1f176c2a48075f71e976  yinxing-1.10.0-root-preview.16-debug.apk
-055dd88faa3d84995fd9ac5a595dcba2da4fef06299cdc4ade4ace1479778fdf  yinxing-guard-1.10.0-root-preview.16.zip
-8cdd9095d45db456ec1477f4b093d9748b592b81b7d7a4e21579e5452748dd5b  SHA256SUMS.txt
+fde8d2acea01ba6711005ae08d9a33a7bde3e22ba350143fc37bae248a62afa1  yinxing-guard-1.10.0-root-preview.16.zip
+5edfe68cc3fdf15e7ef38d1a3912470ddac5f21425f225ef2bbcb4c0601dabc3  SHA256SUMS.txt
 ```
 
 发布后还会从 GitHub Release 新目录下载三项资产，逐字节复核并运行 `sha256sum -c SHA256SUMS.txt`。
