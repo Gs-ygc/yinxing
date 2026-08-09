@@ -2,6 +2,7 @@
 
 PACKAGE_NAME="com.yinxing.launcher"
 ACCESSIBILITY_COMPONENT="com.yinxing.launcher/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
+HOME_COMPONENT="com.yinxing.launcher/.feature.home.MainActivity"
 HOME_ROLE_NAME="android.app.role.HOME"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
@@ -620,6 +621,92 @@ read_home_role_holder() {
     printf '%s\n' "$home_output"
 }
 
+read_home_resolved_component() {
+    if ! resolver_output="$(
+        run_guard_command cmd package resolve-activity \
+            --brief --components --user "$ANDROID_USER_ID" \
+            -a android.intent.action.MAIN \
+            -c android.intent.category.HOME 2>/dev/null
+        resolver_status=$?
+        printf '|'
+        exit "$resolver_status"
+    )"; then
+        printf 'unknown\n'
+        return 1
+    fi
+    case "$resolver_output" in
+        *'|') resolver_output=${resolver_output%|} ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+    line_feed='
+'
+    case "$resolver_output" in
+        *"$line_feed") resolver_output=${resolver_output%"$line_feed"} ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+    case "$resolver_output" in
+        ''|*"$line_feed"*|*'|'*|*null*|*NULL*)
+            printf 'unknown\n'
+            return 1
+            ;;
+        'No activity found')
+            printf 'none\n'
+            return 0
+            ;;
+    esac
+    resolver_package=${resolver_output%%/*}
+    resolver_class=${resolver_output#*/}
+    [ "$resolver_output" != "$resolver_package" ] || {
+        printf 'unknown\n'
+        return 1
+    }
+    case "$resolver_class" in
+        ''|*/*|*[!A-Za-z0-9_.\$]*)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+    valid_android_package_name "$resolver_package" || {
+        printf 'unknown\n'
+        return 1
+    }
+    printf '%s\n' "$resolver_package/$resolver_class"
+}
+
+home_resolver_state() {
+    if ! resolved_component="$(read_home_resolved_component)"; then
+        printf 'unknown\n'
+        return 1
+    fi
+    case "$resolved_component" in
+        none) printf 'none\n' ;;
+        "$HOME_COMPONENT"|"$PACKAGE_NAME/$PACKAGE_NAME.feature.home.MainActivity")
+            printf 'target\n'
+            ;;
+        *) printf 'other\n' ;;
+    esac
+}
+
+home_resolver_matches_holder() {
+    expected_holder="$1"
+    if ! resolved_component="$(read_home_resolved_component)"; then
+        return 1
+    fi
+    if [ "$expected_holder" = "none" ]; then
+        [ "$resolved_component" = "none" ]
+        return $?
+    fi
+    [ "$resolved_component" != "none" ] || return 1
+    resolved_package=${resolved_component%%/*}
+    [ "$resolved_package" = "$expected_holder" ]
+}
+
 cleanup_home_role_locked() {
     if ! path_exists "$HOME_MARKER" && ! path_exists "$HOME_STATE_MARKER"; then
         return 0
@@ -685,6 +772,11 @@ cleanup_home_role_locked() {
                 log_event "uninstall_home_preserve_unstable"
                 return 1
             fi
+            if [ "$confirmed_new_home" = "$previous_home" ] && \
+                ! home_resolver_matches_holder "$previous_home"; then
+                log_event "uninstall_home_preserve_route_unconfirmed"
+                return 1
+            fi
             if [ -n "$pending_boot" ] && \
                 [ "$pending_boot" = "$(read_current_boot_id)" ]; then
                 log_event "uninstall_home_pending_same_boot"
@@ -722,6 +814,10 @@ cleanup_home_role_locked() {
             log_event "uninstall_home_remove_unconfirmed"
             return 1
         fi
+        if ! home_resolver_matches_holder none; then
+            log_event "uninstall_home_remove_route_unconfirmed"
+            return 1
+        fi
     else
         if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$previous_home" \
             >/dev/null 2>&1; then
@@ -750,6 +846,10 @@ cleanup_home_role_locked() {
         if ! confirmed_home="$(read_home_role_holder)" || \
             [ "$confirmed_home" != "$previous_home" ]; then
             log_event "uninstall_home_restore_unconfirmed"
+            return 1
+        fi
+        if ! home_resolver_matches_holder "$previous_home"; then
+            log_event "uninstall_home_restore_route_unconfirmed"
             return 1
         fi
     fi

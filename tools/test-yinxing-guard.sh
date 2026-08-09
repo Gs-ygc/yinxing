@@ -206,6 +206,8 @@ write_fake yinxing-test-sync \
 write_fake mv \
     '#!/usr/bin/env bash' \
     'target="${!#}"' \
+    'source="${@: -2:1}"' \
+    'if [[ "$target" == "$TEST_ROOT/home_resolved_component" && -f "$source" ]]; then value="$(tr -d "\\n" < "$source")"; [[ "$value" == */* ]] || printf "%s/.Launcher\\n" "$value" > "$source"; fi' \
     'if [[ -e "$TEST_ROOT/concurrent_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then if mkdir "$TEST_ROOT/home_publish_slot_one" 2>/dev/null; then touch "$TEST_ROOT/home_publish_first_ready"; for _ in $(seq 1 500); do [[ -e "$TEST_ROOT/home_publish_second_ready" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/home_publish_second_ready" ]] || exit 90; /bin/sleep 0.1; else touch "$TEST_ROOT/home_publish_second_ready"; fi; fi' \
     'if [[ -e "$TEST_ROOT/doze_marker_directory_race" && "$target" == "$TEST_ROOT/state/doze_added_by_module" ]]; then rm -f "$target"; mkdir -p "$target"; fi' \
     'exec /bin/mv "$@"'
@@ -3421,6 +3423,49 @@ test_uninstall_retains_home_marker_when_restore_fails() {
     pass "uninstall retains HOME marker when restore fails"
 }
 
+test_uninstall_retains_home_marker_when_resolver_restore_mismatches() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    touch "$TEST_ROOT/ignore_home_resolver_set"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "resolver-mismatched HOME restore unexpectedly succeeded"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "resolver-mismatched restore applies role"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" \
+        "resolver-mismatched restore retains route evidence"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "resolver-mismatched restore lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "resolver-mismatched restore lost helper"
+    pass "uninstall retains HOME marker on resolver mismatch"
+}
+
+test_uninstall_retains_home_marker_when_resolver_unknown() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/fail_home_resolver_query"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "unknown resolver HOME restore unexpectedly succeeded"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "unknown resolver restore applies role"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "unknown resolver restore lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "unknown resolver restore lost helper"
+    pass "uninstall retains HOME marker on unknown resolver"
+}
+
 test_uninstall_retains_invalid_home_marker() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
@@ -3841,6 +3886,8 @@ case "$MODE" in
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
+        test_uninstall_retains_home_marker_when_resolver_restore_mismatches
+        test_uninstall_retains_home_marker_when_resolver_unknown
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
@@ -3989,6 +4036,8 @@ case "$MODE" in
         test_uninstall_retains_nonregular_accessibility_transactions
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
+        test_uninstall_retains_home_marker_when_resolver_restore_mismatches
+        test_uninstall_retains_home_marker_when_resolver_unknown
         test_uninstall_removes_owned_home_when_previous_was_none
         test_uninstall_preserves_newer_home_choice
         test_uninstall_does_not_remove_preexisting_yinxing_home
@@ -4156,6 +4205,8 @@ case "$MODE" in
         test_uninstall_retains_nonregular_accessibility_transactions
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
+        test_uninstall_retains_home_marker_when_resolver_restore_mismatches
+        test_uninstall_retains_home_marker_when_resolver_unknown
         test_uninstall_removes_owned_home_when_previous_was_none
         test_uninstall_preserves_newer_home_choice
         test_uninstall_does_not_remove_preexisting_yinxing_home
