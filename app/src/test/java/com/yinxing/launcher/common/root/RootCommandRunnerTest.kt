@@ -42,6 +42,72 @@ class RootCommandRunnerTest {
     }
 
     @Test
+    fun defaultRecoveryTimeoutCoversBoundedRebindConfirmation() {
+        withFakeSu(
+            """
+            case "${'$'}2" in
+                /data/adb/modules/yinxing_guard/action.sh) /bin/sleep 4 ;;
+                *) exit 64 ;;
+            esac
+            """.trimIndent()
+        ) { executable ->
+            val runner = SuRootCommandRunner(
+                maxOutputBytes = 1_024,
+                suExecutable = executable.toString()
+            )
+
+            val result = runner.run(RootCommand.RECOVER)
+
+            assertFalse("recovery hit the shared three-second timeout", result.timedOut)
+            assertTrue(result.isSuccessful)
+        }
+    }
+
+    @Test
+    fun defaultKioskTimeoutRemainsShort() {
+        withFakeSu(
+            """
+            case "${'$'}2" in
+                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) /bin/sleep 2 ;;
+                *) exit 64 ;;
+            esac
+            """.trimIndent()
+        ) { executable ->
+            val runner = SuRootCommandRunner(
+                maxOutputBytes = 1_024,
+                suExecutable = executable.toString()
+            )
+
+            val result = runner.run(RootCommand.KIOSK_HOME)
+
+            assertTrue(result.timedOut)
+            assertFalse(result.isSuccessful)
+        }
+    }
+
+    @Test
+    fun defaultStatusTimeoutRemainsBounded() {
+        withFakeSu(
+            """
+            case "${'$'}2" in
+                /data/adb/modules/yinxing_guard/bin/status.sh) /bin/sleep 4 ;;
+                *) exit 64 ;;
+            esac
+            """.trimIndent()
+        ) { executable ->
+            val runner = SuRootCommandRunner(
+                maxOutputBytes = 1_024,
+                suExecutable = executable.toString()
+            )
+
+            val result = runner.run(RootCommand.STATUS)
+
+            assertTrue(result.timedOut)
+            assertFalse(result.isSuccessful)
+        }
+    }
+
+    @Test
     fun timeoutForciblyStopsAStuckSuProcessWithinBound() {
         withFakeSu("exec /bin/sleep 30") { executable ->
             val runner = SuRootCommandRunner(
