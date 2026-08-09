@@ -114,10 +114,10 @@ accessibility_service_binding_state() {
     fi
 
     printf '%s\n' "$accessibility_dump" | awk -v component="$ACCESSIBILITY_COMPONENT" '
-        /^[[:space:]]*Bound services:/ { section = "bound" }
+        /^[[:space:]]*Bound services:/ { seen_bound = 1; section = "bound" }
         /^[[:space:]]*Enabled services:/ { section = "" }
-        /^[[:space:]]*Binding services:/ { section = "binding" }
-        /^[[:space:]]*Crashed services:/ { section = "crashed" }
+        /^[[:space:]]*Binding services:/ { seen_binding = 1; section = "binding" }
+        /^[[:space:]]*Crashed services:/ { seen_crashed = 1; section = "crashed" }
         /^[[:space:]]*Client list info:/ { section = "" }
         section != "" && index($0, component) {
             if (section == "bound") {
@@ -135,6 +135,8 @@ accessibility_service_binding_state() {
                 print "binding"
             } else if (bound) {
                 print "bound"
+            } else if (seen_bound && seen_binding && seen_crashed) {
+                print "unbound"
             } else {
                 print "unknown"
             }
@@ -164,7 +166,7 @@ confirm_accessibility_service_rebind() {
                 log_event "accessibility_service_rebind_unverified"
                 return 0
                 ;;
-            crashed)
+            crashed|unbound)
                 if [ "$confirm_attempt" -ge "$confirm_attempts" ]; then
                     log_event "accessibility_service_rebind_persisted"
                     return 1
@@ -307,6 +309,16 @@ repair_accessibility() {
         return 1
     fi
 
+    target_was_enabled=0
+    case ":$current:" in
+        *":$ACCESSIBILITY_COMPONENT:"*) target_was_enabled=1 ;;
+    esac
+    if [ "$target_was_enabled" -eq 1 ] && [ "$enabled" = "1" ]; then
+        target_was_fully_enabled=1
+    else
+        target_was_fully_enabled=0
+    fi
+
     merged="$(merge_accessibility_services "$current" "$ACCESSIBILITY_COMPONENT")"
     accessibility_changed=0
     if [ "$merged" != "$current" ]; then
@@ -330,9 +342,16 @@ repair_accessibility() {
     fi
 
     binding_state="$(accessibility_service_binding_state)"
-    if [ "$binding_state" = "crashed" ]; then
-        rebind_accessibility_service "$current" "$merged" || return 1
-    fi
+    case "$binding_state" in
+        crashed)
+            rebind_accessibility_service "$current" "$merged" || return 1
+            ;;
+        unbound)
+            if [ "$target_was_fully_enabled" -eq 1 ]; then
+                rebind_accessibility_service "$current" "$merged" || return 1
+            fi
+            ;;
+    esac
     return 0
 }
 
