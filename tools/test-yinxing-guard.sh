@@ -174,6 +174,15 @@ write_fake dumpsys \
     'printf "dumpsys %s\\n" "$*" >> "$CALLS"' \
     '[[ "${1:-}" == "accessibility" ]] || exit 2' \
     '[[ -e "$TEST_ROOT/fail_accessibility_dump" ]] && exit 1' \
+    'if [[ -d "$TEST_ROOT/accessibility_dump_sequence" ]]; then' \
+    '  sequence_call="$(cat "$TEST_ROOT/accessibility_dump_sequence_calls" 2>/dev/null || printf 0)"' \
+    '  sequence_call=$((sequence_call + 1))' \
+    '  printf "%s\\n" "$sequence_call" > "$TEST_ROOT/accessibility_dump_sequence_calls"' \
+    '  sequence_response="$TEST_ROOT/accessibility_dump_sequence/$sequence_call"' \
+    '  [[ -f "$sequence_response" ]] || sequence_response="$TEST_ROOT/accessibility_dump_sequence/last"' \
+    '  [[ -f "$sequence_response" ]] && cat "$sequence_response"' \
+    '  exit 0' \
+    'fi' \
     '[[ -f "$TEST_ROOT/accessibility_dump" ]] && cat "$TEST_ROOT/accessibility_dump"' \
     'exit 0'
 
@@ -217,13 +226,15 @@ reset_fixture() {
         "$TEST_ROOT/fail_home_once" \
         "$TEST_ROOT/use_real_sleep" \
         "$TEST_ROOT/accessibility_dump" \
+        "$TEST_ROOT/accessibility_dump_sequence_calls" \
         "$TEST_ROOT/fail_accessibility_dump" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
         "$TEST_ROOT/component_disabled" \
         "$TEST_ROOT/log_noise"
-    rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules"
+    rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
+        "$TEST_ROOT/accessibility_dump_sequence"
 }
 
 prepare_healthy_status_fixture() {
@@ -399,11 +410,12 @@ test_repair_is_idempotent() {
     pass "repair is idempotent"
 }
 
-test_repair_rebinds_crashed_accessibility_service() {
+test_repair_confirms_binding_after_crash() {
     reset_fixture
     printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
     printf '1\n' > "$ACCESSIBILITY_ENABLED"
-    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+    mkdir -p "$TEST_ROOT/accessibility_dump_sequence"
+    cat > "$TEST_ROOT/accessibility_dump_sequence/1" <<EOF
 User state[
   Bound services:{}
   Enabled services:{$ACCESSIBILITY_COMPONENT}
@@ -412,16 +424,90 @@ User state[
   Client list info:{}
 ]
 EOF
-    repair_state || fail "crashed accessibility service should be rebound"
+    cp "$TEST_ROOT/accessibility_dump_sequence/1" "$TEST_ROOT/accessibility_dump_sequence/2"
+    cat > "$TEST_ROOT/accessibility_dump_sequence/3" <<EOF
+User state[
+  Bound services:{$ACCESSIBILITY_COMPONENT}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=3 \
+    YINXING_GUARD_REBIND_CONFIRM_SECONDS=0 \
+        repair_state || fail "crashed accessibility service should be rebound"
     assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
         "rebind preserves existing services"
+    assert_equals "3" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "rebind should poll until binding is observed"
     assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
-        "rebind should remove and restore the target service"
+        "binding confirmation must not repeat the remove/restore pair"
     assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other"
     assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other:$ACCESSIBILITY_COMPONENT"
     assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_contains "$CALLS" "accessibility_service_rebind_confirmed"
     assert_contains "$CALLS" "accessibility_service_rebound"
-    pass "repair rebinds crashed accessibility service"
+    pass "repair confirms accessibility binding after crash"
+}
+
+test_action_marks_persistent_accessibility_crash_failed() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/accessibility_dump_sequence"
+    cat > "$TEST_ROOT/accessibility_dump_sequence/1" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    cp "$TEST_ROOT/accessibility_dump_sequence/1" "$TEST_ROOT/accessibility_dump_sequence/2"
+    cp "$TEST_ROOT/accessibility_dump_sequence/1" "$TEST_ROOT/accessibility_dump_sequence/3"
+    if YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=2 \
+        YINXING_GUARD_REBIND_CONFIRM_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "persistent accessibility crash unexpectedly reported recovery success"
+    fi
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "persistent crash should record failed repair"
+    assert_equals "3" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "persistent crash should stop at the confirmation bound"
+    assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "persistent crash must not repeat settings toggles"
+    assert_not_contains "$CALLS" "am start"
+    assert_contains "$CALLS" "accessibility_service_rebind_persisted"
+    pass "action marks persistent accessibility crash failed"
+}
+
+test_repair_keeps_unknown_rebind_confirmation_nonfatal() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/accessibility_dump_sequence"
+    cat > "$TEST_ROOT/accessibility_dump_sequence/1" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{$ACCESSIBILITY_COMPONENT}
+  Client list info:{}
+]
+EOF
+    : > "$TEST_ROOT/accessibility_dump_sequence/2"
+    YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=2 \
+    YINXING_GUARD_REBIND_CONFIRM_SECONDS=0 \
+        repair_state || fail "unknown accessibility rebind confirmation should remain nonfatal"
+    assert_equals "2" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "unknown confirmation should stop after the bounded poll"
+    assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "unknown confirmation must not repeat settings toggles"
+    assert_contains "$CALLS" "accessibility_service_rebind_unverified"
+    assert_not_contains "$CALLS" "accessibility_service_rebind_persisted"
+    pass "unknown accessibility rebind confirmation remains nonfatal"
 }
 
 test_repair_leaves_bound_or_binding_accessibility_service_untouched() {
@@ -1167,7 +1253,9 @@ case "$MODE" in
         test_status_reports_missing_module
         test_repair_preserves_and_enables
         test_repair_is_idempotent
-        test_repair_rebinds_crashed_accessibility_service
+        test_repair_confirms_binding_after_crash
+        test_action_marks_persistent_accessibility_crash_failed
+        test_repair_keeps_unknown_rebind_confirmation_nonfatal
         test_repair_leaves_bound_or_binding_accessibility_service_untouched
         test_repair_ignores_unavailable_accessibility_diagnostic
         test_missing_package_is_safe
