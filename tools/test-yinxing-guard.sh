@@ -131,6 +131,7 @@ write_fake pm \
     '#!/usr/bin/env bash' \
     'printf "pm %s\\n" "$*" >> "$CALLS"' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
+    'if [[ -e "$TEST_ROOT/hang_pm_path" && "${args[0]:-}" == "path" ]]; then /bin/sleep 5; fi' \
     'if [[ "${args[0]:-}" == "list" && "${args[1]:-}" == "packages" ]]; then [[ -e "$TEST_ROOT/fail_pm_list" ]] && exit 1; [[ -e "$TEST_ROOT/package_disabled" ]] && printf "package:com.yinxing.launcher\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "dump" ]]; then [[ -e "$TEST_ROOT/fail_pm_dump" ]] && exit 1; printf "Package com.yinxing.launcher\\n"; if [[ -e "$TEST_ROOT/component_disabled" ]]; then printf "disabledComponents: [%s]\\n" "$ACCESSIBILITY_COMPONENT"; else printf "Services: %s\\n" "$ACCESSIBILITY_COMPONENT"; fi; exit 0; fi' \
     'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
@@ -140,6 +141,7 @@ write_fake pm \
 write_fake cmd \
     '#!/usr/bin/env bash' \
     'printf "cmd %s\\n" "$*" >> "$CALLS"' \
+    'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then printf added > "$TEST_ROOT/doze_whitelisted"; fi' \
@@ -149,6 +151,7 @@ write_fake cmd \
 write_fake am \
     '#!/usr/bin/env bash' \
     'printf "am %s\\n" "$*" >> "$CALLS"' \
+    'if [[ -e "$TEST_ROOT/hang_am" ]]; then /bin/sleep 5; fi' \
     'if [[ -e "$TEST_ROOT/fail_home_once" ]]; then rm -f "$TEST_ROOT/fail_home_once"; exit 1; fi' \
     'printf launched > "$TEST_ROOT/home_launched"'
 
@@ -173,6 +176,7 @@ write_fake dumpsys \
     '#!/usr/bin/env bash' \
     'printf "dumpsys %s\\n" "$*" >> "$CALLS"' \
     '[[ "${1:-}" == "accessibility" ]] || exit 2' \
+    'if [[ -e "$TEST_ROOT/hang_dumpsys" ]]; then /bin/sleep 5; fi' \
     '[[ -e "$TEST_ROOT/fail_accessibility_dump" ]] && exit 1' \
     'if [[ -d "$TEST_ROOT/accessibility_dump_sequence" ]]; then' \
     '  sequence_call="$(cat "$TEST_ROOT/accessibility_dump_sequence_calls" 2>/dev/null || printf 0)"' \
@@ -224,6 +228,10 @@ reset_fixture() {
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_home_once" \
+        "$TEST_ROOT/hang_dumpsys" \
+        "$TEST_ROOT/hang_pm_path" \
+        "$TEST_ROOT/hang_am" \
+        "$TEST_ROOT/hang_deviceidle_remove" \
         "$TEST_ROOT/use_real_sleep" \
         "$TEST_ROOT/accessibility_dump" \
         "$TEST_ROOT/accessibility_dump_sequence_calls" \
@@ -609,6 +617,24 @@ EOF
     pass "repair ignores partial accessibility diagnostic"
 }
 
+test_repair_bounds_stalled_accessibility_diagnostic() {
+    local started_at elapsed
+
+    reset_fixture
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    touch "$TEST_ROOT/hang_dumpsys"
+    started_at=$SECONDS
+    YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        run_module_script -c '. "$1"; repair_state' yinxing-test "$MODULE_ROOT/bin/common.sh" || \
+        fail "stalled accessibility diagnostic should remain nonfatal"
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled accessibility diagnostic exceeded bound (${elapsed}s)"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    assert_not_contains "$CALLS" "accessibility_service_rebind"
+    pass "repair bounds stalled accessibility diagnostic"
+}
+
 test_repair_keeps_unknown_rebind_confirmation_nonfatal() {
     reset_fixture
     printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
@@ -757,6 +783,24 @@ test_kiosk_home_command_requires_active_module() {
     [[ ! -e "$TEST_ROOT/home_launched" ]] || fail "missing module launched HOME"
     assert_not_contains "$CALLS" "am start"
     pass "kiosk home command requires active module"
+}
+
+test_kiosk_home_bounds_stalled_launch() {
+    local started_at elapsed
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/modules/yinxing_guard"
+    touch "$TEST_ROOT/hang_am"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        run_module_script "$MODULE_ROOT/bin/kiosk-home.sh"; then
+        fail "stalled kiosk HOME launch unexpectedly succeeded"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled kiosk HOME launch exceeded bound (${elapsed}s)"
+    assert_equals "1" "$(grep -c '^am start --user 0 -n com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS" || true)" \
+        "stalled kiosk HOME command should attempt the fixed component once"
+    pass "kiosk home bounds stalled launch"
 }
 
 test_guard_runs_initial_repair_and_one_health_cycle() {
@@ -1140,6 +1184,25 @@ test_action_reuses_repair_and_launch() {
     pass "action reuses repair and launch"
 }
 
+test_action_bounds_stalled_package_query() {
+    local started_at elapsed
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_pm_path"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "stalled package query unexpectedly reported recovery success"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled package query exceeded bound (${elapsed}s)"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "stalled package query should record failed repair"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    assert_not_contains "$CALLS" "am start"
+    pass "action bounds stalled package query"
+}
+
 test_cleanup_helper_waits_for_module_removal() {
     reset_fixture
     mkdir -p "$TEST_ROOT/modules/yinxing_guard" "$TEST_ROOT/state"
@@ -1262,6 +1325,29 @@ test_uninstall_retains_marker_when_doze_remove_fails() {
     pass "boot-completed cleanup retains retry state after failure"
 }
 
+test_uninstall_cleanup_bounds_stalled_doze_remove() {
+    local started_at elapsed
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state" "$TEST_ROOT/modules/yinxing_guard"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch \
+        "$TEST_ROOT/doze_whitelisted" \
+        "$TEST_ROOT/modules/yinxing_guard/remove" \
+        "$TEST_ROOT/hang_deviceidle_remove"
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || \
+        fail "could not install stalled cleanup helper"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$CLEANUP_TARGET"; then
+        fail "stalled Doze cleanup unexpectedly succeeded"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled Doze cleanup exceeded bound (${elapsed}s)"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || fail "stalled Doze cleanup lost ownership marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "stalled Doze cleanup removed its retry script"
+    pass "uninstall cleanup bounds stalled Doze remove"
+}
+
 test_module_package() {
     local rejection
 
@@ -1345,6 +1431,9 @@ case "$MODE" in
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
         test_repair_ignores_partial_accessibility_diagnostic
+        test_repair_bounds_stalled_accessibility_diagnostic
+        test_action_bounds_stalled_package_query
+        test_kiosk_home_bounds_stalled_launch
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -1368,6 +1457,7 @@ case "$MODE" in
         test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_retains_malformed_marker
         ;;
     all)
@@ -1391,6 +1481,7 @@ case "$MODE" in
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
         test_repair_ignores_partial_accessibility_diagnostic
+        test_repair_bounds_stalled_accessibility_diagnostic
         test_repair_keeps_unknown_rebind_confirmation_nonfatal
         test_repair_leaves_bound_or_binding_accessibility_service_untouched
         test_repair_ignores_unavailable_accessibility_diagnostic
@@ -1402,6 +1493,7 @@ case "$MODE" in
         test_doze_add_claims_ownership
         test_home_launch_is_fixed
         test_kiosk_home_command_requires_active_module
+        test_kiosk_home_bounds_stalled_launch
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -1418,6 +1510,7 @@ case "$MODE" in
         test_service_stops_when_module_disabled_or_removing
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
+        test_action_bounds_stalled_package_query
         test_cleanup_helper_waits_for_module_removal
         test_cleanup_helper_stays_for_first_boot
         test_cleanup_schedule_failure_preserves_existing_helper
@@ -1425,6 +1518,7 @@ case "$MODE" in
         test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_retains_malformed_marker
         test_module_package
         if [[ -z "${YINXING_TEST_SHELL:-}" ]] && command -v busybox >/dev/null 2>&1; then
