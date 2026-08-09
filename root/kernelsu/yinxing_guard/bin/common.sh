@@ -272,6 +272,11 @@ parse_accessibility_transaction_state() {
     esac
     valid_accessibility_services_snapshot "$accessibility_original_services" || \
         return 1
+    case "$accessibility_original_services" in
+        null|NULL) return 1 ;;
+        ""|*[![:space:]]*) ;;
+        *) return 1 ;;
+    esac
     valid_accessibility_services_snapshot "$accessibility_primary_services" || \
         return 1
     valid_accessibility_services_snapshot "$accessibility_alternate_services" || \

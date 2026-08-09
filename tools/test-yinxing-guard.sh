@@ -1035,6 +1035,30 @@ test_repair_is_idempotent() {
     pass "repair is idempotent"
 }
 
+test_repair_retains_noncanonical_accessibility_transaction() {
+    local journal marker="$TEST_ROOT/state/accessibility_transaction"
+
+    for journal in \
+        "pending|0|1|null|$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|NULL|$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|"; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+        printf '1\n' > "$ACCESSIBILITY_ENABLED"
+        printf '%s\n' "$journal" > "$marker"
+        if repair_state; then
+            fail "noncanonical accessibility transaction unexpectedly recovered"
+        fi
+        [[ -f "$marker" ]] || \
+            fail "noncanonical accessibility transaction lost evidence"
+        assert_not_contains "$CALLS" "settings --user 0 put secure"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    done
+    pass "repair retains noncanonical accessibility transaction"
+}
+
 test_accessibility_applied_write_errors_are_compensated() {
     local phase control
 
@@ -2808,7 +2832,10 @@ test_uninstall_retains_malformed_accessibility_transaction() {
         'pending|0|1|original|primary|alternate|extra' \
         "pending|0|0|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|talkback:other" \
         'pending|0|1|talkback:other|caregiver.reader/service|talkback:other' \
-        "pending|0|1|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|caregiver.reader/service"; do
+        "pending|0|1|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|caregiver.reader/service" \
+        "pending|0|1|null|$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|NULL|$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|"; do
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
         printf '%s\n' "$journal" > "$marker"
@@ -3652,6 +3679,7 @@ case "$MODE" in
         test_accessibility_applied_write_errors_are_compensated
         test_accessibility_initial_writes_roll_back_after_module_deactivation
         test_accessibility_failed_compensation_is_recovered_on_uninstall
+        test_repair_retains_noncanonical_accessibility_transaction
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
         test_rebind_preserves_caregiver_change_while_module_remains_active
         test_rebind_restores_original_enabled_state_after_interruption
@@ -3706,6 +3734,7 @@ case "$MODE" in
         test_accessibility_applied_write_errors_are_compensated
         test_accessibility_initial_writes_roll_back_after_module_deactivation
         test_accessibility_failed_compensation_is_recovered_on_uninstall
+        test_repair_retains_noncanonical_accessibility_transaction
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
         test_rebind_preserves_caregiver_change_while_module_remains_active
@@ -3848,6 +3877,7 @@ case "$MODE" in
         test_accessibility_applied_write_errors_are_compensated
         test_accessibility_initial_writes_roll_back_after_module_deactivation
         test_accessibility_failed_compensation_is_recovered_on_uninstall
+        test_repair_retains_noncanonical_accessibility_transaction
         test_repair_confirms_binding_after_crash
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
