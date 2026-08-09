@@ -42,14 +42,16 @@ on a ROM-private API.
 ### Internal command boundary
 
 Add one shared internal helper in `bin/common.sh` that invokes a fixed Android
-command through explicit KernelSU BusyBox applets. It starts
-`busybox timeout -k 1` in a new `busybox setsid` session, waits for the timeout
-runner, and then kills only that newly allocated process group so a shell
-wrapper's stalled descendant cannot keep a command-substitution pipe open. The
-default bound is two seconds and a positive numeric test override is accepted
-through the existing module-test environment convention. The helper is only
-called at literal internal call sites; it is not exposed through the APK
-bridge.
+command through explicit KernelSU BusyBox applets. `busybox setsid` creates a
+dedicated supervisor shell as the live session/process-group leader, and that
+supervisor runs `busybox timeout -k 1`. On any nonzero command result, the live
+leader sends `SIGKILL` to its own `-$$` process group before it can be reaped.
+This prevents PID-reuse targeting and ensures a shell wrapper's stalled
+descendant cannot keep a command-substitution pipe open even if the APK or
+calling module shell exits first. The default bound is two seconds and a
+positive numeric test override is accepted through the existing module-test
+environment convention. The helper is only called at literal internal call
+sites; it is not exposed through the APK bridge.
 
 The production BusyBox path is fixed to `/data/adb/ksu/bin/busybox`. A
 test-environment override and `command -v busybox` fallback allow the same
@@ -99,7 +101,11 @@ configured internal bound. Add behavior tests for:
    no HOME launch;
 3. a stalled HOME command producing a bounded failed fixed command; and
 4. the standalone uninstall cleanup command retaining its existing state when
-   its Doze removal command times out.
+   its Doze removal command times out;
+5. a stalled HOME descendant being removed after the outer caller is killed;
+   and
+6. malformed and non-positive timeout overrides falling back to the safe
+   two-second default while an unrelated process remains untouched by cleanup.
 
 The same tests run in host `sh` and BusyBox `ash`. Existing bound/unbound,
 unknown, first-enable, keepalive, lock, supervisor, and packaging tests remain
