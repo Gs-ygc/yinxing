@@ -1017,10 +1017,61 @@ home_role_state() {
         return 0
     fi
     case "$home_holder" in
-        "$PACKAGE_NAME") printf 'owned\n' ;;
+        "$PACKAGE_NAME")
+            if ! home_resolver="$(home_resolver_state)"; then
+                printf 'unknown\n'
+                return 0
+            fi
+            case "$home_resolver" in
+                target) printf 'owned\n' ;;
+                other) printf 'other\n' ;;
+                none) printf 'none\n' ;;
+                *) printf 'unknown\n' ;;
+            esac
+            ;;
         none) printf 'none\n' ;;
         *) printf 'other\n' ;;
     esac
+}
+
+repair_owned_home_route_locked() {
+    owned_route_state="$1"
+    case "$owned_route_state" in
+        target)
+            return 0
+            ;;
+        other|none)
+            ;;
+        *)
+            log_event "home_route_unknown"
+            return 1
+            ;;
+    esac
+    module_is_active || return 1
+    if ! route_current_holder="$(read_home_role_holder)" || \
+        [ "$route_current_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_route_holder_changed_before_set"
+        return 1
+    fi
+    if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
+        "$HOME_COMPONENT" >/dev/null 2>&1; then
+        log_event "home_route_set_failed"
+        return 1
+    fi
+    module_is_active || return 1
+    if ! route_confirmed_holder="$(read_home_role_holder)" || \
+        [ "$route_confirmed_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_route_holder_unconfirmed"
+        return 1
+    fi
+    if ! route_confirmed_state="$(home_resolver_state)" || \
+        [ "$route_confirmed_state" != target ]; then
+        log_event "home_route_unconfirmed"
+        return 1
+    fi
+    module_is_active || return 1
+    log_event "home_route_repaired"
+    return 0
 }
 
 record_home_holder_marker() {
@@ -1395,6 +1446,13 @@ repair_home_role_locked() {
     esac
 
     if [ "$current_home_holder" = "$PACKAGE_NAME" ]; then
+        if ! current_home_resolver="$(home_resolver_state)"; then
+            log_event "home_route_query_failed"
+            return 1
+        fi
+        if [ "$current_home_resolver" != target ]; then
+            repair_owned_home_route_locked "$current_home_resolver" || return 1
+        fi
         case "$saved_takeover_state" in
             owned) return 0 ;;
             pending\|*)
@@ -1508,6 +1566,11 @@ repair_home_role_locked() {
     fi
     if [ "$confirmed_home_holder" != "$PACKAGE_NAME" ]; then
         log_event "home_role_unconfirmed"
+        return 1
+    fi
+    if ! confirmed_home_resolver="$(home_resolver_state)" || \
+        [ "$confirmed_home_resolver" != target ]; then
+        log_event "home_route_unconfirmed"
         return 1
     fi
     if ! module_is_active; then

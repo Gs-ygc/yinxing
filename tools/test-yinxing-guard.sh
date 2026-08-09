@@ -620,6 +620,7 @@ test_home_role_owned_is_idempotent() {
 
 test_home_resolver_target_is_owned() {
     reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
         "$TEST_ROOT/home_resolved_component"
     assert_equals target "$(read_home_resolved_component)" "target resolver component"
@@ -633,6 +634,11 @@ test_home_resolver_mismatch_is_degraded_and_repaired() {
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     printf 'com.oplus.launcher/.Launcher\n' > "$TEST_ROOT/home_resolved_component"
     repair_state || fail "known resolver mismatch should be repaired"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS")" \
+        "known resolver mismatch repair count"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "role-owned resolver repair created rollback marker"
     assert_equals 'com.yinxing.launcher/.feature.home.MainActivity' \
         "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" "resolver repair"
     assert_equals owned "$(home_role_state)" "repaired resolver state"
@@ -648,6 +654,25 @@ test_home_resolver_unknown_is_safe() {
     assert_not_contains "$CALLS" "cmd package set-home-activity"
 }
 
+test_home_resolver_takeover_confirmation_retains_pending() {
+    reset_fixture
+    printf 'com.oplus.launcher/.Launcher\n' > "$TEST_ROOT/home_resolved_component"
+    touch "$TEST_ROOT/ignore_home_resolver_set"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "unconfirmed resolver takeover unexpectedly reported success"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "resolver takeover role is applied"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "resolver takeover retains original holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state" | sed 's/^pending|[^|]*|//')" \
+        "resolver takeover retains pending state"
+    assert_not_contains "$CALLS" "am start"
+    pass "resolver takeover confirmation retains pending evidence"
+}
+
 test_home_resolver_no_activity_found_is_empty() {
     reset_fixture
     : > "$HOME_HOLDER"
@@ -661,6 +686,7 @@ test_home_resolver_no_activity_found_is_empty() {
 
 test_home_resolver_accepts_fully_qualified_target_class() {
     reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     printf 'com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity\n' > \
         "$TEST_ROOT/home_resolved_component"
     assert_equals target "$(read_home_resolved_component)" \
@@ -673,6 +699,7 @@ test_home_resolver_rejects_invalid_package() {
 
     for component in 'bad package/.Launcher' 'com.bad-name/.Launcher' '1.2/.Launcher'; do
         reset_fixture
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
         printf '%s\n' "$component" > "$TEST_ROOT/home_resolved_component"
         assert_equals unknown "$(read_home_resolved_component)" \
             "invalid resolver package ($component)"
@@ -691,6 +718,7 @@ test_home_resolver_rejects_multiple_lines_and_trailing_blank() {
         $'com.yinxing.launcher/.feature.home.MainActivity\ncom.oplus.launcher/.Launcher\n' \
         $'com.yinxing.launcher/.feature.home.MainActivity\n\n'; do
         reset_fixture
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
         printf '%s' "$output" > "$TEST_ROOT/malformed_home_resolver_output"
         assert_equals unknown "$(read_home_resolved_component)" \
             "malformed resolver evidence"
@@ -706,6 +734,7 @@ test_home_resolver_bounds_stalled_query() {
     local started_at elapsed output
 
     reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/hang_home_resolver_query"
     started_at=$SECONDS
     if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$MODULE_ROOT/action.sh"; then
@@ -3865,6 +3894,7 @@ case "$MODE" in
         test_home_resolver_target_is_owned
         test_home_resolver_mismatch_is_degraded_and_repaired
         test_home_resolver_unknown_is_safe
+        test_home_resolver_takeover_confirmation_retains_pending
         test_home_resolver_no_activity_found_is_empty
         test_home_resolver_accepts_fully_qualified_target_class
         test_home_resolver_rejects_invalid_package
@@ -4016,6 +4046,7 @@ case "$MODE" in
         test_home_resolver_target_is_owned
         test_home_resolver_mismatch_is_degraded_and_repaired
         test_home_resolver_unknown_is_safe
+        test_home_resolver_takeover_confirmation_retains_pending
         test_home_resolver_no_activity_found_is_empty
         test_home_resolver_accepts_fully_qualified_target_class
         test_home_resolver_rejects_invalid_package
