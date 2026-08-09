@@ -798,6 +798,80 @@ read_home_role_holder() {
     printf '%s\n' "$home_output"
 }
 
+read_home_resolved_component() {
+    if ! resolver_output="$(
+        run_guard_command cmd package resolve-activity \
+            --brief --components --user "$ANDROID_USER_ID" \
+            -a android.intent.action.MAIN \
+            -c android.intent.category.HOME 2>/dev/null
+        resolver_status=$?
+        printf '|'
+        exit "$resolver_status"
+    )"; then
+        printf 'unknown\n'
+        return 1
+    fi
+    case "$resolver_output" in
+        *'|') resolver_output=${resolver_output%|} ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+
+    line_feed='
+'
+    case "$resolver_output" in
+        *"$line_feed")
+            resolver_output=${resolver_output%"$line_feed"}
+            ;;
+        *)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+    case "$resolver_output" in
+        ''|*"$line_feed"*|*'|'*|*null*|*NULL*)
+            printf 'unknown\n'
+            return 1
+            ;;
+        'No activity found')
+            printf 'none\n'
+            return 0
+            ;;
+    esac
+
+    resolver_package=${resolver_output%%/*}
+    resolver_class=${resolver_output#*/}
+    [ "$resolver_output" != "$resolver_package" ] || {
+        printf 'unknown\n'
+        return 1
+    }
+    case "$resolver_class" in
+        ''|*/*|*[!A-Za-z0-9_.\$]*)
+            printf 'unknown\n'
+            return 1
+            ;;
+    esac
+    valid_android_package_name "$resolver_package" || {
+        printf 'unknown\n'
+        return 1
+    }
+    case "$resolver_package/$resolver_class" in
+        "$PACKAGE_NAME/.feature.home.MainActivity"|\
+        "$PACKAGE_NAME/$PACKAGE_NAME.feature.home.MainActivity")
+            printf 'target\n'
+            ;;
+        *)
+            printf 'other\n'
+            ;;
+    esac
+}
+
+home_resolver_state() {
+    read_home_resolved_component
+}
+
 read_home_holder_marker() {
     marker_path="$1"
     [ ! -L "$marker_path" ] && [ -f "$marker_path" ] || return 1
