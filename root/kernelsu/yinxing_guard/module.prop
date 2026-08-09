@@ -1,6 +1,6 @@
 id=yinxing_guard
 name=Yinxing Root Guard
-version=1.10.0-root-preview.13
-versionCode=13
+version=1.10.0-root-preview.14
+versionCode=14
 author=Yinxing
-description=Boot recovery and accessibility repair for the managed Yinxing launcher.
+description=Boot recovery, HOME ownership, and accessibility repair for the managed Yinxing launcher.
