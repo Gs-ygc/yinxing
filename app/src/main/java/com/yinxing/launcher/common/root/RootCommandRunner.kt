@@ -9,12 +9,14 @@ import kotlin.concurrent.thread
 
 internal enum class RootCommand {
     STATUS,
-    RECOVER;
+    RECOVER,
+    KIOSK_HOME;
 
     val shellPath: String
         get() = when (this) {
             STATUS -> "/data/adb/modules/yinxing_guard/bin/status.sh"
             RECOVER -> "/data/adb/modules/yinxing_guard/action.sh"
+            KIOSK_HOME -> "/data/adb/modules/yinxing_guard/bin/kiosk-home.sh"
         }
 }
 
@@ -24,6 +26,9 @@ internal data class RootCommandResult(
     val timedOut: Boolean = false,
     val outputLimitExceeded: Boolean = false
 )
+
+internal val RootCommandResult.isSuccessful: Boolean
+    get() = exitCode == 0 && !timedOut && !outputLimitExceeded
 
 internal fun interface RootCommandRunner {
     fun run(command: RootCommand): RootCommandResult

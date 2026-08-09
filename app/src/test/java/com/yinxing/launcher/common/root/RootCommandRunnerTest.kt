@@ -11,12 +11,13 @@ import org.junit.Test
 class RootCommandRunnerTest {
 
     @Test
-    fun usesOnlyTheFixedStatusAndRecoveryPaths() {
+    fun usesOnlyTheFixedStatusRecoveryAndKioskPaths() {
         withFakeSu(
             """
             case "${'$'}2" in
                 /data/adb/modules/yinxing_guard/bin/status.sh) printf 'status-ok\n' ;;
                 /data/adb/modules/yinxing_guard/action.sh) printf 'recover-ok\n' ;;
+                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) printf 'kiosk-ok\n' ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
@@ -29,11 +30,14 @@ class RootCommandRunnerTest {
 
             val status = runner.run(RootCommand.STATUS)
             val recovery = runner.run(RootCommand.RECOVER)
+            val kiosk = runner.run(RootCommand.KIOSK_HOME)
 
             assertEquals(0, status.exitCode)
             assertEquals("status-ok\n", status.output)
             assertEquals(0, recovery.exitCode)
             assertEquals("recover-ok\n", recovery.output)
+            assertEquals(0, kiosk.exitCode)
+            assertEquals("kiosk-ok\n", kiosk.output)
         }
     }
 

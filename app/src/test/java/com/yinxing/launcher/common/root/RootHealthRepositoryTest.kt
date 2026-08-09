@@ -72,6 +72,7 @@ class RootHealthRepositoryTest {
             return when (command) {
                 RootCommand.STATUS -> status
                 RootCommand.RECOVER -> recover
+                RootCommand.KIOSK_HOME -> RootCommandResult(0, "")
             }
         }
     }

@@ -42,6 +42,4 @@ internal class RootHealthRepository(
         }
     }
 
-    private val RootCommandResult.isSuccessful: Boolean
-        get() = exitCode == 0 && !timedOut && !outputLimitExceeded
 }
