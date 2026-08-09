@@ -646,15 +646,17 @@ test_repair_bounds_stalled_accessibility_diagnostic() {
     pass "repair bounds stalled accessibility diagnostic"
 }
 
-test_command_timeout_sanitizes_all_zero_override() {
-    local output
+test_command_timeout_sanitizes_non_positive_overrides() {
+    local output override
 
-    reset_fixture
-    output="$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=00 \
-        run_module_script -c '. "$1"; printf "%s\\n" "$GUARD_COMMAND_TIMEOUT_SECONDS"' \
-        yinxing-test "$MODULE_ROOT/bin/common.sh")"
-    assert_equals "2" "$output" "all-zero command timeout should use the safe default"
-    pass "command timeout sanitizes all-zero override"
+    for override in invalid -1 0 00; do
+        reset_fixture
+        output="$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS="$override" \
+            run_module_script -c '. "$1"; printf "%s\\n" "$GUARD_COMMAND_TIMEOUT_SECONDS"' \
+            yinxing-test "$MODULE_ROOT/bin/common.sh")"
+        assert_equals "2" "$output" "invalid command timeout '$override' should use the safe default"
+    done
+    pass "command timeout sanitizes non-positive overrides"
 }
 
 test_repair_keeps_unknown_rebind_confirmation_nonfatal() {
@@ -831,6 +833,8 @@ test_kiosk_home_cleans_stalled_descendant_after_caller_exit() {
     reset_fixture
     mkdir -p "$TEST_ROOT/modules/yinxing_guard"
     touch "$TEST_ROOT/hang_am_descendant"
+    /bin/sleep 5 &
+    LIVE_PID=$!
     if [[ "${YINXING_TEST_SHELL:-}" == "busybox" ]]; then
         ASH_STANDALONE=1 YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
             busybox ash "$MODULE_ROOT/bin/kiosk-home.sh" &
@@ -853,6 +857,10 @@ test_kiosk_home_cleans_stalled_descendant_after_caller_exit() {
         fail "stalled HOME descendant survived caller exit and internal timeout"
     fi
     STALLED_COMMAND_PID=""
+    kill -0 "$LIVE_PID" 2>/dev/null || fail "stalled HOME cleanup targeted an unrelated process"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
     pass "kiosk home cleans stalled descendant after caller exit"
 }
 
@@ -1488,7 +1496,7 @@ case "$MODE" in
         test_action_bounds_stalled_package_query
         test_kiosk_home_bounds_stalled_launch
         test_kiosk_home_cleans_stalled_descendant_after_caller_exit
-        test_command_timeout_sanitizes_all_zero_override
+        test_command_timeout_sanitizes_non_positive_overrides
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -1537,7 +1545,7 @@ case "$MODE" in
         test_repair_does_not_rebind_initial_enable_when_unbound
         test_repair_ignores_partial_accessibility_diagnostic
         test_repair_bounds_stalled_accessibility_diagnostic
-        test_command_timeout_sanitizes_all_zero_override
+        test_command_timeout_sanitizes_non_positive_overrides
         test_repair_keeps_unknown_rebind_confirmation_nonfatal
         test_repair_leaves_bound_or_binding_accessibility_service_untouched
         test_repair_ignores_unavailable_accessibility_diagnostic
