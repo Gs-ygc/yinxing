@@ -9,6 +9,7 @@ FAKE_BIN="$TEST_ROOT/bin"
 CALLS="$TEST_ROOT/calls.log"
 SERVICES="$TEST_ROOT/accessibility_services"
 ACCESSIBILITY_ENABLED="$TEST_ROOT/accessibility_enabled"
+HOME_HOLDER="$TEST_ROOT/home_holder"
 CLEANUP_TARGET="$TEST_ROOT/boot-completed.d/yinxing-guard-uninstall-cleanup.sh"
 PACKAGE_NESTED_DIR="$MODULE_ROOT/.package-test-output"
 
@@ -45,7 +46,8 @@ mkdir -p "$FAKE_BIN"
 : > "$CALLS"
 : > "$SERVICES"
 printf '0\n' > "$ACCESSIBILITY_ENABLED"
-export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED
+printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
+export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER
 export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
@@ -142,6 +144,7 @@ write_fake pm \
     'if [[ -e "$TEST_ROOT/hang_pm_path" && "${args[0]:-}" == "path" ]]; then /bin/sleep 5; fi' \
     'if [[ "${args[0]:-}" == "list" && "${args[1]:-}" == "packages" ]]; then [[ -e "$TEST_ROOT/fail_pm_list" ]] && exit 1; [[ -e "$TEST_ROOT/package_disabled" ]] && printf "package:com.yinxing.launcher\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "dump" ]]; then [[ -e "$TEST_ROOT/fail_pm_dump" ]] && exit 1; printf "Package com.yinxing.launcher\\n"; if [[ -e "$TEST_ROOT/component_disabled" ]]; then printf "disabledComponents: [%s]\\n" "$ACCESSIBILITY_COMPONENT"; else printf "Services: %s\\n" "$ACCESSIBILITY_COMPONENT"; fi; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "path" && "${args[-1]:-}" == "com.oplus.launcher" ]]; then [[ -e "$TEST_ROOT/previous_home_missing" ]] && exit 1; printf "/system/priv-app/OplusLauncher/OplusLauncher.apk\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "enable" ]]; then [[ -e "$TEST_ROOT/fail_pm_enable" ]] && exit 1; exit 0; fi' \
     'exit 2'
@@ -149,6 +152,9 @@ write_fake pm \
 write_fake cmd \
     '#!/usr/bin/env bash' \
     'printf "cmd %s\\n" "$*" >> "$CALLS"' \
+    'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; target="${!#}"; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
@@ -234,6 +240,14 @@ reset_fixture() {
         "$TEST_ROOT/fail_pm_list" \
         "$TEST_ROOT/fail_pm_dump" \
         "$TEST_ROOT/fail_pm_enable" \
+        "$TEST_ROOT/fail_home_role_query" \
+        "$TEST_ROOT/fail_home_role_set" \
+        "$TEST_ROOT/fail_home_role_remove" \
+        "$TEST_ROOT/hang_home_role_query" \
+        "$TEST_ROOT/hang_home_role_set" \
+        "$TEST_ROOT/ignore_home_role_set" \
+        "$TEST_ROOT/malformed_home_role_output" \
+        "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_home_once" \
@@ -254,6 +268,7 @@ reset_fixture() {
         "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
         "$TEST_ROOT/accessibility_dump_sequence"
+    printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
 }
 
 prepare_healthy_status_fixture() {
@@ -269,6 +284,7 @@ prepare_healthy_status_fixture() {
     chmod 0755 "$CLEANUP_TARGET"
     printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
     printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     touch "$TEST_ROOT/doze_whitelisted"
 }
 
@@ -287,14 +303,45 @@ test_status_reports_healthy_state() {
     prepare_healthy_status_fixture
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
-    assert_contains_text "$output" "schema=1"
+    assert_contains_text "$output" "schema=2"
     assert_contains_text "$output" "module=active"
     assert_contains_text "$output" "guard=running"
     assert_contains_text "$output" "accessibility=enabled"
+    assert_contains_text "$output" "home=owned"
     assert_contains_text "$output" "doze=owned"
     assert_contains_text "$output" "cleanup=ready"
     assert_contains_text "$output" "last_repair=ok"
     pass "status reports healthy state"
+}
+
+test_status_reports_other_home_holder() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=other"
+    pass "status reports another HOME holder"
+}
+
+test_status_reports_no_home_holder() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    : > "$HOME_HOLDER"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=none"
+    pass "status reports no HOME holder"
+}
+
+test_status_reports_unknown_home_holder() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    touch "$TEST_ROOT/fail_home_role_query"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home=unknown"
+    pass "status reports unknown HOME holder"
 }
 
 test_status_reports_disabled_package_as_disabled() {
@@ -374,7 +421,7 @@ test_status_output_contract_ignores_log_noise() {
     prepare_healthy_status_fixture
     touch "$TEST_ROOT/fail_deviceidle_query" "$TEST_ROOT/log_noise"
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
-    assert_equals "8" "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" "status output line count"
+    assert_equals "9" "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" "status output line count"
     assert_not_contains_text "$output" "log-noise"
     pass "status output contract ignores log noise"
 }
@@ -421,7 +468,193 @@ test_status_reports_missing_module() {
     assert_contains_text "$output" "module=missing"
     assert_contains_text "$output" "guard=missing"
     assert_contains_text "$output" "accessibility=missing"
+    assert_contains_text "$output" "home=unknown"
     pass "status reports missing module"
+}
+
+test_home_role_owned_is_idempotent() {
+    reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    repair_state || fail "owned HOME should be healthy"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "manual HOME ownership was claimed"
+    pass "owned HOME role is idempotent"
+}
+
+test_home_role_reconciles_other_holder() {
+    reset_fixture
+    repair_state || fail "another HOME holder should be reconciled"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" "HOME takeover"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" "prior HOME marker"
+    assert_equals "600" "$(stat -c '%a' "$TEST_ROOT/state/home_previous_holder")" \
+        "prior HOME marker mode"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity$' "$CALLS")" \
+        "fixed HOME takeover count"
+    pass "HOME role reconciles another holder"
+}
+
+test_home_role_reconciles_no_holder() {
+    reset_fixture
+    : > "$HOME_HOLDER"
+    repair_state || fail "empty HOME should be reconciled"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" "empty HOME takeover"
+    assert_equals "none" "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "empty HOME marker"
+    pass "HOME role reconciles no holder"
+}
+
+test_home_role_query_failure_is_safe() {
+    reset_fixture
+    touch "$TEST_ROOT/fail_home_role_query"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "failed HOME query unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "failed HOME query preserves holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "failed HOME query repair result"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role query failure is safe"
+}
+
+test_home_role_malformed_output_is_safe() {
+    reset_fixture
+    printf 'bad holder\n' > "$TEST_ROOT/malformed_home_role_output"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "malformed HOME output unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "malformed HOME output preserves holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "malformed HOME output repair result"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "malformed HOME role output is safe"
+}
+
+test_home_role_multiple_holders_are_safe() {
+    reset_fixture
+    printf 'com.oplus.launcher\ncom.example.launcher\n' > "$TEST_ROOT/malformed_home_role_output"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "multiple HOME holders unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "multiple HOME holders preserve current holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "multiple HOME holders repair result"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "multiple HOME role holders are safe"
+}
+
+test_home_role_invalid_marker_is_safe() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'bad holder\n' > "$TEST_ROOT/state/home_previous_holder"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "invalid HOME marker unexpectedly reported recovery success"
+    fi
+    assert_equals "bad holder" "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "invalid HOME marker is retained"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "invalid HOME marker preserves holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "invalid HOME marker repair result"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "invalid HOME role marker is safe"
+}
+
+test_home_role_marker_write_failure_is_safe() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state/home_previous_holder.tmp.$$"
+    if repair_state; then
+        fail "HOME marker write failure unexpectedly reported success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME marker write failure preserves holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role marker write failure is safe"
+}
+
+test_home_role_set_failure_retains_marker() {
+    reset_fixture
+    touch "$TEST_ROOT/fail_home_role_set"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "failed HOME set unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "failed HOME set preserves holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "failed HOME set retains prior holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "failed HOME set repair result"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role set failure retains marker"
+}
+
+test_home_role_unconfirmed_set_retains_marker() {
+    reset_fixture
+    touch "$TEST_ROOT/ignore_home_role_set"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "unconfirmed HOME set unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "unconfirmed HOME set preserves holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "unconfirmed HOME set retains prior holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "unconfirmed HOME set repair result"
+    assert_not_contains "$CALLS" "am start"
+    pass "unconfirmed HOME role set retains marker"
+}
+
+test_home_role_bounds_stalled_query() {
+    local started_at elapsed
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_home_role_query"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "stalled HOME query unexpectedly reported recovery success"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled HOME query exceeded bound (${elapsed}s)"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stalled HOME query preserves holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "stalled HOME query repair result"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role query is bounded"
+}
+
+test_home_role_bounds_stalled_set() {
+    local started_at elapsed
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_home_role_set"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "stalled HOME set unexpectedly reported recovery success"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled HOME set exceeded bound (${elapsed}s)"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stalled HOME set preserves holder"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "stalled HOME set retains prior holder"
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "stalled HOME set repair result"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role set is bounded"
 }
 
 test_repair_preserves_and_enables() {
@@ -1473,6 +1706,9 @@ case "$MODE" in
         ;;
     --status-only)
         test_status_reports_healthy_state
+        test_status_reports_other_home_holder
+        test_status_reports_no_home_holder
+        test_status_reports_unknown_home_holder
         test_status_reports_disabled_package_as_disabled
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
@@ -1488,6 +1724,18 @@ case "$MODE" in
         test_module_package
         ;;
     --guard-only)
+        test_home_role_owned_is_idempotent
+        test_home_role_reconciles_other_holder
+        test_home_role_reconciles_no_holder
+        test_home_role_query_failure_is_safe
+        test_home_role_malformed_output_is_safe
+        test_home_role_multiple_holders_are_safe
+        test_home_role_invalid_marker_is_safe
+        test_home_role_marker_write_failure_is_safe
+        test_home_role_set_failure_retains_marker
+        test_home_role_unconfirmed_set_retains_marker
+        test_home_role_bounds_stalled_query
+        test_home_role_bounds_stalled_set
         test_repair_confirms_binding_after_confirmed_unbound
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
@@ -1526,6 +1774,9 @@ case "$MODE" in
     all)
         test_merge_cases
         test_status_reports_healthy_state
+        test_status_reports_other_home_holder
+        test_status_reports_no_home_holder
+        test_status_reports_unknown_home_holder
         test_status_reports_disabled_package_as_disabled
         test_status_reports_disabled_component_as_disabled
         test_status_reports_unknown_when_package_state_query_fails
@@ -1536,6 +1787,18 @@ case "$MODE" in
         test_status_reports_stale_guard_as_degraded
         test_status_reports_stale_guard_when_pid_identity_mismatches
         test_status_reports_missing_module
+        test_home_role_owned_is_idempotent
+        test_home_role_reconciles_other_holder
+        test_home_role_reconciles_no_holder
+        test_home_role_query_failure_is_safe
+        test_home_role_malformed_output_is_safe
+        test_home_role_multiple_holders_are_safe
+        test_home_role_invalid_marker_is_safe
+        test_home_role_marker_write_failure_is_safe
+        test_home_role_set_failure_retains_marker
+        test_home_role_unconfirmed_set_retains_marker
+        test_home_role_bounds_stalled_query
+        test_home_role_bounds_stalled_set
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_repair_confirms_binding_after_crash
