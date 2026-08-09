@@ -1973,6 +1973,7 @@ test_binding_stall_rejects_malformed_evidence() {
         'binding|bad boot|1|0\n' \
         'binding|fixture-boot|1|0|extra\n' \
         'binding|fixture-boot|100001|0\n' \
+        'binding|fixture-boot|1000000|0\n' \
         'binding|fixture-boot|-1|0\n'; do
         prepare_binding_stall_fixture
         mkdir -p "$TEST_ROOT/state"

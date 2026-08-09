@@ -249,6 +249,7 @@ valid_accessibility_binding_stall_value() {
         0|[1-9]*) ;;
         *) return 1 ;;
     esac
+    [ "${#stall_observations}" -le 6 ] || return 1
     case "$stall_rebind_attempts" in
         ''|*[!0-9]*) return 1 ;;
     esac
@@ -256,6 +257,7 @@ valid_accessibility_binding_stall_value() {
         0|[1-9]*) ;;
         *) return 1 ;;
     esac
+    [ "${#stall_rebind_attempts}" -le 6 ] || return 1
     [ "$stall_observations" -le 100000 ] 2>/dev/null || return 1
     [ "$stall_rebind_attempts" -le 100000 ] 2>/dev/null || return 1
     return 0
