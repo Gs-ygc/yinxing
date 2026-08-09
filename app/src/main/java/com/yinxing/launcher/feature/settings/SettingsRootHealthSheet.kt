@@ -244,7 +244,7 @@ private fun SettingsActivity.rootHealthHubSummary(snapshot: RootHealthSnapshot):
     )
 }
 
-private fun SettingsActivity.rootHealthStatusSummary(snapshot: RootHealthSnapshot): String {
+internal fun SettingsActivity.rootHealthStatusSummary(snapshot: RootHealthSnapshot): String {
     if (snapshot.state == RootHealthState.UNCHECKED || snapshot.state == RootHealthState.ROOT_UNAVAILABLE) {
         return rootHealthHubSummary(snapshot)
     }
@@ -253,6 +253,7 @@ private fun SettingsActivity.rootHealthStatusSummary(snapshot: RootHealthSnapsho
         rootValueLabel(snapshot.module),
         rootValueLabel(snapshot.guard),
         rootValueLabel(snapshot.accessibility),
+        rootValueLabel(snapshot.home),
         rootValueLabel(snapshot.doze),
         rootValueLabel(snapshot.cleanup),
         rootValueLabel(snapshot.lastRepair)
@@ -288,7 +289,8 @@ private fun SettingsActivity.rootHealthBadge(snapshot: RootHealthSnapshot): Badg
 private fun SettingsActivity.rootValueLabel(value: String): String {
     return when (value) {
         "active", "running", "enabled", "owned", "present", "ready", "ok" -> getString(R.string.settings_root_value_ready)
-        "disabled", "stale", "absent", "failed" -> getString(R.string.settings_root_value_pending)
+        "disabled", "stale", "other", "none", "absent", "failed" ->
+            getString(R.string.settings_root_value_pending)
         "missing" -> getString(R.string.settings_root_value_missing)
         "removing", "invalid" -> getString(R.string.settings_root_value_problem)
         else -> getString(R.string.settings_root_value_unknown)

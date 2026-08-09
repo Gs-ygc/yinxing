@@ -11,6 +11,8 @@ import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootHealthSnapshot
+import com.yinxing.launcher.common.root.RootHealthState
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import com.yinxing.launcher.feature.incoming.IncomingCallDiagnostics
@@ -108,6 +110,30 @@ class SettingsActivitySmokeTest {
             activity.getString(R.string.settings_root_hub_summary_unchecked),
             activity.findViewById<TextView>(R.id.tv_root_hub_summary).text.toString()
         )
+    }
+
+    @Test
+    fun rootHealthStatusSummaryIncludesHomeOwnership() {
+        val activity = buildActivity()
+        val schemaTwo = checkNotNull(RootHealthSnapshot.parse(schemaTwoRootHealth()))
+        val otherHome = checkNotNull(
+            RootHealthSnapshot.parse(schemaTwoRootHealth().replace("home=owned", "home=other"))
+        )
+        val schemaOne = checkNotNull(
+            RootHealthSnapshot.parse(
+                schemaTwoRootHealth()
+                    .replace("schema=2", "schema=1")
+                    .lineSequence()
+                    .filterNot { it.startsWith("home=") }
+                    .joinToString("\n")
+            )
+        )
+
+        assertEquals(RootHealthState.HEALTHY, schemaTwo.state)
+        assertEquals(RootHealthState.DEGRADED, schemaOne.state)
+        assertTrue(activity.rootHealthStatusSummary(schemaTwo).contains("桌面 正常"))
+        assertTrue(activity.rootHealthStatusSummary(otherHome).contains("桌面 待处理"))
+        assertTrue(activity.rootHealthStatusSummary(schemaOne).contains("桌面 未知"))
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -261,6 +287,18 @@ class SettingsActivitySmokeTest {
         Robolectric.buildActivity(SettingsActivity::class.java).setup().get()
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+    private fun schemaTwoRootHealth(): String = """
+        schema=2
+        version=1.10.0-root-preview.14
+        module=active
+        guard=running
+        accessibility=enabled
+        home=owned
+        doze=owned
+        cleanup=ready
+        last_repair=ok
+    """.trimIndent()
 
     @Suppress("DEPRECATION")
     private fun registerSettingsActivity() {

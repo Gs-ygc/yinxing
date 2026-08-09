@@ -16,7 +16,71 @@ class RootHealthSnapshotTest {
         assertEquals("1.10.0-root-preview.3", snapshot?.version)
         assertEquals("running", snapshot?.guard)
         assertEquals("enabled", snapshot?.accessibility)
+        assertEquals("owned", snapshot?.home)
         assertEquals("owned", snapshot?.doze)
+    }
+
+    @Test
+    fun schemaTwoRequiresOwnedHomeForHealthy() {
+        val snapshot = RootHealthSnapshot.parse(
+            validSnapshot().replace("home=owned", "home=other")
+        )
+
+        assertNotNull(snapshot)
+        assertEquals(RootHealthState.DEGRADED, snapshot?.state)
+    }
+
+    @Test
+    fun schemaTwoOtherNoneAndUnknownHomeAreDegraded() {
+        listOf("other", "none", "unknown").forEach { home ->
+            val snapshot = RootHealthSnapshot.parse(
+                validSnapshot().replace("home=owned", "home=$home")
+            )
+
+            assertNotNull(snapshot)
+            assertEquals(home, snapshot?.home)
+            assertEquals(RootHealthState.DEGRADED, snapshot?.state)
+        }
+    }
+
+    @Test
+    fun schemaTwoRejectsMissingDuplicateAndUnsupportedHome() {
+        val missingHome = validSnapshot().trimEnd()
+            .lineSequence()
+            .filterNot { it.startsWith("home=") }
+            .joinToString("\n", postfix = "\n")
+
+        assertNull(RootHealthSnapshot.parse(missingHome))
+        assertNull(RootHealthSnapshot.parse(validSnapshot() + "home=owned\n"))
+        assertNull(RootHealthSnapshot.parse(validSnapshot().replace("home=owned", "home=default")))
+    }
+
+    @Test
+    fun schemaOneRemainsParseableButDegradedWithUnknownHome() {
+        val legacySnapshot = validSnapshot()
+            .replace("schema=2", "schema=1")
+            .trimEnd()
+            .lineSequence()
+            .filterNot { it.startsWith("home=") }
+            .joinToString("\n", postfix = "\n")
+
+        val snapshot = RootHealthSnapshot.parse(legacySnapshot)
+
+        assertNotNull(snapshot)
+        assertEquals("unknown", snapshot?.home)
+        assertEquals(RootHealthState.DEGRADED, snapshot?.state)
+    }
+
+    @Test
+    fun rejectsSchemaOneWithHomeAndSchemaTwoWithoutHome() {
+        val schemaOneWithHome = validSnapshot().replace("schema=2", "schema=1")
+        val schemaTwoWithoutHome = validSnapshot().trimEnd()
+            .lineSequence()
+            .filterNot { it.startsWith("home=") }
+            .joinToString("\n", postfix = "\n")
+
+        assertNull(RootHealthSnapshot.parse(schemaOneWithHome))
+        assertNull(RootHealthSnapshot.parse(schemaTwoWithoutHome))
     }
 
     @Test
@@ -63,7 +127,7 @@ class RootHealthSnapshotTest {
 
     @Test
     fun rejectsMissingRequiredKeys() {
-        val missingDoze = validSnapshot()
+        val missingDoze = validSnapshot().trimEnd()
             .lineSequence()
             .filterNot { it.startsWith("doze=") }
             .joinToString("\n", postfix = "\n")
@@ -90,11 +154,12 @@ class RootHealthSnapshotTest {
     }
 
     private fun validSnapshot(): String = """
-        schema=1
+        schema=2
         version=1.10.0-root-preview.3
         module=active
         guard=running
         accessibility=enabled
+        home=owned
         doze=owned
         cleanup=ready
         last_repair=ok
