@@ -54,7 +54,7 @@ guard_state() {
 }
 
 package_enabled_state() {
-    if ! disabled_packages="$(pm list packages -d --user "$ANDROID_USER_ID" "$PACKAGE_NAME" 2>/dev/null)"; then
+    if ! disabled_packages="$(run_guard_command pm list packages -d --user "$ANDROID_USER_ID" "$PACKAGE_NAME" 2>/dev/null)"; then
         printf 'unknown\n'
         return
     fi
@@ -66,7 +66,7 @@ package_enabled_state() {
 }
 
 component_enabled_state() {
-    if ! package_dump="$(pm dump "$PACKAGE_NAME" 2>/dev/null)"; then
+    if ! package_dump="$(run_guard_command pm dump "$PACKAGE_NAME" 2>/dev/null)"; then
         printf 'unknown\n'
         return
     fi
@@ -85,7 +85,7 @@ component_enabled_state() {
 
 accessibility_state() {
     if [ ! -d "$MODULE_DIR" ] || \
-        ! pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
+        ! run_guard_command pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         printf 'missing\n'
         return
     fi
@@ -111,8 +111,8 @@ accessibility_state() {
             return
             ;;
     esac
-    if ! current_services="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)" || \
-        ! enabled_state="$(settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
+    if ! current_services="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)" || \
+        ! enabled_state="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
         printf 'unknown\n'
         return
     fi

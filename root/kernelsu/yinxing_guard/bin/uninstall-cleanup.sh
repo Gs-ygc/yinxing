@@ -7,6 +7,26 @@ MODULE_VERSION="1.10.0-root-preview.12"
 MARKER="$STATE_DIR/doze_added_by_module"
 SELF_PATH="$0"
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
+GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
+case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
+    ''|*[!0-9]*|0) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
+esac
+GUARD_BUSYBOX_BIN="${YINXING_GUARD_BUSYBOX_BIN:-/data/adb/ksu/bin/busybox}"
+if [ ! -x "$GUARD_BUSYBOX_BIN" ]; then
+    GUARD_BUSYBOX_BIN="$(command -v busybox 2>/dev/null || true)"
+fi
+
+run_guard_command() {
+    [ -n "$GUARD_BUSYBOX_BIN" ] || return 127
+
+    "$GUARD_BUSYBOX_BIN" setsid \
+        "$GUARD_BUSYBOX_BIN" timeout -k 1 "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@" &
+    guard_command_runner_pid=$!
+    wait "$guard_command_runner_pid"
+    guard_command_status=$?
+    "$GUARD_BUSYBOX_BIN" kill -KILL "-$guard_command_runner_pid" >/dev/null 2>&1 || true
+    return "$guard_command_status"
+}
 
 log_event() {
     if command -v log >/dev/null 2>&1; then
@@ -40,7 +60,7 @@ if [ "$(cat "$MARKER" 2>/dev/null)" != "added" ]; then
     exit 1
 fi
 
-if ! cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1; then
+if ! run_guard_command cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1; then
     log_event "uninstall_doze_cleanup_deferred"
     exit 1
 fi

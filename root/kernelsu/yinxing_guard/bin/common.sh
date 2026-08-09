@@ -9,6 +9,26 @@ LOG_TAG="YinxingGuard"
 MODULE_VERSION="1.10.0-root-preview.12"
 GUARD_OWNER_ACTIVE_STATUS=76
 CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
+GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
+case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
+    ''|*[!0-9]*|0) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
+esac
+GUARD_BUSYBOX_BIN="${YINXING_GUARD_BUSYBOX_BIN:-/data/adb/ksu/bin/busybox}"
+if [ ! -x "$GUARD_BUSYBOX_BIN" ]; then
+    GUARD_BUSYBOX_BIN="$(command -v busybox 2>/dev/null || true)"
+fi
+
+run_guard_command() {
+    [ -n "$GUARD_BUSYBOX_BIN" ] || return 127
+
+    "$GUARD_BUSYBOX_BIN" setsid \
+        "$GUARD_BUSYBOX_BIN" timeout -k 1 "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@" &
+    guard_command_runner_pid=$!
+    wait "$guard_command_runner_pid"
+    guard_command_status=$?
+    "$GUARD_BUSYBOX_BIN" kill -KILL "-$guard_command_runner_pid" >/dev/null 2>&1 || true
+    return "$guard_command_status"
+}
 
 log_event() {
     message="$1"
@@ -104,7 +124,7 @@ remove_accessibility_service() {
 }
 
 accessibility_service_binding_state() {
-    if ! accessibility_dump="$(dumpsys accessibility 2>/dev/null)"; then
+    if ! accessibility_dump="$(run_guard_command dumpsys accessibility 2>/dev/null)"; then
         printf 'unknown\n'
         return 0
     fi
@@ -193,16 +213,16 @@ rebind_accessibility_service() {
     esac
 
     without="$(remove_accessibility_service "$current" "$ACCESSIBILITY_COMPONENT")"
-    if ! settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$without"; then
+    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$without"; then
         log_event "accessibility_service_rebind_remove_failed"
         return 1
     fi
     sleep 1
-    if ! settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged"; then
+    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged"; then
         log_event "accessibility_service_rebind_restore_failed"
         return 1
     fi
-    if ! settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1; then
+    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1; then
         log_event "accessibility_service_rebind_enable_failed"
         return 1
     fi
@@ -227,7 +247,7 @@ read_boot_id_from() {
         boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
     fi
     if [ -z "$boot_id" ]; then
-        boot_id="$(getprop ro.runtime.firstboot 2>/dev/null || true)"
+        boot_id="$(run_guard_command getprop ro.runtime.firstboot 2>/dev/null || true)"
     fi
     [ -n "$boot_id" ] || boot_id="unknown"
     printf '%s\n' "$boot_id"
@@ -286,25 +306,25 @@ install_cleanup_helper() {
 }
 
 repair_accessibility() {
-    if ! pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
+    if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_missing"
         return 1
     fi
 
-    if ! pm enable --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
+    if ! run_guard_command pm enable --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_enable_failed"
         return 1
     fi
-    if ! pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1; then
+    if ! run_guard_command pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1; then
         log_event "service_enable_failed"
         return 1
     fi
 
-    if ! current="$(settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)"; then
+    if ! current="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)"; then
         log_event "accessibility_services_read_failed"
         return 1
     fi
-    if ! enabled="$(settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
+    if ! enabled="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
         log_event "accessibility_enabled_read_failed"
         return 1
     fi
@@ -322,7 +342,7 @@ repair_accessibility() {
     merged="$(merge_accessibility_services "$current" "$ACCESSIBILITY_COMPONENT")"
     accessibility_changed=0
     if [ "$merged" != "$current" ]; then
-        settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged" || {
+        run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged" || {
             log_event "accessibility_services_write_failed"
             return 1
         }
@@ -330,7 +350,7 @@ repair_accessibility() {
     fi
 
     if [ "$enabled" != "1" ]; then
-        settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1 || {
+        run_guard_command settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1 || {
             log_event "accessibility_enabled_write_failed"
             return 1
         }
@@ -356,7 +376,7 @@ repair_accessibility() {
 }
 
 doze_contains_package() {
-    if ! output="$(cmd deviceidle whitelist 2>/dev/null)"; then
+    if ! output="$(run_guard_command cmd deviceidle whitelist 2>/dev/null)"; then
         log_event "doze_whitelist_read_failed"
         return 2
     fi
@@ -376,14 +396,14 @@ repair_keepalive() {
             log_event "doze_whitelist_skipped_no_state"
         elif [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
             log_event "doze_whitelist_skipped_no_cleanup"
-        elif cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
+        elif run_guard_command cmd deviceidle whitelist "+$PACKAGE_NAME" >/dev/null 2>&1; then
             marker_tmp="$STATE_DIR/doze_added_by_module.tmp.$$"
             rm -f "$marker_tmp"
             if ! printf 'added\n' > "$marker_tmp" 2>/dev/null || \
                 ! mv -f "$marker_tmp" "$STATE_DIR/doze_added_by_module" 2>/dev/null; then
                 rm -f "$marker_tmp"
                 log_event "doze_marker_write_failed"
-                cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
+                run_guard_command cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
                     log_event "doze_rollback_failed"
             fi
         else
@@ -391,9 +411,9 @@ repair_keepalive() {
         fi
     fi
 
-    cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_IN_BACKGROUND allow \
+    run_guard_command cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_IN_BACKGROUND allow \
         >/dev/null 2>&1 || log_event "background_appop_unsupported"
-    cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_ANY_IN_BACKGROUND allow \
+    run_guard_command cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_ANY_IN_BACKGROUND allow \
         >/dev/null 2>&1 || log_event "any_background_appop_unsupported"
     return 0
 }
@@ -405,7 +425,7 @@ repair_state() {
 }
 
 launch_home() {
-    am start --user "$ANDROID_USER_ID" -n "$HOME_COMPONENT" >/dev/null 2>&1 || {
+    run_guard_command am start --user "$ANDROID_USER_ID" -n "$HOME_COMPONENT" >/dev/null 2>&1 || {
         log_event "home_launch_failed"
         return 1
     }

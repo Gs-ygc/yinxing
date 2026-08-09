@@ -175,7 +175,7 @@ acquire_lock() {
 
 wait_for_boot() {
     attempts=0
-    while [ "$(getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
+    while [ "$(run_guard_command getprop sys.boot_completed 2>/dev/null)" != "1" ]; do
         if [ "$BOOT_WAIT_MAX_CYCLES" -gt 0 ] && [ "$attempts" -ge "$BOOT_WAIT_MAX_CYCLES" ]; then
             log_event "boot_wait_timeout"
             return 1
