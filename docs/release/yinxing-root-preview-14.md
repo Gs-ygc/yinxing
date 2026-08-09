@@ -53,7 +53,7 @@ Preview 13 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 ## 验证记录
 
 - 环境：Gradle 9.3.1、OpenJDK 21、Android SDK Build Tools 36.0.0、BusyBox 1.36.1；Root 模块最终源码提交 `e5f049e`。
-- `bash tools/test-yinxing-guard.sh all`：主机 Shell、递归 BusyBox ash 和两次确定性模块打包均通过，耗时 2m35.853s。
+- `bash tools/test-yinxing-guard.sh all`：主机 Shell、递归 BusyBox ash 和两次确定性模块打包均通过，耗时 2m38.516s。
 - 新增模块回归覆盖：完整修复锁与卸载锁并发、HOME 首标记尚未发布时卸载、Doze 添加执行中卸载、HOME `pending/owned/released` 同/跨启动恢复、`pending` 发布期间护理者改选、无障碍首次写入和重绑的已生效报错、护理者服务列表与全局开关组合变化、即时补偿失败后的跨进程卸载恢复、仅全局开关恢复不重复写服务列表，以及包含 `null`/`NULL` 和嵌入式 sentinel 的畸形事务日志保留。原有 HOME/Doze/AppOps 生命周期、严格包名/单行解析、命令超时、非普通标记和双向独立重试覆盖继续通过。
 - Bash/BusyBox ash 语法、固定 Android 命令包装扫描、旧版本残留扫描和 `git diff --check` 均通过。
 - `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：48 个 Gradle 任务全部重新执行，353 项测试、0 失败、0 错误、0 跳过，耗时 1m23.010s。
