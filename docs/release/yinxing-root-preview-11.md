@@ -39,6 +39,7 @@ APK 的 Root 调用白名单保持不变，只允许三个固定、无参数的�
 - `bash tools/test-yinxing-guard.sh all`：主机 Bash 和 BusyBox ash 均通过，耗时 24.97 秒。
 - `bash -n root/kernelsu/yinxing_guard/bin/*.sh tools/test-yinxing-guard.sh tools/package-yinxing-guard.sh` 与 `busybox ash -n root/kernelsu/yinxing_guard/bin/common.sh`：通过。
 - `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：347 项测试，0 失败、0 错误、0 跳过；耗时 91.32 秒。
+- 最终标签源复现同一命令：347 项测试，0 失败、0 错误、0 跳过；耗时 85.55 秒，APK 与发布候选逐字节一致。
 - `aapt2 dump badging`：包名 `com.yinxing.launcher`、`versionCode=27`、`versionName=1.10.0-root-preview.11`。
 - `apksigner verify --verbose`：APK Signature Scheme v2 验证通过。
 - KernelSU ZIP：11 个条目位于归档根目录，脚本均为可执行权限，时间戳归一化为 1980-01-01 00:00:00，重复打包字节一致。
