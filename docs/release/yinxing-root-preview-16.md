@@ -46,10 +46,17 @@ Preview 15 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 ## 验证记录
 
 - 所有 KernelSU Shell 脚本通过 `sh -n` 和 standalone BusyBox `ash -n`；固定命令扫描确认 Root bridge 未扩权。
-- `bash tools/test-yinxing-guard.sh all` 退出码为 0，包含 host 与递归 BusyBox harness，共 372 个 PASS；耗时和构建记录在发布后补入本节。
-- Android 单元测试、强制 Debug 构建、APK metadata/signature、确定性 KernelSU ZIP 和新下载校验记录在发布后补入本节。
+- `bash tools/test-yinxing-guard.sh all` 退出码为 0，包含 host 与递归 BusyBox harness，共 372 个 PASS，耗时 209.22 秒。
+- `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon` 构建成功，48 个任务重新执行，耗时 90.32 秒。43 个 JUnit XML 合计 353 tests、0 failures、0 errors、0 skipped。
+- `aapt2` 确认 APK 为 `com.yinxing.launcher`、`versionCode=32`、`versionName=1.10.0-root-preview.16`、`minSdk=24`、`targetSdk=36`；`apksigner` 确认单一 Android Debug 签名和 v2 签名有效。
+- `unzip -t` 验证模块 ZIP 无错误；独立重新打包与发布 ZIP 逐字节一致，ZIP 内 `common.sh` 和 `uninstall-cleanup.sh` 与源码 SHA-256 完全一致。
 - 当前环境没有连接真实一加 15；不会把本地 fixture 或 AOSP 行为表述为 ColorOS 16 真机验证。
 
 ## SHA-256
 
-发布资产构建完成后以 `sha256sum -c SHA256SUMS.txt` 为准，并在此处同步记录 APK、KernelSU ZIP 和 GitHub Release URL。
+```text
+d6889a1d0d90866ddd3b08dd33392460ab50bc84a43a1f176c2a48075f71e976  yinxing-1.10.0-root-preview.16-debug.apk
+eff00262f69e75eabf471f2a76d722c654c07f98825f12d00cc81c6d771ddf61  yinxing-guard-1.10.0-root-preview.16.zip
+```
+
+发布后还会从 GitHub Release 新目录下载三项资产，逐字节复核并运行 `sha256sum -c SHA256SUMS.txt`。
