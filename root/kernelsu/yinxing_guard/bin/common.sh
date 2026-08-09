@@ -192,7 +192,7 @@ accessibility_service_binding_state() {
 accessibility_binding_stall_threshold() {
     stall_threshold="${YINXING_GUARD_BINDING_STALL_THRESHOLD:-2}"
     case "$stall_threshold" in
-        ''|*[!0-9]*) printf '2\n' ;;
+        ''|*[!0-9]*|0*) printf '2\n' ;;
         *)
             if ! [ "$stall_threshold" -gt 0 ] 2>/dev/null; then
                 printf '2\n'
@@ -209,7 +209,7 @@ accessibility_binding_stall_threshold() {
 accessibility_binding_stall_max_rebinds() {
     stall_max_rebinds="${YINXING_GUARD_BINDING_STALL_MAX_REBINDS:-2}"
     case "$stall_max_rebinds" in
-        ''|*[!0-9]*) printf '2\n' ;;
+        ''|*[!0-9]*|0*) printf '2\n' ;;
         *)
             if ! [ "$stall_max_rebinds" -gt 0 ] 2>/dev/null; then
                 printf '2\n'
@@ -245,8 +245,16 @@ valid_accessibility_binding_stall_value() {
     case "$stall_observations" in
         ''|*[!0-9]*) return 1 ;;
     esac
+    case "$stall_observations" in
+        0|[1-9]*) ;;
+        *) return 1 ;;
+    esac
     case "$stall_rebind_attempts" in
         ''|*[!0-9]*) return 1 ;;
+    esac
+    case "$stall_rebind_attempts" in
+        0|[1-9]*) ;;
+        *) return 1 ;;
     esac
     [ "$stall_observations" -le 100000 ] 2>/dev/null || return 1
     [ "$stall_rebind_attempts" -le 100000 ] 2>/dev/null || return 1
@@ -281,18 +289,22 @@ read_accessibility_binding_stall() {
     printf '%s\n' "$stall_output"
 }
 
+validate_accessibility_binding_stall_marker() {
+    if [ ! -e "$ACCESSIBILITY_BINDING_STALL_MARKER" ] && \
+        [ ! -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
+        return 0
+    fi
+    (read_accessibility_binding_stall >/dev/null) || {
+        log_event "accessibility_binding_stall_marker_invalid"
+        return 1
+    }
+}
+
 write_accessibility_binding_stall() {
     stall_value="$1"
     valid_accessibility_binding_stall_value "$stall_value" || return 1
     ensure_state_dir || return 1
-    if [ -e "$ACCESSIBILITY_BINDING_STALL_MARKER" ] || \
-        [ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
-        if [ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ] || \
-            [ ! -f "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
-            log_event "accessibility_binding_stall_marker_invalid"
-            return 1
-        fi
-    fi
+    validate_accessibility_binding_stall_marker || return 1
     stall_marker_tmp="$ACCESSIBILITY_BINDING_STALL_MARKER.tmp.$$"
     rm -f "$stall_marker_tmp" 2>/dev/null || true
     if ! { printf '%s\n' "$stall_value" > "$stall_marker_tmp"; } 2>/dev/null || \
@@ -791,6 +803,21 @@ restore_accessibility_after_interrupted_rebind() {
     fi
     log_event "accessibility_service_rebind_compensated"
     return 0
+}
+
+compensate_accessibility_repair_failure() {
+    repair_transaction_started="$1"
+    repair_temporary_services="$2"
+    repair_original_services="$3"
+    repair_original_enabled="$4"
+
+    [ "$repair_transaction_started" -eq 1 ] || return 0
+    restore_accessibility_after_interrupted_rebind \
+        "$repair_temporary_services" "$repair_original_services" 1 \
+        "$repair_original_enabled" || {
+        log_event "accessibility_repair_compensation_failed"
+        return 1
+    }
 }
 
 rebind_accessibility_service() {
@@ -2016,6 +2043,7 @@ repair_accessibility() {
         restore_accessibility_transaction || return 1
         module_is_active || return 1
     fi
+    validate_accessibility_binding_stall_marker || return 1
     if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_missing"
         return 1
@@ -2133,6 +2161,9 @@ repair_accessibility() {
         bound)
             if ! clear_accessibility_binding_stall; then
                 log_event "accessibility_binding_stall_clear_failed"
+                compensate_accessibility_repair_failure \
+                    "$accessibility_transaction_started" "$merged" "$current" \
+                    "$enabled" || true
                 return 1
             fi
             ;;
@@ -2141,6 +2172,9 @@ repair_accessibility() {
                 [ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
                 if ! clear_accessibility_binding_stall; then
                     log_event "accessibility_binding_stall_clear_failed"
+                    compensate_accessibility_repair_failure \
+                        "$accessibility_transaction_started" "$merged" \
+                        "$current" "$enabled" || true
                     return 1
                 fi
             fi
@@ -2174,39 +2208,61 @@ repair_accessibility() {
                     post_binding_state="$(accessibility_service_binding_state)"
                     case "$post_binding_state" in
                         bound)
-                            clear_accessibility_binding_stall || {
+                            if ! clear_accessibility_binding_stall; then
                                 log_event "accessibility_binding_stall_clear_failed"
+                                compensate_accessibility_repair_failure \
+                                    "$accessibility_transaction_started" "$merged" \
+                                    "$current" "$enabled" || true
                                 return 1
-                            }
+                            fi
                             ;;
                         binding)
-                            write_accessibility_binding_stall \
-                                "binding|$(current_guard_boot_id)|0|$ACCESSIBILITY_BINDING_STALL_ATTEMPTS" || \
+                            if ! write_accessibility_binding_stall \
+                                "binding|$(current_guard_boot_id)|0|$ACCESSIBILITY_BINDING_STALL_ATTEMPTS"; then
+                                compensate_accessibility_repair_failure \
+                                    "$accessibility_transaction_started" "$merged" \
+                                    "$current" "$enabled" || true
                                 return 1
+                            fi
                             log_event "accessibility_binding_stall_rebind_pending"
                             ;;
                         unknown)
-                            clear_accessibility_binding_stall || {
+                            if ! clear_accessibility_binding_stall; then
                                 log_event "accessibility_binding_stall_clear_failed"
+                                compensate_accessibility_repair_failure \
+                                    "$accessibility_transaction_started" "$merged" \
+                                    "$current" "$enabled" || true
                                 return 1
-                            }
+                            fi
                             ;;
                         crashed|unbound)
-                            clear_accessibility_binding_stall || {
+                            if ! clear_accessibility_binding_stall; then
                                 log_event "accessibility_binding_stall_clear_failed"
+                                compensate_accessibility_repair_failure \
+                                    "$accessibility_transaction_started" "$merged" \
+                                    "$current" "$enabled" || true
                                 return 1
-                            }
+                            fi
+                            compensate_accessibility_repair_failure \
+                                "$accessibility_transaction_started" "$merged" \
+                                "$current" "$enabled" || true
                             return 1
                             ;;
                         *)
-                            clear_accessibility_binding_stall || {
+                            if ! clear_accessibility_binding_stall; then
                                 log_event "accessibility_binding_stall_clear_failed"
+                                compensate_accessibility_repair_failure \
+                                    "$accessibility_transaction_started" "$merged" \
+                                    "$current" "$enabled" || true
                                 return 1
-                            }
+                            fi
                             ;;
                     esac
                     ;;
                 *)
+                    compensate_accessibility_repair_failure \
+                        "$accessibility_transaction_started" "$merged" "$current" \
+                        "$enabled" || true
                     return 1
                     ;;
             esac
@@ -2216,6 +2272,9 @@ repair_accessibility() {
                 [ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
                 clear_accessibility_binding_stall || {
                     log_event "accessibility_binding_stall_clear_failed"
+                    compensate_accessibility_repair_failure \
+                        "$accessibility_transaction_started" "$merged" "$current" \
+                        "$enabled" || true
                     return 1
                 }
             fi
@@ -2241,6 +2300,9 @@ repair_accessibility() {
                 [ -L "$ACCESSIBILITY_BINDING_STALL_MARKER" ]; then
                 clear_accessibility_binding_stall || {
                     log_event "accessibility_binding_stall_clear_failed"
+                    compensate_accessibility_repair_failure \
+                        "$accessibility_transaction_started" "$merged" "$current" \
+                        "$enabled" || true
                     return 1
                 }
             fi
