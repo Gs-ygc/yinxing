@@ -22,6 +22,8 @@ cmd package resolve-activity --brief --components --user 0 -a android.intent.act
 
 独立卸载助手也使用相同的严格解析规则。恢复接管前桌面后，它会确认恢复后的 resolver 属于原桌面包；已知不一致、空结果、畸形或超时都保留 marker 和助手。若下一次运行时 role 已回到原桌面但路由仍明确指向银杏，助手会再尝试一次固定恢复；已知指向其他非银杏路由时保持照护者选择，不会强制覆盖。
 
+为覆盖 role 与 resolver 分步变化的竞态，`owned` 和 `released` 状态在发布前后都会重复确认 role、route、role。任何中途变化、银杏残留路由或未知结果都会保留 `pending`、回滚 marker 和独立助手，留待下一轮收敛；只有已确认的非银杏路由，或与接管前桌面完全匹配的路由，才允许清除回滚证据。
+
 状态协议仍是九行 schema 2，APK Root 白名单也仍只有原来的三个固定、无参数模块路径。没有新增任意 shell、坐标点击、私有 ColorOS API、任意包名或任意组件输入。
 
 该固定命令的参数和输出形式基于 AOSP 的 [`resolve-activity` 与 `set-home-activity` 实现](https://android.googlesource.com/platform/frameworks/base/+/master/services/core/java/com/android/server/pm/PackageManagerShellCommand.java)；没有依赖 ColorOS 私有接口。
@@ -47,8 +49,8 @@ Preview 14 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 ## 验证记录
 
 - 所有 KernelSU Shell 脚本通过 `sh -n`，系统命令扫描确认 `cmd`、`pm`、`settings`、`am` 与 `dumpsys` 均继续经过既有的受限超时执行器。
-- `bash tools/test-yinxing-guard.sh all` 退出码为 0，耗时 176.30 秒；包含宿主 Shell、递归 KernelSU BusyBox Shell 与确定性模块打包检查。
-- `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon` 构建成功，48 个任务重新执行，耗时 84.56 秒。43 个 JUnit XML 合计 353 tests、0 failures、0 errors、0 skipped。
+- `bash tools/test-yinxing-guard.sh all` 退出码为 0，耗时 199.95 秒；包含宿主 Shell、递归 KernelSU BusyBox Shell 与确定性模块打包检查。
+- `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon` 构建成功，48 个任务重新执行，耗时 85.75 秒。43 个 JUnit XML 合计 353 tests、0 failures、0 errors、0 skipped。
 - `aapt2` 确认 APK 为 `com.yinxing.launcher`、`versionCode=31`、`versionName=1.10.0-root-preview.15`、`minSdk=24`、`targetSdk=36`；`apksigner` 确认单一 Android Debug 签名和 v2 签名有效。
 - `unzip -t` 验证模块 ZIP 无错误；独立重新打包与发布 ZIP 逐字节一致。
 
@@ -56,7 +58,7 @@ Preview 14 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 
 ```text
 46151044f7393488833d2d292dee4c7f9ea96989ed8b7f561c3d60199d4514ce  yinxing-1.10.0-root-preview.15-debug.apk
-deb6dae0e17434ee083daf161f4a324b4da4894b2cfcd2f90d0e3ff47ec94366  yinxing-guard-1.10.0-root-preview.15.zip
+140e2d39457a668398d3459601eca921cf676949e2d34692cd51343d47656e29  yinxing-guard-1.10.0-root-preview.15.zip
 ```
 
 本 Preview 尚未连接真实一加 15：`adb devices -l` 未发现设备。不会把本地模拟或 AOSP 命令验证表述为 ColorOS 16 真机验证。真机体验应重点确认 ColorOS 的 resolver 输出、接管后 Home 键路由、模块卸载后的原桌面恢复、无障碍绑定和重启保活。
