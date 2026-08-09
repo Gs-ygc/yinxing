@@ -210,6 +210,9 @@ parse_accessibility_transaction_state() {
         return 1
     valid_accessibility_services_snapshot "$accessibility_alternate_services" || \
         return 1
+    case "$accessibility_alternate_services" in
+        null|NULL) return 1 ;;
+    esac
     expected_primary_services="$(merge_accessibility_services \
         "$accessibility_original_services" "$ACCESSIBILITY_COMPONENT")"
     [ "$expected_primary_services" = "$accessibility_primary_services" ] || \

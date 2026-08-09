@@ -1041,10 +1041,11 @@ test_repair_retains_noncanonical_accessibility_transaction() {
     for journal in \
         "pending|0|1|null|$ACCESSIBILITY_COMPONENT|" \
         "pending|0|1|NULL|$ACCESSIBILITY_COMPONENT|" \
-        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|"; do
+        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|null:$ACCESSIBILITY_COMPONENT|null:$ACCESSIBILITY_COMPONENT|null" \
+        "pending|0|1|NULL:$ACCESSIBILITY_COMPONENT|NULL:$ACCESSIBILITY_COMPONENT|NULL"; do
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
-        printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
         printf '1\n' > "$ACCESSIBILITY_ENABLED"
         printf '%s\n' "$journal" > "$marker"
         if repair_state; then
@@ -2835,7 +2836,9 @@ test_uninstall_retains_malformed_accessibility_transaction() {
         "pending|0|1|talkback:other|talkback:other:$ACCESSIBILITY_COMPONENT|caregiver.reader/service" \
         "pending|0|1|null|$ACCESSIBILITY_COMPONENT|" \
         "pending|0|1|NULL|$ACCESSIBILITY_COMPONENT|" \
-        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|"; do
+        "pending|0|1|   |$ACCESSIBILITY_COMPONENT|" \
+        "pending|0|1|null:$ACCESSIBILITY_COMPONENT|null:$ACCESSIBILITY_COMPONENT|null" \
+        "pending|0|1|NULL:$ACCESSIBILITY_COMPONENT|NULL:$ACCESSIBILITY_COMPONENT|NULL"; do
         reset_fixture
         mkdir -p "$TEST_ROOT/state"
         printf '%s\n' "$journal" > "$marker"
