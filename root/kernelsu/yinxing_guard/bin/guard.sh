@@ -191,8 +191,12 @@ run_health_cycle() {
         log_event "guard_module_inactive"
         return 2
     fi
-    if [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
-        install_cleanup_helper "$CLEANUP_SOURCE" || true
+    if ! cleanup_helper_ready; then
+        if ! install_cleanup_helper "$CLEANUP_SOURCE" || ! cleanup_helper_ready; then
+            record_repair_result failed || true
+            log_event "uninstall_cleanup_unavailable"
+            return 1
+        fi
     fi
     if ! repair_state; then
         record_repair_result failed || true

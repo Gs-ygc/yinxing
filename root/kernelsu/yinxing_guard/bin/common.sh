@@ -13,6 +13,8 @@ MODULE_VERSION="1.10.0-root-preview.14"
 GUARD_OWNER_ACTIVE_STATUS=76
 CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
 GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
+HOME_MARKER_LINK_COMMAND="${YINXING_GUARD_HOME_MARKER_LINK_COMMAND:-ln}"
+HOME_MARKER_SYNC_COMMAND="${YINXING_GUARD_HOME_MARKER_SYNC_COMMAND:-sync}"
 case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
     ''|*[!0-9]*) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
 esac
@@ -307,14 +309,31 @@ valid_home_holder() {
 }
 
 read_home_role_holder() {
-    if ! home_output="$(run_guard_command cmd role get-role-holders \
-        --user "$ANDROID_USER_ID" "$HOME_ROLE_NAME" 2>/dev/null)"; then
+    if ! home_output="$(
+        run_guard_command cmd role get-role-holders \
+            --user "$ANDROID_USER_ID" "$HOME_ROLE_NAME" 2>/dev/null
+        home_status=$?
+        printf '|'
+        exit "$home_status"
+    )"; then
         return 1
     fi
+    case "$home_output" in
+        *'|') home_output=${home_output%|} ;;
+        *) return 1 ;;
+    esac
     if [ -z "$home_output" ]; then
         printf 'none\n'
         return 0
     fi
+    line_feed='
+'
+    case "$home_output" in
+        *"$line_feed")
+            home_output=${home_output%"$line_feed"}
+            [ -n "$home_output" ] || return 1
+            ;;
+    esac
     case "$home_output" in
         *[!A-Za-z0-9_.]*|.*|*.|*..*) return 1 ;;
     esac
@@ -322,6 +341,39 @@ read_home_role_holder() {
         *.*) printf '%s\n' "$home_output" ;;
         *) return 1 ;;
     esac
+}
+
+read_home_previous_holder() {
+    [ ! -L "$HOME_PREVIOUS_HOLDER_MARKER" ] && \
+        [ -f "$HOME_PREVIOUS_HOLDER_MARKER" ] || return 1
+    if ! marker_output="$(
+        cat "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null
+        marker_status=$?
+        printf '|'
+        exit "$marker_status"
+    )"; then
+        return 1
+    fi
+    case "$marker_output" in
+        *'|') marker_output=${marker_output%|} ;;
+        *) return 1 ;;
+    esac
+    line_feed='
+'
+    case "$marker_output" in
+        *"$line_feed") marker_output=${marker_output%"$line_feed"} ;;
+        *) return 1 ;;
+    esac
+    if [ "$marker_output" != "none" ] && ! valid_home_holder "$marker_output"; then
+        return 1
+    fi
+    printf '%s\n' "$marker_output"
+}
+
+cleanup_helper_ready() {
+    [ ! -L "$CLEANUP_TARGET" ] && \
+        [ -f "$CLEANUP_TARGET" ] && \
+        [ -x "$CLEANUP_TARGET" ]
 }
 
 home_role_state() {
@@ -344,30 +396,35 @@ record_home_previous_holder() {
     fi
     ensure_state_dir || return 1
 
-    if [ -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+    if [ ! -e "$HOME_PREVIOUS_HOLDER_MARKER" ] && \
+        [ ! -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        marker_tmp="$HOME_PREVIOUS_HOLDER_MARKER.tmp.$$"
+        rm -f "$marker_tmp" 2>/dev/null || true
+        if ! { printf '%s\n' "$previous_holder" > "$marker_tmp"; } 2>/dev/null || \
+            ! chmod 0600 "$marker_tmp" 2>/dev/null; then
+            rm -f "$marker_tmp" 2>/dev/null || true
+            log_event "home_role_marker_write_failed"
+            return 1
+        fi
+        run_guard_command "$HOME_MARKER_LINK_COMMAND" "$marker_tmp" \
+            "$HOME_PREVIOUS_HOLDER_MARKER" \
+            >/dev/null 2>&1 || true
+        rm -f "$marker_tmp" 2>/dev/null || true
+    fi
+
+    if ! saved_holder_before_sync="$(read_home_previous_holder)"; then
         log_event "home_role_marker_invalid"
         return 1
     fi
-    if [ -e "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
-        if [ ! -f "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
-            log_event "home_role_marker_invalid"
-            return 1
-        fi
-        saved_holder="$(cat "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null || true)"
-        if [ "$saved_holder" != "none" ] && ! valid_home_holder "$saved_holder"; then
-            log_event "home_role_marker_invalid"
-            return 1
-        fi
-        return 0
+    if ! run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f \
+        "$HOME_PREVIOUS_HOLDER_MARKER" "$STATE_DIR" \
+        >/dev/null 2>&1; then
+        log_event "home_role_marker_sync_failed"
+        return 1
     fi
-
-    marker_tmp="$HOME_PREVIOUS_HOLDER_MARKER.tmp.$$"
-    rm -f "$marker_tmp" 2>/dev/null || true
-    if ! { printf '%s\n' "$previous_holder" > "$marker_tmp"; } 2>/dev/null || \
-        ! chmod 0600 "$marker_tmp" 2>/dev/null || \
-        ! mv -f "$marker_tmp" "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null; then
-        rm -f "$marker_tmp" 2>/dev/null || true
-        log_event "home_role_marker_write_failed"
+    if ! saved_holder_after_sync="$(read_home_previous_holder)" || \
+        [ "$saved_holder_before_sync" != "$saved_holder_after_sync" ]; then
+        log_event "home_role_marker_changed"
         return 1
     fi
     return 0
@@ -379,28 +436,34 @@ repair_home_role() {
         return 1
     fi
 
-    if [ -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
-        log_event "home_role_marker_invalid"
-        return 1
-    fi
-    if [ -e "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
-        if [ ! -f "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
-            log_event "home_role_marker_invalid"
-            return 1
-        fi
-        saved_home_holder="$(cat "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null || true)"
-        if [ "$saved_home_holder" != "none" ] && ! valid_home_holder "$saved_home_holder"; then
+    if [ -e "$HOME_PREVIOUS_HOLDER_MARKER" ] || \
+        [ -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        if ! saved_home_holder="$(read_home_previous_holder)"; then
             log_event "home_role_marker_invalid"
             return 1
         fi
     fi
 
     [ "$current_home_holder" = "$PACKAGE_NAME" ] && return 0
+    if ! cleanup_helper_ready; then
+        log_event "home_role_cleanup_helper_unavailable"
+        return 1
+    fi
     if ! module_is_active; then
         log_event "home_role_skipped_module_inactive"
         return 1
     fi
     record_home_previous_holder "$current_home_holder" || return 1
+    if ! refreshed_home_holder="$(read_home_role_holder)"; then
+        log_event "home_role_pre_set_query_failed"
+        return 1
+    fi
+    [ "$refreshed_home_holder" = "$PACKAGE_NAME" ] && return 0
+    if [ "$refreshed_home_holder" != "$current_home_holder" ]; then
+        log_event "home_role_changed_before_set"
+        return 1
+    fi
+    module_is_active || return 1
     if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
         "$HOME_COMPONENT" >/dev/null 2>&1; then
         log_event "home_role_set_failed"
@@ -423,8 +486,8 @@ install_cleanup_helper() {
     cleanup_dir=${CLEANUP_TARGET%/*}
     temp_path="$CLEANUP_TARGET.tmp.$$"
 
-    if [ -d "$CLEANUP_TARGET" ]; then
-        log_event "uninstall_cleanup_target_is_directory"
+    if [ -L "$CLEANUP_TARGET" ] || [ -d "$CLEANUP_TARGET" ]; then
+        log_event "uninstall_cleanup_target_invalid"
         return 1
     fi
     if ! mkdir -p "$cleanup_dir" 2>/dev/null; then
@@ -439,7 +502,7 @@ install_cleanup_helper() {
         log_event "uninstall_cleanup_schedule_failed"
         return 1
     fi
-    return 0
+    cleanup_helper_ready
 }
 
 repair_accessibility() {

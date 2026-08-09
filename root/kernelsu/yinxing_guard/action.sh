@@ -10,6 +10,7 @@ if ! module_is_active; then
     exit 1
 fi
 install_cleanup_helper "$MODDIR/bin/uninstall-cleanup.sh" || exit 1
+cleanup_helper_ready || exit 1
 module_is_active || exit 1
 if ! repair_state; then
     record_repair_result failed || true

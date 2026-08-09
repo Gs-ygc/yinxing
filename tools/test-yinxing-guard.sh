@@ -52,6 +52,8 @@ export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
 export YINXING_GUARD_MODULE_STATE_DIR="$MODULE_ROOT"
+export YINXING_GUARD_HOME_MARKER_LINK_COMMAND="yinxing-test-ln"
+export YINXING_GUARD_HOME_MARKER_SYNC_COMMAND="yinxing-test-sync"
 export PATH="$FAKE_BIN:$PATH"
 
 run_module_script() {
@@ -163,6 +165,25 @@ write_fake cmd \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_remove" ]] && exit 1; rm -f "$TEST_ROOT/doze_whitelisted"; fi' \
     'exit 0'
 
+write_fake yinxing-test-sync \
+    '#!/usr/bin/env bash' \
+    'printf "sync %s\\n" "$*" >> "$CALLS"' \
+    '[[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5' \
+    '[[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1' \
+    'exit 0'
+
+write_fake mv \
+    '#!/usr/bin/env bash' \
+    'target="${!#}"' \
+    'if [[ -e "$TEST_ROOT/concurrent_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then if mkdir "$TEST_ROOT/home_publish_slot_one" 2>/dev/null; then touch "$TEST_ROOT/home_publish_first_ready"; for _ in $(seq 1 500); do [[ -e "$TEST_ROOT/home_publish_second_ready" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/home_publish_second_ready" ]] || exit 90; /bin/sleep 0.1; else touch "$TEST_ROOT/home_publish_second_ready"; fi; fi' \
+    'exec /bin/mv "$@"'
+
+write_fake yinxing-test-ln \
+    '#!/usr/bin/env bash' \
+    'target="${!#}"' \
+    'if [[ -e "$TEST_ROOT/concurrent_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then if mkdir "$TEST_ROOT/home_publish_slot_one" 2>/dev/null; then touch "$TEST_ROOT/home_publish_first_ready"; for _ in $(seq 1 500); do [[ -e "$TEST_ROOT/home_publish_second_ready" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/home_publish_second_ready" ]] || exit 90; /bin/sleep 0.1; else touch "$TEST_ROOT/home_publish_second_ready"; fi; fi' \
+    'exec /bin/ln "$@"'
+
 write_fake am \
     '#!/usr/bin/env bash' \
     'printf "am %s\\n" "$*" >> "$CALLS"' \
@@ -246,7 +267,12 @@ reset_fixture() {
         "$TEST_ROOT/fail_home_role_remove" \
         "$TEST_ROOT/hang_home_role_query" \
         "$TEST_ROOT/hang_home_role_set" \
+        "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
+        "$TEST_ROOT/fail_home_marker_sync" \
+        "$TEST_ROOT/concurrent_home_marker_publish" \
+        "$TEST_ROOT/home_publish_first_ready" \
+        "$TEST_ROOT/home_publish_second_ready" \
         "$TEST_ROOT/malformed_home_role_output" \
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/fail_deviceidle_query" \
@@ -268,8 +294,9 @@ reset_fixture() {
         "$TEST_ROOT/component_disabled" \
         "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
-        "$TEST_ROOT/accessibility_dump_sequence"
+        "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one"
     printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install baseline cleanup helper"
 }
 
 prepare_healthy_status_fixture() {
@@ -656,6 +683,117 @@ test_home_role_bounds_stalled_set() {
         "stalled HOME set repair result"
     assert_not_contains "$CALLS" "am start"
     pass "HOME role set is bounded"
+}
+
+test_home_role_rejects_trailing_blank_query_output() {
+    reset_fixture
+    printf 'com.oplus.launcher\n\n' > "$TEST_ROOT/malformed_home_role_output"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "HOME query with a trailing blank line unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "trailing blank HOME query preserves holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME role query rejects trailing blank evidence"
+}
+
+test_home_role_rejects_trailing_blank_marker() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n\n' > "$TEST_ROOT/state/home_previous_holder"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "HOME marker with a trailing blank line unexpectedly reported recovery success"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "trailing blank HOME marker preserves holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME rollback marker rejects trailing blank evidence"
+}
+
+test_home_marker_concurrent_publish_does_not_clobber() {
+    local first_status second_status
+
+    reset_fixture
+    touch "$TEST_ROOT/concurrent_home_marker_publish"
+    run_module_script -c '. "$1"; record_home_previous_holder "$2"' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh" com.oplus.launcher &
+    GUARD_PID=$!
+    for _ in $(seq 1 500); do
+        [[ -e "$TEST_ROOT/home_publish_first_ready" ]] && break
+        /bin/sleep 0.01
+    done
+    [[ -e "$TEST_ROOT/home_publish_first_ready" ]] || fail "first HOME marker publisher did not reach commit"
+    run_module_script -c '. "$1"; record_home_previous_holder "$2"' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh" com.example.caregiverlauncher &
+    SECOND_GUARD_PID=$!
+    set +e
+    wait "$GUARD_PID"
+    first_status=$?
+    wait "$SECOND_GUARD_PID"
+    second_status=$?
+    set -e
+    GUARD_PID=""
+    SECOND_GUARD_PID=""
+    assert_equals "0" "$first_status" "first HOME marker publisher status"
+    assert_equals "0" "$second_status" "second HOME marker publisher status"
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "later overwrite must not replace the first committed HOME marker"
+    pass "HOME rollback marker publication does not clobber"
+}
+
+test_home_marker_sync_failure_blocks_takeover() {
+    reset_fixture
+    touch "$TEST_ROOT/fail_home_marker_sync"
+    if run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "HOME takeover succeeded after rollback marker sync failure"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "marker sync failure preserves HOME"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "marker sync failure retains rollback evidence"
+    assert_contains "$CALLS" \
+        "sync -f $TEST_ROOT/state/home_previous_holder $TEST_ROOT/state"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME takeover requires durable rollback marker"
+}
+
+test_home_marker_sync_is_bounded() {
+    local started_at elapsed
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_home_marker_sync"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "HOME takeover succeeded after stalled rollback marker sync"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "rollback marker sync exceeded bound (${elapsed}s)"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stalled marker sync preserves HOME"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "stalled sync lost rollback marker"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME rollback marker sync is bounded"
+}
+
+test_guard_requires_cleanup_helper_before_home_takeover() {
+    reset_fixture
+    rm -f "$CLEANUP_TARGET"
+    mkdir -p "$CLEANUP_TARGET"
+    YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh" || true
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "Guard without a cleanup helper preserves HOME"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "am start"
+    pass "Guard requires rollback cleanup before HOME takeover"
 }
 
 test_repair_preserves_and_enables() {
@@ -1542,6 +1680,7 @@ test_guard_prevents_concurrent_processes() {
 
 test_action_reuses_repair_and_launch() {
     reset_fixture
+    rm -f "$CLEANUP_TARGET"
     run_module_script "$MODULE_ROOT/action.sh"
     assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "action repairs accessibility"
     assert_equals "ok" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" "action records successful repair"
@@ -1609,11 +1748,18 @@ test_cleanup_schedule_failure_preserves_existing_helper() {
 
 test_cleanup_directory_target_is_rejected() {
     reset_fixture
+    rm -f "$CLEANUP_TARGET"
     mkdir -p "$CLEANUP_TARGET"
     if install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh"; then
         fail "cleanup helper accepted a directory target"
     fi
-    repair_state || fail "accessibility repair should survive a bad helper target"
+    if repair_state; then
+        fail "repair unexpectedly succeeded without rollback cleanup readiness"
+    fi
+    assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
+        "accessibility repair survives a bad helper target"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "bad helper target blocks HOME takeover"
     [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || fail "bad helper target allowed an unowned Doze add"
     [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || fail "bad helper target created ownership marker"
     pass "cleanup directory target is rejected"
@@ -1980,6 +2126,12 @@ case "$MODE" in
         test_home_role_unconfirmed_set_retains_marker
         test_home_role_bounds_stalled_query
         test_home_role_bounds_stalled_set
+        test_home_role_rejects_trailing_blank_query_output
+        test_home_role_rejects_trailing_blank_marker
+        test_home_marker_concurrent_publish_does_not_clobber
+        test_home_marker_sync_failure_blocks_takeover
+        test_home_marker_sync_is_bounded
+        test_guard_requires_cleanup_helper_before_home_takeover
         test_repair_confirms_binding_after_confirmed_unbound
         test_action_marks_persistent_confirmed_unbound_failed
         test_repair_does_not_rebind_initial_enable_when_unbound
@@ -2055,6 +2207,12 @@ case "$MODE" in
         test_home_role_unconfirmed_set_retains_marker
         test_home_role_bounds_stalled_query
         test_home_role_bounds_stalled_set
+        test_home_role_rejects_trailing_blank_query_output
+        test_home_role_rejects_trailing_blank_marker
+        test_home_marker_concurrent_publish_does_not_clobber
+        test_home_marker_sync_failure_blocks_takeover
+        test_home_marker_sync_is_bounded
+        test_guard_requires_cleanup_helper_before_home_takeover
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_repair_confirms_binding_after_crash
