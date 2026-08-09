@@ -1172,11 +1172,11 @@ test_module_package() {
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
-    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=9'
+    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=10'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
-    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.9'
-    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=9'
+    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.10'
+    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=10'
     for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"
