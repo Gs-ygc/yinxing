@@ -332,6 +332,24 @@ EOF
     pass "status reports stale crashed accessibility service"
 }
 
+test_status_reports_stale_when_accessibility_service_confirmed_unbound() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "accessibility=stale"
+    pass "status reports stale confirmed-unbound accessibility service"
+}
+
 test_status_output_contract_ignores_log_noise() {
     reset_fixture
     prepare_healthy_status_fixture
@@ -451,6 +469,43 @@ EOF
     pass "repair confirms accessibility binding after crash"
 }
 
+test_repair_confirms_binding_after_confirmed_unbound() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/accessibility_dump_sequence"
+    cat > "$TEST_ROOT/accessibility_dump_sequence/1" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    cat > "$TEST_ROOT/accessibility_dump_sequence/2" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{$ACCESSIBILITY_COMPONENT}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=2 \
+    YINXING_GUARD_REBIND_CONFIRM_SECONDS=0 \
+        repair_state || fail "confirmed unbound service should be rebound"
+    assert_equals "2" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "confirmed unbound rebind should poll until binding is observed"
+    assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "confirmed unbound rebind should write the service list twice"
+    assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other"
+    assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services talkback:other:$ACCESSIBILITY_COMPONENT"
+    assert_contains "$CALLS" "accessibility_service_rebind_confirmed"
+    assert_contains "$CALLS" "accessibility_service_rebound"
+    pass "repair confirms accessibility binding after confirmed unbound state"
+}
+
 test_action_marks_persistent_accessibility_crash_failed() {
     reset_fixture
     printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
@@ -481,6 +536,77 @@ EOF
     assert_not_contains "$CALLS" "am start"
     assert_contains "$CALLS" "accessibility_service_rebind_persisted"
     pass "action marks persistent accessibility crash failed"
+}
+
+test_action_marks_persistent_confirmed_unbound_failed() {
+    reset_fixture
+    printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    mkdir -p "$TEST_ROOT/accessibility_dump_sequence"
+    for response in 1 2 3; do
+        cat > "$TEST_ROOT/accessibility_dump_sequence/$response" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    done
+    if YINXING_GUARD_REBIND_CONFIRM_ATTEMPTS=2 \
+        YINXING_GUARD_REBIND_CONFIRM_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "persistent confirmed unbound service unexpectedly reported recovery success"
+    fi
+    assert_equals "failed" "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "persistent confirmed unbound service should record failed repair"
+    assert_equals "3" "$(grep -c '^dumpsys accessibility$' "$CALLS" || true)" \
+        "persistent confirmed unbound service should stop at the confirmation bound"
+    assert_equals "2" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "persistent confirmed unbound service must not repeat settings toggles"
+    assert_not_contains "$CALLS" "am start"
+    assert_contains "$CALLS" "accessibility_service_rebind_persisted"
+    pass "action marks persistent confirmed-unbound accessibility service failed"
+}
+
+test_repair_does_not_rebind_initial_enable_when_unbound() {
+    reset_fixture
+    : > "$SERVICES"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+  Crashed services:{}
+  Client list info:{}
+]
+EOF
+    repair_state || fail "initial accessibility enable should succeed"
+    assert_equals "1" "$(grep -oF "$ACCESSIBILITY_COMPONENT" "$SERVICES" | wc -l | tr -d ' ')" \
+        "initial accessibility enable should include the target once"
+    assert_equals "1" "$(grep -c '^settings --user 0 put secure enabled_accessibility_services' "$CALLS" || true)" \
+        "initial accessibility enable should write the service list once"
+    assert_not_contains "$CALLS" "accessibility_service_rebind"
+    pass "repair does not rebind initial enable when unbound"
+}
+
+test_repair_ignores_partial_accessibility_diagnostic() {
+    reset_fixture
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    cat > "$TEST_ROOT/accessibility_dump" <<EOF
+User state[
+  Bound services:{}
+  Enabled services:{$ACCESSIBILITY_COMPONENT}
+  Binding services:{}
+]
+EOF
+    repair_state || fail "partial accessibility diagnostic should not fail repair"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    assert_not_contains "$CALLS" "accessibility_service_rebind"
+    pass "repair ignores partial accessibility diagnostic"
 }
 
 test_repair_keeps_unknown_rebind_confirmation_nonfatal() {
@@ -1205,6 +1331,7 @@ case "$MODE" in
         test_status_reports_unknown_when_package_state_query_fails
         test_status_reports_unknown_when_component_state_query_fails
         test_status_reports_stale_when_accessibility_service_crashed
+        test_status_reports_stale_when_accessibility_service_confirmed_unbound
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_stale_guard_when_pid_identity_mismatches
@@ -1214,6 +1341,10 @@ case "$MODE" in
         test_module_package
         ;;
     --guard-only)
+        test_repair_confirms_binding_after_confirmed_unbound
+        test_action_marks_persistent_confirmed_unbound_failed
+        test_repair_does_not_rebind_initial_enable_when_unbound
+        test_repair_ignores_partial_accessibility_diagnostic
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -1247,6 +1378,7 @@ case "$MODE" in
         test_status_reports_unknown_when_package_state_query_fails
         test_status_reports_unknown_when_component_state_query_fails
         test_status_reports_stale_when_accessibility_service_crashed
+        test_status_reports_stale_when_accessibility_service_confirmed_unbound
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
         test_status_reports_stale_guard_when_pid_identity_mismatches
@@ -1254,7 +1386,11 @@ case "$MODE" in
         test_repair_preserves_and_enables
         test_repair_is_idempotent
         test_repair_confirms_binding_after_crash
+        test_repair_confirms_binding_after_confirmed_unbound
         test_action_marks_persistent_accessibility_crash_failed
+        test_action_marks_persistent_confirmed_unbound_failed
+        test_repair_does_not_rebind_initial_enable_when_unbound
+        test_repair_ignores_partial_accessibility_diagnostic
         test_repair_keeps_unknown_rebind_confirmation_nonfatal
         test_repair_leaves_bound_or_binding_accessibility_service_untouched
         test_repair_ignores_unavailable_accessibility_diagnostic
