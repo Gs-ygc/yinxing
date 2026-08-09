@@ -58,11 +58,12 @@ binding|<boot-id>|<observations>|<rebind-attempts>
 ```
 
 `<boot-id>` is the same sanitized boot identifier used by the existing guard
-state. `observations` is a decimal count from 0 through 100000 and
-`rebind-attempts` is a decimal count from 0 through 100000. The marker is
-written with the existing temporary-file, mode-0600, read-back, and `sync`
-pattern. Symlinks, directories, malformed values, extra lines, extra pipes,
-and failed read-back/sync are invalid and never get overwritten.
+state. `observations` is a canonical decimal count from 0 through 100000 (only
+`0` or a non-zero digit followed by digits), and `rebind-attempts` follows the
+same rule. The marker is written with the existing temporary-file, mode-0600,
+read-back, and `sync` pattern. Symlinks, directories, malformed values, extra
+lines, extra pipes, leading-zero counts, and failed read-back/sync are invalid
+and never get overwritten.
 
 The effective defaults are fixed and numeric:
 
@@ -73,8 +74,10 @@ Invalid, empty, zero, or non-numeric overrides fall back to those defaults.
 
 ## Repair state machine
 
-After the existing package/component/settings checks, `repair_accessibility()`
-classifies the target binding:
+After recovering any pre-existing accessibility transaction,
+`repair_accessibility()` validates an existing stall marker before it enables
+the package/component or writes either secure setting, then classifies the
+target binding:
 
 | Observation | Behavior |
 | --- | --- |
@@ -95,7 +98,10 @@ code fails closed at the point where a mutation would otherwise occur.
 The existing accessibility transaction marker remains the sole rollback record
 for settings changes. Before a stall-triggered rebind, the same transaction is
 created from the current enabled-services snapshot; all existing compensation
-and caregiver-change checks therefore remain in force.
+and caregiver-change checks therefore remain in force. If evidence clear or
+post-rebind publication fails after that transaction has started, the repair
+path invokes the existing compensation routine before returning, while
+retaining malformed evidence for the next operator-visible recovery attempt.
 
 ## Status and uninstall
 

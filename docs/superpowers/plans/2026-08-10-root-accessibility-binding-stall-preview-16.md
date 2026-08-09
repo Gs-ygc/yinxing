@@ -13,9 +13,9 @@
 - Target remains OnePlus 15 China ColorOS 16, KernelSU Root, Android user 0.
 - Root command allowlist remains exactly `status.sh`, `action.sh`, and `kiosk-home.sh`, all without APK-supplied arguments.
 - New behavior uses no new Android command; it only reuses `dumpsys accessibility`, `settings`, and the reviewed rebind sequence.
-- Marker values are `binding|<sanitized-boot-id>|<observations>|<rebind-attempts>`; numeric fields are limited to 0..100000.
+- Marker values are `binding|<sanitized-boot-id>|<observations>|<rebind-attempts>`; numeric fields are canonical decimal (`0` or no-leading-zero digits) limited to 0..100000.
 - Defaults are threshold 2 and maximum rebind attempts 2; invalid, empty, zero, or non-numeric overrides use those defaults.
-- Unknown or malformed Android diagnostics and unsafe marker paths never trigger speculative settings writes.
+- Unknown or malformed Android diagnostics and unsafe marker paths never trigger speculative settings writes; existing stall evidence is preflighted before package/component or secure-setting mutation, and post-mutation evidence failures compensate the accessibility transaction.
 - Version is `1.10.0-root-preview.16`; APK `versionCode=32`; module `versionCode=16`.
 - Every shell behavior test passes in host mode and recursive standalone BusyBox `ash` mode.
 - No physical-device validation is claimed; no Android device is attached in this environment.
