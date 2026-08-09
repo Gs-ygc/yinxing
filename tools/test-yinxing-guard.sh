@@ -427,9 +427,9 @@ EOF
     cp "$TEST_ROOT/accessibility_dump_sequence/1" "$TEST_ROOT/accessibility_dump_sequence/2"
     cat > "$TEST_ROOT/accessibility_dump_sequence/3" <<EOF
 User state[
-  Bound services:{$ACCESSIBILITY_COMPONENT}
+  Bound services:{}
   Enabled services:{$ACCESSIBILITY_COMPONENT}
-  Binding services:{}
+  Binding services:{$ACCESSIBILITY_COMPONENT}
   Crashed services:{}
   Client list info:{}
 ]

@@ -39,7 +39,7 @@ APK 的 Root 调用白名单保持不变，只允许三个固定、无参数的�
 ## 验证记录
 
 - 环境：Gradle 9.3.1、OpenJDK 21.0.11、Android SDK Build Tools 36.0.0。
-- `bash tools/test-yinxing-guard.sh all`：主机 Bash 和 BusyBox ash 均通过，耗时 23.93 秒。
+- `bash tools/test-yinxing-guard.sh all`：主机 Bash 和 BusyBox ash 均通过，耗时 24.06 秒。
 - `bash -n root/kernelsu/yinxing_guard/bin/*.sh tools/test-yinxing-guard.sh tools/package-yinxing-guard.sh` 与 `busybox ash -n root/kernelsu/yinxing_guard/bin/common.sh`：通过。
 - `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon`：344 项测试，0 失败、0 错误、0 跳过；耗时 101.91 秒。
 - `aapt2 dump badging`：包名 `com.yinxing.launcher`、`versionCode=26`、`versionName=1.10.0-root-preview.10`。
