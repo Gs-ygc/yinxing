@@ -89,9 +89,12 @@ after a failed manual action.
 
 `RootCommandRunnerTest` adds:
 
-- exact assertions for all three literal paths and timeout budgets;
 - a real fake-`su` recovery that sleeps four seconds, proving the production
   recovery budget outlives the former three-second cutoff;
+- a real fake-`su` Kiosk command that sleeps two seconds and is terminated by
+  the preserved short budget;
+- a real fake-`su` status command that sleeps four seconds and is terminated by
+  the preserved three-second budget;
 - preservation of the existing short override timeout test, output bound, and
   three-command routing coverage.
 

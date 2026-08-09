@@ -28,7 +28,7 @@
 
 **Interfaces:**
 - Consumes: current default `SuRootCommandRunner()`, fixed `RootCommand.RECOVER`, and existing `withFakeSu()` host-process fixture.
-- Produces: `defaultRecoveryTimeoutCoversBoundedRebindConfirmation()` red regression proving a four-second action must not hit the old three-second cutoff.
+- Produces: real-process regressions proving four-second recovery succeeds while two-second Kiosk and four-second status commands remain bounded.
 
 - [ ] **Step 1: Add the real-process recovery regression.**
 
@@ -58,6 +58,54 @@ fun defaultRecoveryTimeoutCoversBoundedRebindConfirmation() {
 }
 ```
 
+Add two behavior-preservation tests using the same real fixture:
+
+```kotlin
+@Test
+fun defaultKioskTimeoutRemainsShort() {
+    withFakeSu(
+        """
+        case "${'$'}2" in
+            /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) /bin/sleep 2 ;;
+            *) exit 64 ;;
+        esac
+        """.trimIndent()
+    ) { executable ->
+        val runner = SuRootCommandRunner(
+            maxOutputBytes = 1_024,
+            suExecutable = executable.toString()
+        )
+
+        val result = runner.run(RootCommand.KIOSK_HOME)
+
+        assertTrue(result.timedOut)
+        assertFalse(result.isSuccessful)
+    }
+}
+
+@Test
+fun defaultStatusTimeoutRemainsBounded() {
+    withFakeSu(
+        """
+        case "${'$'}2" in
+            /data/adb/modules/yinxing_guard/bin/status.sh) /bin/sleep 4 ;;
+            *) exit 64 ;;
+        esac
+        """.trimIndent()
+    ) { executable ->
+        val runner = SuRootCommandRunner(
+            maxOutputBytes = 1_024,
+            suExecutable = executable.toString()
+        )
+
+        val result = runner.run(RootCommand.STATUS)
+
+        assertTrue(result.timedOut)
+        assertFalse(result.isSuccessful)
+    }
+}
+```
+
 Do not weaken `timeoutForciblyStopsAStuckSuProcessWithinBound()` or replace its explicit 100 ms override.
 
 - [ ] **Step 2: Run the focused test and observe RED.**
@@ -71,7 +119,7 @@ env GRADLE_OPTS='-Dhttp.proxyHost=172.38.8.47 -Dhttp.proxyPort=8888 -Dhttps.prox
     --no-daemon --console=plain
 ```
 
-Expected: `defaultRecoveryTimeoutCoversBoundedRebindConfirmation` fails because the result has `timedOut=true` after the current 3,000 ms default. The fixed-path, 100 ms stuck-process, and output-limit tests remain green.
+Expected: recovery fails because the result has `timedOut=true` after the current 3,000 ms default; Kiosk fails because the shared 3,000 ms default lets its two-second process succeed. The status preservation test, fixed-path test, 100 ms stuck-process test, and output-limit test remain green.
 
 - [ ] **Step 3: Run static checks for the red slice.**
 
@@ -160,22 +208,7 @@ private val runner: RootCommandRunner = SuRootCommandRunner()
 
 Remove its companion object containing `DEFAULT_TIMEOUT_MILLIS`. Injection of a fake `RootCommandRunner` and cancellation/error handling remain unchanged.
 
-- [ ] **Step 4: Assert the exact production budgets.**
-
-Add to `RootCommandRunnerTest`:
-
-```kotlin
-@Test
-fun fixedCommandsDeclareExactTimeoutBudgets() {
-    assertEquals(3_000L, RootCommand.STATUS.timeoutMillis)
-    assertEquals(12_000L, RootCommand.RECOVER.timeoutMillis)
-    assertEquals(1_200L, RootCommand.KIOSK_HOME.timeoutMillis)
-}
-```
-
-The existing fake-`su` routing test remains the executable proof for all three literal paths.
-
-- [ ] **Step 5: Run the focused Root JVM suite and observe GREEN.**
+- [ ] **Step 4: Run the focused Root JVM suite and observe GREEN.**
 
 ```bash
 env GRADLE_OPTS='-Dhttp.proxyHost=172.38.8.47 -Dhttp.proxyPort=8888 -Dhttps.proxyHost=172.38.8.47 -Dhttps.proxyPort=8888' \
@@ -184,9 +217,9 @@ env GRADLE_OPTS='-Dhttp.proxyHost=172.38.8.47 -Dhttp.proxyPort=8888 -Dhttps.prox
     --no-daemon --console=plain
 ```
 
-Expected: the four-second default recovery succeeds, the 100 ms override still terminates the 30-second process within 1.5 seconds, output overflow remains bounded, repository tests stay green, and all exact budget assertions pass.
+Expected: the four-second default recovery succeeds; two-second Kiosk and four-second status processes time out; the 100 ms override still terminates the 30-second process within 1.5 seconds; output overflow remains bounded and repository tests stay green.
 
-- [ ] **Step 6: Run source and diff checks.**
+- [ ] **Step 5: Run source and diff checks.**
 
 ```bash
 rg -n 'DEFAULT_TIMEOUT_MILLIS|timeoutMillis = 3_000|timeoutMillis = 12_000|timeoutMillis = 1_200' \
@@ -197,7 +230,7 @@ git diff --check
 
 Expected: no duplicate `DEFAULT_TIMEOUT_MILLIS`; one exact enum budget per command; diff check exits 0.
 
-- [ ] **Step 7: Commit the implementation.**
+- [ ] **Step 6: Commit the implementation.**
 
 ```bash
 git add \
