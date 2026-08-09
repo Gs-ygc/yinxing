@@ -186,8 +186,8 @@ write_fake cmd \
     'apply_late_home_set() { [[ -f "$TEST_ROOT/late_home_target" ]] || return 0; reads="$(cat "$TEST_ROOT/late_home_reads" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/late_home_reads"; if [[ "$reads" -ge 4 ]]; then cat "$TEST_ROOT/late_home_target" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/late_home_target"; fi; }' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then apply_late_home_set; [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
     'if [[ "${1:-}" == "package" && "${2:-}" == "resolve-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_resolver_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_resolver_query" ]] && exit 1; if [[ -f "$TEST_ROOT/malformed_home_resolver_output" ]]; then cat "$TEST_ROOT/malformed_home_resolver_output"; exit 0; fi; if [[ -f "$TEST_ROOT/home_resolved_component" ]]; then cat "$TEST_ROOT/home_resolved_component"; exit 0; fi; holder="$(tr -d "\\n" < "$HOME_HOLDER" 2>/dev/null || true)"; if [[ -z "$holder" ]]; then printf "No activity found\\n"; elif [[ "$holder" == "com.yinxing.launcher" ]]; then printf "com.yinxing.launcher/.feature.home.MainActivity\\n"; else printf "%s/.Launcher\\n" "$holder"; fi; exit 0; fi' \
-    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; if [[ -e "$TEST_ROOT/pause_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then touch "$TEST_ROOT/home_role_set_entered"; for _ in $(seq 1 200); do [[ -e "$TEST_ROOT/allow_home_role_set" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_role_set" ]] || exit 89; fi; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; holder="${target%%/*}"; if [[ ! -e "$TEST_ROOT/ignore_home_role_set" ]]; then holder_tmp="$HOME_HOLDER.tmp.$$"; printf "%s\\n" "$holder" > "$holder_tmp" && mv -f "$holder_tmp" "$HOME_HOLDER"; fi; if [[ ! -e "$TEST_ROOT/ignore_home_resolver_set" ]]; then resolver_tmp="$TEST_ROOT/home_resolved_component.tmp.$$"; printf "%s\\n" "$target" > "$resolver_tmp" && mv -f "$resolver_tmp" "$TEST_ROOT/home_resolved_component"; fi; exit 0; fi' \
-    'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then target="${!#}"; if [[ -e "$TEST_ROOT/pause_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then touch "$TEST_ROOT/home_role_set_entered"; for _ in $(seq 1 200); do [[ -e "$TEST_ROOT/allow_home_role_set" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_role_set" ]] || exit 89; fi; [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; [[ -e "$TEST_ROOT/fail_home_role_restore" && "${target%%/*}" != "com.yinxing.launcher" ]] && exit 1; if [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]]; then printf "%s\\n" "${target%%/*}" > "$TEST_ROOT/late_home_target"; printf '0\\n' > "$TEST_ROOT/late_home_reads"; fi; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/late_home_role_set" && "${target%%/*}" == "com.yinxing.launcher" ]] && /bin/sleep 5; holder="${target%%/*}"; if [[ ! -e "$TEST_ROOT/ignore_home_role_set" ]]; then holder_tmp="$HOME_HOLDER.tmp.$$"; printf "%s\\n" "$holder" > "$holder_tmp" && mv -f "$holder_tmp" "$HOME_HOLDER"; fi; if [[ ! -e "$TEST_ROOT/ignore_home_resolver_set" ]]; then if [[ "${target%%/*}" != "com.yinxing.launcher" && -f "$TEST_ROOT/home_resolver_after_role_restore" ]]; then cp "$TEST_ROOT/home_resolver_after_role_restore" "$HOME_RESOLVED_COMPONENT"; elif [[ ! -e "$TEST_ROOT/ignore_home_resolver_restore" || "${target%%/*}" == "com.yinxing.launcher" ]]; then resolver_tmp="$TEST_ROOT/home_resolved_component.tmp.$$"; printf "%s\\n" "$target" > "$resolver_tmp" && mv -f "$resolver_tmp" "$HOME_RESOLVED_COMPONENT"; fi; fi; exit 0; fi' \
+    'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; if [[ ! -e "$TEST_ROOT/ignore_home_resolver_remove" ]]; then if [[ -f "$TEST_ROOT/home_resolver_after_role_remove" ]]; then cp "$TEST_ROOT/home_resolver_after_role_remove" "$HOME_RESOLVED_COMPONENT"; else rm -f "$HOME_RESOLVED_COMPONENT"; fi; fi; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
@@ -200,6 +200,8 @@ write_fake yinxing-test-sync \
     '#!/usr/bin/env bash' \
     'printf "sync %s\\n" "$*" >> "$CALLS"' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_after_takeover_state_sync" ]]; then printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/switch_home_after_takeover_state_sync"; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_after_owned_state_sync" && "$(tr -d "\\n" < "$TEST_ROOT/state/home_takeover_state" 2>/dev/null)" == owned ]]; then printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; printf "com.yinxing.launcher/.feature.home.MainActivity\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_after_owned_state_sync"; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync" && "$(tr -d "\\n" < "$TEST_ROOT/state/home_takeover_state" 2>/dev/null)" == released ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.yinxing.launcher/.feature.home.MainActivity\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* && -e "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.oplus.launcher/.Launcher\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* ]]; then [[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1; fi' \
     'exit 0'
@@ -321,7 +323,11 @@ reset_fixture() {
         "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
         "$TEST_ROOT/ignore_home_resolver_set" \
+        "$TEST_ROOT/ignore_home_resolver_restore" \
+        "$TEST_ROOT/home_resolver_after_role_restore" \
         "$TEST_ROOT/ignore_home_role_remove" \
+        "$TEST_ROOT/ignore_home_resolver_remove" \
+        "$TEST_ROOT/home_resolver_after_role_remove" \
         "$TEST_ROOT/fail_home_marker_sync" \
         "$TEST_ROOT/concurrent_home_marker_publish" \
         "$TEST_ROOT/home_publish_first_ready" \
@@ -346,6 +352,8 @@ reset_fixture() {
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
         "$TEST_ROOT/switch_home_after_takeover_state_sync" \
+        "$TEST_ROOT/switch_home_after_owned_state_sync" \
+        "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync" \
         "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_add_after_apply" \
@@ -1126,6 +1134,80 @@ test_home_role_preserves_choice_after_takeover_state_publish() {
         fail "post-publication HOME choice retained takeover state"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     pass "HOME preserves choice made after takeover state publication"
+}
+
+test_home_role_retains_pending_when_post_publish_route_is_stale() {
+    reset_fixture
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    touch "$TEST_ROOT/switch_home_after_takeover_state_sync"
+    if repair_state; then
+        fail "HOME repair cleared evidence while the post-publication route stayed Yinxing"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stale post-publication route preserves caregiver HOME"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "stale post-publication route remains observable"
+    case "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" in
+        pending\|*) ;;
+        *) fail "stale post-publication route released pending HOME state" ;;
+    esac
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "stale post-publication route lost original HOME evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "stale post-publication route lost cleanup helper"
+    pass "HOME retains pending evidence when post-publication route is stale"
+}
+
+test_home_role_rechecks_owned_promotion_before_commit() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|fixture-boot|com.oplus.launcher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    touch "$TEST_ROOT/switch_home_after_owned_state_sync"
+    if repair_state; then
+        fail "HOME repair committed owned state after a role race"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "owned-promotion role race preserves caregiver choice"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "owned-promotion role race leaves stale route evidence"
+    case "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" in
+        pending\|*) ;;
+        *) fail "owned-promotion role race left an owned state" ;;
+    esac
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "owned-promotion role race lost original HOME evidence"
+    pass "HOME rechecks owned promotion before commit"
+}
+
+test_home_role_rechecks_owned_takeover_before_commit() {
+    reset_fixture
+    touch "$TEST_ROOT/switch_home_after_owned_state_sync"
+    if repair_state; then
+        fail "HOME repair committed owned state after a takeover role race"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "owned-takeover role race preserves caregiver choice"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "owned-takeover role race leaves stale route evidence"
+    case "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" in
+        pending\|*) ;;
+        *) fail "owned-takeover role race left an owned state" ;;
+    esac
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "owned-takeover role race lost original HOME evidence"
+    pass "HOME rechecks owned takeover before commit"
 }
 
 test_home_marker_sync_is_bounded() {
@@ -2587,6 +2669,58 @@ test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
     pass "action restores no-holder HOME after mid-set deactivation"
 }
 
+test_action_retains_pending_when_no_holder_route_restore_is_unconfirmed() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    : > "$HOME_HOLDER"
+    touch "$TEST_ROOT/ignore_home_resolver_remove"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after no-holder HOME route rollback was unconfirmed"
+    fi
+    assert_equals "" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "unconfirmed no-holder rollback preserves role removal"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "unconfirmed no-holder rollback retains stale route evidence"
+    case "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" in
+        pending\|*) ;;
+        *) fail "unconfirmed no-holder rollback released pending state" ;;
+    esac
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "unconfirmed no-holder rollback lost original evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "unconfirmed no-holder rollback lost cleanup helper"
+    pass "no-holder HOME rollback retains pending route evidence"
+}
+
+test_action_retains_pending_when_previous_route_restore_is_unconfirmed() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'com.example.caregiverlauncher/.Launcher\n' > \
+        "$TEST_ROOT/home_resolver_after_role_restore"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after previous HOME route rollback was unconfirmed"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "unconfirmed previous rollback restores role"
+    assert_equals "com.example.caregiverlauncher/.Launcher" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "unconfirmed previous rollback retains mismatched route evidence"
+    case "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" in
+        pending\|*) ;;
+        *) fail "unconfirmed previous rollback released pending state" ;;
+    esac
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "unconfirmed previous rollback lost original evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "unconfirmed previous rollback lost cleanup helper"
+    pass "previous HOME rollback retains pending route evidence"
+}
+
 test_repeated_home_takeover_never_clobbers_original_holder() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
@@ -3381,16 +3515,41 @@ test_uninstall_removes_owned_home_when_previous_was_none() {
     printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
     printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.oplus.launcher/.Launcher\n' > "$TEST_ROOT/home_resolver_after_role_remove"
     run_module_script "$MODULE_ROOT/uninstall.sh"
     [[ -x "$CLEANUP_TARGET" ]] || fail "empty HOME rollback helper was not scheduled"
     run_module_script "$CLEANUP_TARGET"
     assert_equals "" "$(tr -d '\n' < "$HOME_HOLDER")" "uninstall removes module-owned HOME"
+    assert_equals "com.oplus.launcher/.Launcher" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "uninstall accepts a known fallback HOME route"
     assert_equals "1" \
         "$(grep -c '^cmd role remove-role-holder --user 0 android.app.role.HOME com.yinxing.launcher$' "$CALLS")" \
         "owned HOME removal count"
     [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "HOME removal retained marker"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "HOME removal retained helper"
     pass "uninstall removes owned HOME when no holder existed"
+}
+
+test_uninstall_retains_released_home_evidence_when_route_is_still_yinxing() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'released\n' > "$TEST_ROOT/state/home_takeover_state"
+    : > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$HOME_RESOLVED_COMPONENT"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "released HOME evidence with stale Yinxing route unexpectedly cleared"
+    fi
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "released HOME evidence lost its original marker"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "released HOME evidence lost its state marker"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "released HOME evidence lost its retry helper"
+    pass "released HOME evidence retains a stale Yinxing route"
 }
 
 test_uninstall_preserves_newer_home_choice() {
@@ -3409,6 +3568,57 @@ test_uninstall_preserves_newer_home_choice() {
     [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "new HOME choice retained stale marker"
     [[ ! -e "$CLEANUP_TARGET" ]] || fail "new HOME choice retained helper"
     pass "uninstall preserves newer HOME choice"
+}
+
+test_uninstall_preserves_newer_choice_with_stale_yinxing_route() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$HOME_RESOLVED_COMPONENT"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "new HOME choice with stale Yinxing route unexpectedly cleared evidence"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "new HOME choice with stale route preserves role"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "new HOME choice with stale route lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "new HOME choice with stale route lost helper"
+    pass "uninstall preserves newer choice with stale Yinxing route"
+}
+
+test_uninstall_retains_evidence_when_route_changes_after_release_publish() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'com.example.caregiverlauncher/.Launcher\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    touch "$TEST_ROOT/switch_home_to_yinxing_after_release_state_sync"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "route race after released publish unexpectedly cleared HOME evidence"
+    fi
+    assert_equals "com.yinxing.launcher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "route race after release publishes Yinxing role for retry"
+    assert_equals "com.yinxing.launcher/.feature.home.MainActivity" \
+        "$(tr -d '\n' < "$HOME_RESOLVED_COMPONENT")" \
+        "route race after release retains Yinxing route"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "route race after release lost original HOME evidence"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "route race after release lost takeover state"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "route race after release lost cleanup helper"
+    pass "uninstall retains evidence when route changes after release publish"
 }
 
 test_uninstall_does_not_remove_preexisting_yinxing_home() {
@@ -3825,6 +4035,29 @@ test_uninstall_preserves_choice_made_during_previous_home_validation() {
     pass "uninstall preserves HOME choice made during package validation"
 }
 
+test_uninstall_retains_choice_when_previous_validation_route_is_stale() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
+        "$HOME_RESOLVED_COMPONENT"
+    touch "$TEST_ROOT/switch_home_during_previous_path"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "stale route during previous HOME validation unexpectedly cleared evidence"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stale route validation preserves caregiver role choice"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "stale route validation lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "stale route validation lost cleanup helper"
+    pass "uninstall retains choice when previous validation route is stale"
+}
+
 test_uninstall_retries_failed_or_unconfirmed_home_removal() {
     local mode control
 
@@ -3988,12 +4221,18 @@ case "$MODE" in
         test_action_persists_latest_home_when_inactive_rollback_fails
         test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_action_retains_pending_when_no_holder_route_restore_is_unconfirmed
+        test_action_retains_pending_when_previous_route_restore_is_unconfirmed
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
+        test_uninstall_retains_released_home_evidence_when_route_is_still_yinxing
+        test_uninstall_preserves_newer_choice_with_stale_yinxing_route
         test_uninstall_retains_home_marker_when_resolver_restore_mismatches
         test_uninstall_retains_home_marker_when_resolver_unknown
         test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
         test_uninstall_preserves_known_non_yinxing_route_mismatch
+        test_uninstall_retains_choice_when_previous_validation_route_is_stale
+        test_uninstall_retains_evidence_when_route_changes_after_release_publish
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
@@ -4010,8 +4249,17 @@ case "$MODE" in
         test_home_transaction_lock_serializes_concurrent_actions
         test_uninstall_waits_for_unpublished_home_transaction
         test_home_role_preserves_choice_after_takeover_state_publish
+        test_home_role_retains_pending_when_post_publish_route_is_stale
+        test_home_role_rechecks_owned_promotion_before_commit
+        test_home_role_rechecks_owned_takeover_before_commit
         test_home_resolver_rechecks_cross_boot_pending_transition
         test_home_resolver_rechecks_marker_sync_transition
+        test_action_retains_pending_when_no_holder_route_restore_is_unconfirmed
+        test_action_retains_pending_when_previous_route_restore_is_unconfirmed
+        test_uninstall_retains_released_home_evidence_when_route_is_still_yinxing
+        test_uninstall_preserves_newer_choice_with_stale_yinxing_route
+        test_uninstall_retains_choice_when_previous_validation_route_is_stale
+        test_uninstall_retains_evidence_when_route_changes_after_release_publish
         test_home_transaction_lock_reclaims_dead_owner
         test_home_transaction_lock_rejects_symlink
         test_guard_promotes_visible_pending_home_state
@@ -4060,6 +4308,9 @@ case "$MODE" in
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
+        test_home_role_retains_pending_when_post_publish_route_is_stale
+        test_home_role_rechecks_owned_promotion_before_commit
+        test_home_role_rechecks_owned_takeover_before_commit
         test_home_marker_sync_is_bounded
         test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
@@ -4109,6 +4360,11 @@ case "$MODE" in
         test_action_persists_latest_home_when_inactive_rollback_fails
         test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_action_retains_pending_when_no_holder_route_restore_is_unconfirmed
+        test_action_retains_pending_when_previous_route_restore_is_unconfirmed
+        test_home_role_retains_pending_when_post_publish_route_is_stale
+        test_home_role_rechecks_owned_promotion_before_commit
+        test_home_role_rechecks_owned_takeover_before_commit
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         test_home_transaction_lock_serializes_concurrent_actions
@@ -4151,7 +4407,10 @@ case "$MODE" in
         test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
         test_uninstall_preserves_known_non_yinxing_route_mismatch
         test_uninstall_removes_owned_home_when_previous_was_none
+        test_uninstall_retains_released_home_evidence_when_route_is_still_yinxing
         test_uninstall_preserves_newer_home_choice
+        test_uninstall_preserves_newer_choice_with_stale_yinxing_route
+        test_uninstall_retains_evidence_when_route_changes_after_release_publish
         test_uninstall_does_not_remove_preexisting_yinxing_home
         test_uninstall_retains_home_marker_when_previous_package_is_missing
         test_uninstall_retains_home_marker_when_restore_fails
@@ -4164,6 +4423,7 @@ case "$MODE" in
         test_uninstall_rejects_trailing_blank_home_query
         test_uninstall_rejects_invalid_android_home_markers
         test_uninstall_preserves_choice_made_during_previous_home_validation
+        test_uninstall_retains_choice_when_previous_validation_route_is_stale
         test_uninstall_retries_failed_or_unconfirmed_home_removal
         test_uninstall_bounds_stalled_home_removal
         test_uninstall_completes_doze_when_home_removal_needs_retry
@@ -4218,6 +4478,9 @@ case "$MODE" in
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
+        test_home_role_retains_pending_when_post_publish_route_is_stale
+        test_home_role_rechecks_owned_promotion_before_commit
+        test_home_role_rechecks_owned_takeover_before_commit
         test_home_marker_sync_is_bounded
         test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
@@ -4281,6 +4544,9 @@ case "$MODE" in
         test_action_persists_latest_home_when_inactive_rollback_fails
         test_uninstall_recovers_latest_home_after_late_set_completion
         test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_home_role_retains_pending_when_post_publish_route_is_stale
+        test_home_role_rechecks_owned_promotion_before_commit
+        test_home_role_rechecks_owned_takeover_before_commit
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         test_home_transaction_lock_serializes_concurrent_actions
@@ -4324,6 +4590,7 @@ case "$MODE" in
         test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
         test_uninstall_preserves_known_non_yinxing_route_mismatch
         test_uninstall_removes_owned_home_when_previous_was_none
+        test_uninstall_retains_evidence_when_route_changes_after_release_publish
         test_uninstall_preserves_newer_home_choice
         test_uninstall_does_not_remove_preexisting_yinxing_home
         test_uninstall_retains_home_marker_when_previous_package_is_missing

@@ -798,7 +798,7 @@ read_home_role_holder() {
     printf '%s\n' "$home_output"
 }
 
-read_home_resolved_component() {
+read_home_resolved_activity() {
     if ! resolver_output="$(
         run_guard_command cmd package resolve-activity \
             --brief --components --user "$ANDROID_USER_ID" \
@@ -808,15 +808,11 @@ read_home_resolved_component() {
         printf '|'
         exit "$resolver_status"
     )"; then
-        printf 'unknown\n'
         return 1
     fi
     case "$resolver_output" in
         *'|') resolver_output=${resolver_output%|} ;;
-        *)
-            printf 'unknown\n'
-            return 1
-            ;;
+        *) return 1 ;;
     esac
 
     line_feed='
@@ -825,16 +821,10 @@ read_home_resolved_component() {
         *"$line_feed")
             resolver_output=${resolver_output%"$line_feed"}
             ;;
-        *)
-            printf 'unknown\n'
-            return 1
-            ;;
+        *) return 1 ;;
     esac
     case "$resolver_output" in
-        ''|*"$line_feed"*|*'|'*|*null*|*NULL*)
-            printf 'unknown\n'
-            return 1
-            ;;
+        ''|*"$line_feed"*|*'|'*|*null*|*NULL*) return 1 ;;
         'No activity found')
             printf 'none\n'
             return 0
@@ -843,33 +833,51 @@ read_home_resolved_component() {
 
     resolver_package=${resolver_output%%/*}
     resolver_class=${resolver_output#*/}
-    [ "$resolver_output" != "$resolver_package" ] || {
-        printf 'unknown\n'
-        return 1
-    }
+    [ "$resolver_output" != "$resolver_package" ] || return 1
     case "$resolver_class" in
-        ''|*/*|*[!A-Za-z0-9_.\$]*)
-            printf 'unknown\n'
-            return 1
-            ;;
+        ''|*/*|*[!A-Za-z0-9_.\$]*) return 1 ;;
     esac
-    valid_android_package_name "$resolver_package" || {
+    valid_android_package_name "$resolver_package" || return 1
+    printf '%s\n' "$resolver_package/$resolver_class"
+}
+
+read_home_resolved_component() {
+    if ! resolved_component="$(read_home_resolved_activity)"; then
         printf 'unknown\n'
         return 1
-    }
-    case "$resolver_package/$resolver_class" in
-        "$PACKAGE_NAME/.feature.home.MainActivity"|\
-        "$PACKAGE_NAME/$PACKAGE_NAME.feature.home.MainActivity")
+    fi
+    case "$resolved_component" in
+        none) printf 'none\n' ;;
+        "$HOME_COMPONENT"|"$PACKAGE_NAME/$PACKAGE_NAME.feature.home.MainActivity")
             printf 'target\n'
             ;;
-        *)
-            printf 'other\n'
-            ;;
+        *) printf 'other\n' ;;
     esac
 }
 
 home_resolver_state() {
     read_home_resolved_component
+}
+
+home_resolver_matches_holder_locked() {
+    expected_home_holder="$1"
+    if [ "$expected_home_holder" != none ]; then
+        valid_home_holder "$expected_home_holder" || return 1
+    fi
+    if ! resolved_component="$(read_home_resolved_activity)"; then
+        return 1
+    fi
+    if [ "$expected_home_holder" = none ]; then
+        if [ "$resolved_component" = none ]; then
+            return 0
+        fi
+        resolved_package=${resolved_component%%/*}
+        [ "$resolved_package" != "$PACKAGE_NAME" ]
+        return $?
+    fi
+    [ "$resolved_component" != none ] || return 1
+    resolved_package=${resolved_component%%/*}
+    [ "$resolved_package" = "$expected_home_holder" ]
 }
 
 read_home_holder_marker() {
@@ -1079,7 +1087,122 @@ ensure_owned_home_route_locked() {
         log_event "home_route_query_failed"
         return 1
     fi
-    repair_owned_home_route_locked "$owned_home_resolver"
+    repair_owned_home_route_locked "$owned_home_resolver" || return 1
+    if ! owned_home_holder="$(read_home_role_holder)" || \
+        [ "$owned_home_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_route_holder_changed_after_check"
+        return 1
+    fi
+    if ! owned_home_resolver="$(home_resolver_state)" || \
+        [ "$owned_home_resolver" != target ]; then
+        log_event "home_route_changed_after_check"
+        return 1
+    fi
+    if ! owned_home_holder="$(read_home_role_holder)" || \
+        [ "$owned_home_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_route_holder_changed_after_resolver_check"
+        return 1
+    fi
+    module_is_active || return 1
+    return 0
+}
+
+home_route_safe_for_release_locked() {
+    if ! released_home_route="$(read_home_resolved_activity)"; then
+        log_event "home_route_release_query_failed"
+        return 1
+    fi
+    if [ "$released_home_route" = none ]; then
+        return 0
+    fi
+    released_home_package=${released_home_route%%/*}
+    if [ "$released_home_package" != "$PACKAGE_NAME" ]; then
+        return 0
+    fi
+    log_event "home_route_release_unconfirmed"
+    return 1
+}
+
+confirm_owned_home_state_locked() {
+    if ! owned_confirmed_holder="$(read_home_role_holder)" || \
+        [ "$owned_confirmed_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_owned_state_holder_unconfirmed"
+        return 1
+    fi
+    if ! owned_confirmed_resolver="$(home_resolver_state)" || \
+        [ "$owned_confirmed_resolver" != target ]; then
+        log_event "home_owned_state_route_unconfirmed"
+        return 1
+    fi
+    if ! owned_confirmed_holder_after_route="$(read_home_role_holder)" || \
+        [ "$owned_confirmed_holder_after_route" != "$PACKAGE_NAME" ]; then
+        log_event "home_owned_state_holder_changed_after_route"
+        return 1
+    fi
+    module_is_active || return 1
+    return 0
+}
+
+home_release_evidence_locked() {
+    release_route_mode="$1"
+    release_expected_holder="$2"
+    release_pending_state="$3"
+    release_clear_evidence=yes
+    if [ "$#" -ge 4 ]; then
+        release_clear_evidence="$4"
+    fi
+    case "$release_route_mode" in
+        safe|exact) ;;
+        *) return 1 ;;
+    esac
+    if ! release_before_holder="$(read_home_role_holder)"; then
+        log_event "home_release_holder_query_failed"
+        return 1
+    fi
+    if [ "$release_route_mode" = safe ]; then
+        [ "$release_before_holder" != "$PACKAGE_NAME" ] || return 1
+    elif [ "$release_before_holder" != "$release_expected_holder" ]; then
+        return 1
+    fi
+    if [ "$release_route_mode" = safe ]; then
+        home_route_safe_for_release_locked || return 1
+    else
+        home_resolver_matches_holder_locked "$release_expected_holder" || return 1
+    fi
+    if ! write_home_takeover_state released; then
+        return 1
+    fi
+    if ! release_after_holder="$(read_home_role_holder)" || \
+        [ "$release_after_holder" != "$release_before_holder" ]; then
+        log_event "home_release_holder_changed"
+        write_home_takeover_state "$release_pending_state" || \
+            log_event "home_release_pending_restore_failed"
+        return 1
+    fi
+    if [ "$release_route_mode" = safe ]; then
+        home_route_safe_for_release_locked || {
+            write_home_takeover_state "$release_pending_state" || \
+                log_event "home_release_pending_restore_failed"
+            return 1
+        }
+    else
+        home_resolver_matches_holder_locked "$release_expected_holder" || {
+            write_home_takeover_state "$release_pending_state" || \
+                log_event "home_release_pending_restore_failed"
+            return 1
+        }
+    fi
+    if ! release_after_route_holder="$(read_home_role_holder)" || \
+        [ "$release_after_route_holder" != "$release_before_holder" ]; then
+        log_event "home_release_holder_changed_after_route"
+        write_home_takeover_state "$release_pending_state" || \
+            log_event "home_release_pending_restore_failed"
+        return 1
+    fi
+    if [ "$release_clear_evidence" = yes ]; then
+        clear_released_home_evidence
+    fi
+    return 0
 }
 
 record_home_holder_marker() {
@@ -1339,10 +1462,10 @@ rollback_home_after_inactive_takeover() {
             log_event "home_role_inactive_preserve_unconfirmed"
             return 1
         fi
-        if ! write_home_takeover_state released; then
+        home_release_evidence_locked safe "" "$rollback_state" no || {
             log_event "home_role_inactive_release_failed"
             return 1
-        fi
+        }
         log_event "home_role_inactive_rollback_preserved_new_choice_released"
         return 0
     fi
@@ -1358,6 +1481,7 @@ rollback_home_after_inactive_takeover() {
             log_event "home_role_inactive_remove_unconfirmed"
             return 1
         fi
+        home_resolver_matches_holder_locked "$rollback_previous_home" || return 1
     else
         if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$rollback_previous_home" \
             >/dev/null 2>&1; then
@@ -1369,7 +1493,7 @@ rollback_home_after_inactive_takeover() {
             return 1
         fi
         if [ "$rollback_current_home" != "$PACKAGE_NAME" ]; then
-            write_home_takeover_state released || return 1
+            home_release_evidence_locked safe "" "$rollback_state" no || return 1
             log_event "home_role_inactive_rollback_preserved_new_choice_released"
             return 0
         fi
@@ -1383,9 +1507,11 @@ rollback_home_after_inactive_takeover() {
             log_event "home_role_inactive_restore_unconfirmed"
             return 1
         fi
+        home_resolver_matches_holder_locked "$rollback_previous_home" || return 1
     fi
 
-    if ! write_home_takeover_state released; then
+    if ! home_release_evidence_locked exact "$rollback_previous_home" \
+        "$rollback_state" no; then
         log_event "home_role_inactive_rollback_state_release_failed"
         return 1
     fi
@@ -1460,8 +1586,17 @@ repair_home_role_locked() {
             pending\|*)
                 cleanup_helper_ready "${CLEANUP_SOURCE:-}" || return 1
                 module_is_active || return 1
+                ensure_owned_home_route_locked || return 1
                 pending_state_before_promotion="$saved_takeover_state"
                 write_home_takeover_state owned || return 1
+                if ! confirm_owned_home_state_locked; then
+                    if write_home_takeover_state "$pending_state_before_promotion" && \
+                        ! module_is_active; then
+                        rollback_home_after_inactive_takeover || \
+                            log_event "home_role_inactive_rollback_failed"
+                    fi
+                    return 1
+                fi
                 if ! module_is_active; then
                     write_home_takeover_state "$pending_state_before_promotion" && \
                         rollback_home_after_inactive_takeover || \
@@ -1526,8 +1661,8 @@ repair_home_role_locked() {
         return 1
     fi
     takeover_boot_id="$(current_guard_boot_id)"
-    if ! write_home_takeover_state \
-        "pending|$takeover_boot_id|$refreshed_home_holder"; then
+    pending_takeover_state="pending|$takeover_boot_id|$refreshed_home_holder"
+    if ! write_home_takeover_state "$pending_takeover_state"; then
         log_event "home_role_pending_state_failed"
         return 1
     fi
@@ -1540,8 +1675,8 @@ repair_home_role_locked() {
         return 1
     fi
     if [ "$post_publish_home_holder" != "$refreshed_home_holder" ]; then
-        if ! write_home_takeover_state released || \
-            ! clear_released_home_evidence; then
+        if ! home_route_safe_for_release_locked || \
+            ! home_release_evidence_locked safe "" "$pending_takeover_state"; then
             log_event "home_role_post_publish_release_failed"
             return 1
         fi
@@ -1579,6 +1714,7 @@ repair_home_role_locked() {
         log_event "home_route_unconfirmed"
         return 1
     fi
+    ensure_owned_home_route_locked || return 1
     if ! module_is_active; then
         rollback_home_after_inactive_takeover || \
             log_event "home_role_inactive_rollback_failed"
@@ -1588,9 +1724,16 @@ repair_home_role_locked() {
         log_event "home_role_owned_state_failed"
         return 1
     fi
+    if ! confirm_owned_home_state_locked; then
+        if write_home_takeover_state "$pending_takeover_state" && \
+            ! module_is_active; then
+            rollback_home_after_inactive_takeover || \
+                log_event "home_role_inactive_rollback_failed"
+        fi
+        return 1
+    fi
     if ! module_is_active; then
-        write_home_takeover_state \
-            "pending|$takeover_boot_id|$refreshed_home_holder" && \
+        write_home_takeover_state "$pending_takeover_state" && \
             rollback_home_after_inactive_takeover || \
             log_event "home_role_inactive_rollback_failed"
         return 1

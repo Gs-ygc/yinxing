@@ -699,12 +699,75 @@ home_resolver_matches_holder() {
         return 1
     fi
     if [ "$expected_holder" = "none" ]; then
-        [ "$resolved_component" = "none" ]
+        if [ "$resolved_component" = "none" ]; then
+            return 0
+        fi
+        [ "$resolved_component" != "none" ] || return 1
+        resolved_package=${resolved_component%%/*}
+        [ "$resolved_package" != "$PACKAGE_NAME" ]
         return $?
     fi
     [ "$resolved_component" != "none" ] || return 1
     resolved_package=${resolved_component%%/*}
     [ "$resolved_package" = "$expected_holder" ]
+}
+
+home_route_safe_for_release() {
+    home_resolver_matches_holder none || {
+        log_event "uninstall_home_release_route_unconfirmed"
+        return 1
+    }
+    return 0
+}
+
+released_home_evidence_is_safe() {
+    if ! released_current_home="$(read_home_role_holder)"; then
+        log_event "uninstall_home_released_role_query_failed"
+        return 1
+    fi
+    if [ "$released_current_home" = "$PACKAGE_NAME" ]; then
+        return 0
+    fi
+    home_route_safe_for_release
+}
+
+release_home_evidence_after_check() {
+    release_expected_holder="$1"
+    release_route_mode="$2"
+    case "$release_route_mode" in
+        safe|exact) ;;
+        *) return 1 ;;
+    esac
+    if ! release_before_holder="$(read_home_role_holder)"; then
+        log_event "uninstall_home_release_holder_query_failed"
+        return 1
+    fi
+    if [ "$release_route_mode" = safe ]; then
+        [ "$release_before_holder" != "$PACKAGE_NAME" ] || return 1
+        home_route_safe_for_release || return 1
+    else
+        [ "$release_before_holder" = "$release_expected_holder" ] || return 1
+        home_resolver_matches_holder "$release_expected_holder" || return 1
+    fi
+    if ! write_home_takeover_state released; then
+        return 1
+    fi
+    if ! release_after_holder="$(read_home_role_holder)" || \
+        [ "$release_after_holder" != "$release_before_holder" ]; then
+        log_event "uninstall_home_release_holder_changed"
+        return 1
+    fi
+    if [ "$release_route_mode" = safe ]; then
+        home_route_safe_for_release || return 1
+    else
+        home_resolver_matches_holder "$release_expected_holder" || return 1
+    fi
+    if ! release_after_route_holder="$(read_home_role_holder)" || \
+        [ "$release_after_route_holder" != "$release_before_holder" ]; then
+        log_event "uninstall_home_release_holder_changed_after_route"
+        return 1
+    fi
+    clear_home_evidence
 }
 
 retry_home_restore_route_locked() {
@@ -751,6 +814,7 @@ cleanup_home_role_locked() {
             fi
             ;;
         released)
+            released_home_evidence_is_safe || return 1
             clear_home_evidence || return 1
             log_event "uninstall_home_released_state_cleared"
             return 0
@@ -803,7 +867,10 @@ cleanup_home_role_locked() {
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
-            release_home_evidence || return 1
+            if [ "$confirmed_new_home" != "$previous_home" ]; then
+                home_route_safe_for_release || return 1
+            fi
+            release_home_evidence_after_check "$confirmed_new_home" safe || return 1
             log_event "uninstall_home_preserved_new_choice"
             return 0
         fi
@@ -821,7 +888,8 @@ cleanup_home_role_locked() {
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
-            release_home_evidence || return 1
+            home_route_safe_for_release || return 1
+            release_home_evidence_after_check "$current_before_remove" safe || return 1
             log_event "uninstall_home_preserved_new_choice"
             return 0
         fi
@@ -835,7 +903,7 @@ cleanup_home_role_locked() {
             log_event "uninstall_home_remove_unconfirmed"
             return 1
         fi
-        if ! home_resolver_matches_holder none; then
+        if ! home_route_safe_for_release; then
             log_event "uninstall_home_remove_route_unconfirmed"
             return 1
         fi
@@ -855,7 +923,8 @@ cleanup_home_role_locked() {
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
-            release_home_evidence || return 1
+            home_route_safe_for_release || return 1
+            release_home_evidence_after_check "$current_before_restore" safe || return 1
             log_event "uninstall_home_preserved_new_choice"
             return 0
         fi
@@ -880,7 +949,7 @@ cleanup_home_role_locked() {
         log_event "uninstall_home_pending_compensated_same_boot"
         return 1
     fi
-    release_home_evidence || return 1
+    release_home_evidence_after_check "$previous_home" exact || return 1
     log_event "uninstall_home_cleanup_complete"
     return 0
 }
