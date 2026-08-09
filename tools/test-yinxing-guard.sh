@@ -1642,6 +1642,176 @@ test_uninstall_cleanup_bounds_stalled_doze_remove() {
     pass "uninstall cleanup bounds stalled Doze remove"
 }
 
+test_uninstall_restores_previous_home_holder() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'stale\n' > "$TEST_ROOT/state/home_previous_holder.tmp.999"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "HOME rollback helper was not scheduled"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "uninstall removed HOME marker early"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "uninstall restores previous HOME"
+    assert_equals "1" \
+        "$(grep -c '^cmd package set-home-activity --user 0 com.oplus.launcher$' "$CALLS")" \
+        "previous HOME restore count"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "successful HOME restore retained marker"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder.tmp.999" ]] || \
+        fail "successful HOME restore retained temp marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "successful HOME restore retained helper"
+    pass "uninstall restores previous HOME holder"
+}
+
+test_uninstall_removes_owned_home_when_previous_was_none() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "empty HOME rollback helper was not scheduled"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "" "$(tr -d '\n' < "$HOME_HOLDER")" "uninstall removes module-owned HOME"
+    assert_equals "1" \
+        "$(grep -c '^cmd role remove-role-holder --user 0 android.app.role.HOME com.yinxing.launcher$' "$CALLS")" \
+        "owned HOME removal count"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "HOME removal retained marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "HOME removal retained helper"
+    pass "uninstall removes owned HOME when no holder existed"
+}
+
+test_uninstall_preserves_newer_home_choice() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "new HOME choice cleanup helper was not scheduled"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "uninstall preserves newer HOME choice"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "new HOME choice retained stale marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "new HOME choice retained helper"
+    pass "uninstall preserves newer HOME choice"
+}
+
+test_uninstall_does_not_remove_preexisting_yinxing_home() {
+    reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || \
+        fail "could not install preexisting HOME helper fixture"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "uninstall preserves manually selected Yinxing HOME"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "unowned HOME retained cleanup helper"
+    pass "uninstall does not remove preexisting Yinxing HOME"
+}
+
+test_uninstall_retains_home_marker_when_previous_package_is_missing() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/previous_home_missing"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "missing previous HOME unexpectedly restored"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "missing previous HOME preserves current holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "missing previous HOME lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "missing previous HOME lost retry helper"
+    pass "uninstall retains HOME marker when previous package is missing"
+}
+
+test_uninstall_retains_home_marker_when_restore_fails() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/fail_home_role_set"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "failed previous HOME restore unexpectedly succeeded"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "failed restore preserves current HOME"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "failed restore lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "failed restore lost retry helper"
+    pass "uninstall retains HOME marker when restore fails"
+}
+
+test_uninstall_retains_invalid_home_marker() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'bad holder\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "invalid HOME marker cleanup unexpectedly succeeded"
+    fi
+    assert_equals "bad holder" "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "invalid HOME marker is retained"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "invalid HOME marker preserves current holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "invalid HOME marker lost retry helper"
+    pass "uninstall retains invalid HOME marker"
+}
+
+test_uninstall_bounds_stalled_home_restore() {
+    local started_at elapsed
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/hang_home_role_set"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$CLEANUP_TARGET"; then
+        fail "stalled HOME restore unexpectedly succeeded"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled HOME restore exceeded bound (${elapsed}s)"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stalled HOME restore preserves current holder"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "stalled HOME restore lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "stalled HOME restore lost retry helper"
+    pass "uninstall bounds stalled HOME restore"
+}
+
+test_uninstall_completes_home_when_doze_cleanup_needs_retry() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/fail_deviceidle_remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "partial HOME/Doze cleanup unexpectedly succeeded"
+    fi
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME restore completes independently"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "completed HOME restore retained marker"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || fail "failed Doze cleanup lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "partial cleanup lost retry helper"
+    rm -f "$TEST_ROOT/fail_deviceidle_remove"
+    run_module_script "$CLEANUP_TARGET"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || fail "Doze retry retained marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "completed cleanup retained helper"
+    pass "uninstall completes HOME while Doze cleanup retries"
+}
+
 test_module_package() {
     local rejection
 
@@ -1770,6 +1940,15 @@ case "$MODE" in
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_retains_malformed_marker
+        test_uninstall_restores_previous_home_holder
+        test_uninstall_removes_owned_home_when_previous_was_none
+        test_uninstall_preserves_newer_home_choice
+        test_uninstall_does_not_remove_preexisting_yinxing_home
+        test_uninstall_retains_home_marker_when_previous_package_is_missing
+        test_uninstall_retains_home_marker_when_restore_fails
+        test_uninstall_retains_invalid_home_marker
+        test_uninstall_bounds_stalled_home_restore
+        test_uninstall_completes_home_when_doze_cleanup_needs_retry
         ;;
     all)
         test_merge_cases
@@ -1848,6 +2027,15 @@ case "$MODE" in
         test_uninstall_retains_marker_when_doze_remove_fails
         test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_retains_malformed_marker
+        test_uninstall_restores_previous_home_holder
+        test_uninstall_removes_owned_home_when_previous_was_none
+        test_uninstall_preserves_newer_home_choice
+        test_uninstall_does_not_remove_preexisting_yinxing_home
+        test_uninstall_retains_home_marker_when_previous_package_is_missing
+        test_uninstall_retains_home_marker_when_restore_fails
+        test_uninstall_retains_invalid_home_marker
+        test_uninstall_bounds_stalled_home_restore
+        test_uninstall_completes_home_when_doze_cleanup_needs_retry
         test_module_package
         if [[ -z "${YINXING_TEST_SHELL:-}" ]] && command -v busybox >/dev/null 2>&1; then
             YINXING_TEST_SHELL=busybox bash "$0" all
