@@ -11,7 +11,7 @@
 ## Global Constraints
 
 - Target OnePlus 15 China ColorOS 16 with KernelSU on a user-controlled rooted appliance.
-- Root commands remain exactly the no-argument fixed paths `status.sh`, `action.sh`, and `kiosk-home.sh`; no arbitrary shell, arguments, package, component, coordinates, process killing, or private ColorOS API.
+- Root commands remain exactly the no-argument fixed paths `status.sh`, `action.sh`, and `kiosk-home.sh`; no arbitrary shell, arguments, package, component, coordinates, command targeting app/system processes, or private ColorOS API. Timeout cleanup may continue terminating only the runner's own spawned `su` process.
 - Production timeout budgets are exactly `STATUS=3_000L`, `RECOVER=12_000L`, and `KIOSK_HOME=1_200L` milliseconds.
 - A supplied `SuRootCommandRunner(timeoutMillis=...)` remains a positive, uniform test/caller override; `null` selects the command budget.
 - Process interruption, output limit, error-stream merge, graceful/forced termination, and fail-closed result semantics remain unchanged.
@@ -27,7 +27,7 @@
 - Modify: `app/src/test/java/com/yinxing/launcher/common/root/RootCommandRunnerTest.kt`
 
 **Interfaces:**
-- Consumes: current default `SuRootCommandRunner()`, fixed `RootCommand.RECOVER`, and existing `withFakeSu()` host-process fixture.
+- Consumes: current default `SuRootCommandRunner()`, all three fixed `RootCommand` values, and existing `withFakeSu()` host-process fixture.
 - Produces: real-process regressions proving four-second recovery succeeds while two-second Kiosk and four-second status commands remain bounded.
 
 - [ ] **Step 1: Add the real-process recovery regression.**

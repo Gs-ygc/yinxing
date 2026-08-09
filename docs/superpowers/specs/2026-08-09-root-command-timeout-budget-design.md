@@ -112,7 +112,7 @@ KernelSU module ZIP, basename-only SHA-256 file, install order, Preview 10
 rollback instructions, exact timings, and an explicit statement that no
 OnePlus 15 was connected locally.
 
-Out of scope: new Root commands or arguments, arbitrary shell input, process
-killing policy, coordinate clicking, private ColorOS APIs, broader keepalive
+Out of scope: new Root commands or arguments, arbitrary shell input, commands
+targeting app/system processes, coordinate clicking, private ColorOS APIs, broader keepalive
 settings, accessibility parser changes, Kiosk state-machine changes, and
 elderly-launcher visual redesign.
