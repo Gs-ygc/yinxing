@@ -707,6 +707,22 @@ home_resolver_matches_holder() {
     [ "$resolved_package" = "$expected_holder" ]
 }
 
+retry_home_restore_route_locked() {
+    restore_holder="$1"
+    [ "$restore_holder" != "none" ] || return 1
+    if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
+        "$restore_holder" >/dev/null 2>&1; then
+        log_event "uninstall_home_restore_route_set_failed"
+        return 1
+    fi
+    if ! retry_confirmed_holder="$(read_home_role_holder)" || \
+        [ "$retry_confirmed_holder" != "$restore_holder" ]; then
+        log_event "uninstall_home_restore_route_holder_unconfirmed"
+        return 1
+    fi
+    home_resolver_matches_holder "$restore_holder"
+}
+
 cleanup_home_role_locked() {
     if ! path_exists "$HOME_MARKER" && ! path_exists "$HOME_STATE_MARKER"; then
         return 0
@@ -774,8 +790,13 @@ cleanup_home_role_locked() {
             fi
             if [ "$confirmed_new_home" = "$previous_home" ] && \
                 ! home_resolver_matches_holder "$previous_home"; then
-                log_event "uninstall_home_preserve_route_unconfirmed"
-                return 1
+                if [ "$previous_home" = "none" ] || \
+                    ! retry_route_state="$(home_resolver_state)" || \
+                    [ "$retry_route_state" != target ] || \
+                    ! retry_home_restore_route_locked "$previous_home"; then
+                    log_event "uninstall_home_preserve_route_unconfirmed"
+                    return 1
+                fi
             fi
             if [ -n "$pending_boot" ] && \
                 [ "$pending_boot" = "$(read_current_boot_id)" ]; then

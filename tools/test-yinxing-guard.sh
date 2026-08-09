@@ -3444,6 +3444,14 @@ test_uninstall_retains_home_marker_when_resolver_restore_mismatches() {
     [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
         fail "resolver-mismatched restore lost HOME marker"
     [[ -x "$CLEANUP_TARGET" ]] || fail "resolver-mismatched restore lost helper"
+    rm -f "$TEST_ROOT/ignore_home_resolver_set"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.oplus.launcher/.Launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/home_resolved_component")" \
+        "resolver mismatch retry repairs route"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "resolver mismatch retry retained HOME marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "resolver mismatch retry retained helper"
     pass "uninstall retains HOME marker on resolver mismatch"
 }
 
@@ -3464,6 +3472,63 @@ test_uninstall_retains_home_marker_when_resolver_unknown() {
         fail "unknown resolver restore lost HOME marker"
     [[ -x "$CLEANUP_TARGET" ]] || fail "unknown resolver restore lost helper"
     pass "uninstall retains HOME marker on unknown resolver"
+}
+
+test_uninstall_bounds_or_rejects_home_resolver_restore_evidence() {
+    local mode control started_at elapsed
+
+    for mode in malformed stalled; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+        printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        touch "$TEST_ROOT/ignore_home_resolver_set"
+        case "$mode" in
+            malformed)
+                printf 'com.yinxing.launcher/.feature.home.MainActivity\ncom.oplus.launcher/.Launcher\n' > \
+                    "$TEST_ROOT/malformed_home_resolver_output"
+                ;;
+            stalled)
+                control="$TEST_ROOT/hang_home_resolver_query"
+                touch "$control"
+                ;;
+        esac
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        started_at=$SECONDS
+        if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$CLEANUP_TARGET"; then
+            fail "resolver evidence unexpectedly allowed cleanup ($mode)"
+        fi
+        elapsed=$((SECONDS - started_at))
+        if [ "$mode" = stalled ]; then
+            [[ "$elapsed" -lt 4 ]] || fail "stalled resolver cleanup exceeded bound (${elapsed}s)"
+        fi
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "resolver evidence cleanup restores role ($mode)"
+        [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+            fail "resolver evidence cleanup lost marker ($mode)"
+        [[ -x "$CLEANUP_TARGET" ]] || fail "resolver evidence cleanup lost helper ($mode)"
+    done
+    pass "uninstall bounds and rejects resolver restore evidence"
+}
+
+test_uninstall_preserves_known_non_yinxing_route_mismatch() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'owned\n' > "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
+    printf 'com.example.caregiverlauncher/.Launcher\n' > \
+        "$TEST_ROOT/home_resolved_component"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "non-Yinxing resolver mismatch unexpectedly completed cleanup"
+    fi
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "non-Yinxing resolver mismatch lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "non-Yinxing resolver mismatch lost helper"
+    pass "uninstall preserves known non-Yinxing route mismatch"
 }
 
 test_uninstall_retains_invalid_home_marker() {
@@ -3888,6 +3953,8 @@ case "$MODE" in
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         test_uninstall_retains_home_marker_when_resolver_restore_mismatches
         test_uninstall_retains_home_marker_when_resolver_unknown
+        test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
+        test_uninstall_preserves_known_non_yinxing_route_mismatch
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
@@ -4038,6 +4105,8 @@ case "$MODE" in
         test_uninstall_restores_previous_home_holder
         test_uninstall_retains_home_marker_when_resolver_restore_mismatches
         test_uninstall_retains_home_marker_when_resolver_unknown
+        test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
+        test_uninstall_preserves_known_non_yinxing_route_mismatch
         test_uninstall_removes_owned_home_when_previous_was_none
         test_uninstall_preserves_newer_home_choice
         test_uninstall_does_not_remove_preexisting_yinxing_home
@@ -4207,6 +4276,8 @@ case "$MODE" in
         test_uninstall_restores_previous_home_holder
         test_uninstall_retains_home_marker_when_resolver_restore_mismatches
         test_uninstall_retains_home_marker_when_resolver_unknown
+        test_uninstall_bounds_or_rejects_home_resolver_restore_evidence
+        test_uninstall_preserves_known_non_yinxing_route_mismatch
         test_uninstall_removes_owned_home_when_previous_was_none
         test_uninstall_preserves_newer_home_choice
         test_uninstall_does_not_remove_preexisting_yinxing_home
