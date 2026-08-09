@@ -139,7 +139,30 @@ write_fake settings \
     'shift_if_user() { if [[ "${1:-}" == "--user" ]]; then shift 2; fi; printf "%s" "$*"; }' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
     'if [[ "${args[0]:-}" == "get" ]]; then [[ -e "$TEST_ROOT/fail_settings_get" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_accessibility_read"; [[ -s "$SERVICES" ]] && cat "$SERVICES" || printf "null\\n"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then cat "$ACCESSIBILITY_ENABLED"; else exit 2; fi; exit 0; fi' \
-    'if [[ "${args[0]:-}" == "put" ]]; then [[ -e "$TEST_ROOT/fail_settings_put" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then previous="$(cat "$SERVICES" 2>/dev/null || true)"; value="${args[3]:-}"; printf "%s\\n" "$value" > "$SERVICES"; if [[ ":$previous:" == *":$ACCESSIBILITY_COMPONENT:"* && ":$value:" != *":$ACCESSIBILITY_COMPONENT:"* ]]; then touch "$TEST_ROOT/accessibility_rebind_removed"; if [[ -f "$TEST_ROOT/caregiver_services_during_rebind_remove" ]]; then cat "$TEST_ROOT/caregiver_services_during_rebind_remove" > "$SERVICES"; fi; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"; elif [[ -e "$TEST_ROOT/accessibility_rebind_removed" && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then rm -f "$TEST_ROOT/accessibility_rebind_removed"; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_restore"; fi; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then printf "%s\\n" "${args[3]:-}" > "$ACCESSIBILITY_ENABLED"; fi; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "put" ]]; then' \
+    '  [[ -e "$TEST_ROOT/fail_settings_put" ]] && exit 1' \
+    '  if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then' \
+    '    previous="$(cat "$SERVICES" 2>/dev/null || true)"; value="${args[3]:-}"' \
+    '    if [[ -f "$TEST_ROOT/fail_accessibility_compensation_services" && "$value" == "$(cat "$TEST_ROOT/fail_accessibility_compensation_services")" ]]; then exit 1; fi' \
+    '    printf "%s\\n" "$value" > "$SERVICES"' \
+    '    if [[ ":$previous:" == *":$ACCESSIBILITY_COMPONENT:"* && ":$value:" != *":$ACCESSIBILITY_COMPONENT:"* ]]; then' \
+    '      touch "$TEST_ROOT/accessibility_rebind_removed"' \
+    '      [[ -f "$TEST_ROOT/caregiver_services_during_rebind_remove" ]] && cat "$TEST_ROOT/caregiver_services_during_rebind_remove" > "$SERVICES"' \
+    '      deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"' \
+    '    elif [[ -e "$TEST_ROOT/accessibility_rebind_removed" && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then' \
+    '      rm -f "$TEST_ROOT/accessibility_rebind_removed"; deactivate_from "$TEST_ROOT/deactivate_during_accessibility_rebind_restore"' \
+    '    fi' \
+    '    if [[ ":$previous:" != *":$ACCESSIBILITY_COMPONENT:"* && ":$value:" == *":$ACCESSIBILITY_COMPONENT:"* ]]; then' \
+    '      deactivate_from "$TEST_ROOT/deactivate_during_accessibility_services_put"' \
+    '      if [[ -e "$TEST_ROOT/fail_settings_services_put_after_apply" ]]; then rm -f "$TEST_ROOT/fail_settings_services_put_after_apply"; exit 1; fi' \
+    '    fi' \
+    '  elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then' \
+    '    printf "%s\\n" "${args[3]:-}" > "$ACCESSIBILITY_ENABLED"' \
+    '    deactivate_from "$TEST_ROOT/deactivate_during_accessibility_enabled_put"' \
+    '    if [[ -e "$TEST_ROOT/fail_settings_enabled_put_after_apply" ]]; then rm -f "$TEST_ROOT/fail_settings_enabled_put_after_apply"; exit 1; fi' \
+    '  fi' \
+    '  exit 0' \
+    'fi' \
     'exit 2'
 
 write_fake pm \
@@ -167,15 +190,15 @@ write_fake cmd \
     'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
-    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then deactivate_from "$TEST_ROOT/deactivate_during_doze_add"; printf added > "$TEST_ROOT/doze_whitelisted"; [[ -e "$TEST_ROOT/fail_deviceidle_add_after_apply" ]] && exit 1; fi' \
+    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then if [[ -e "$TEST_ROOT/pause_deviceidle_add" ]]; then touch "$TEST_ROOT/deviceidle_add_entered"; for _ in $(seq 1 400); do [[ -e "$TEST_ROOT/allow_deviceidle_add" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_deviceidle_add" ]] || exit 89; fi; deactivate_from "$TEST_ROOT/deactivate_during_doze_add"; printf added > "$TEST_ROOT/doze_whitelisted"; [[ -e "$TEST_ROOT/fail_deviceidle_add_after_apply" ]] && exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_deviceidle_remove" ]] || rm -f "$TEST_ROOT/doze_whitelisted"; [[ -e "$TEST_ROOT/fail_deviceidle_remove_after_apply" ]] && exit 1; fi' \
     'exit 0'
 
 write_fake yinxing-test-sync \
     '#!/usr/bin/env bash' \
     'printf "sync %s\\n" "$*" >> "$CALLS"' \
-    '[[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5' \
-    '[[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_takeover_state "* && -e "$TEST_ROOT/switch_home_after_takeover_state_sync" ]]; then printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; rm -f "$TEST_ROOT/switch_home_after_takeover_state_sync"; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* ]]; then [[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1; fi' \
     'exit 0'
 
 write_fake mv \
@@ -188,6 +211,7 @@ write_fake mv \
 write_fake yinxing-test-ln \
     '#!/usr/bin/env bash' \
     'target="${!#}"' \
+    'if [[ -e "$TEST_ROOT/pause_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then touch "$TEST_ROOT/home_marker_publish_entered"; for _ in $(seq 1 400); do [[ -e "$TEST_ROOT/allow_home_marker_publish" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_marker_publish" ]] || exit 89; fi' \
     'if [[ -e "$TEST_ROOT/concurrent_home_marker_publish" && "$target" == "$TEST_ROOT/state/home_previous_holder" ]]; then if mkdir "$TEST_ROOT/home_publish_slot_one" 2>/dev/null; then touch "$TEST_ROOT/home_publish_first_ready"; for _ in $(seq 1 500); do [[ -e "$TEST_ROOT/home_publish_second_ready" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/home_publish_second_ready" ]] || exit 90; /bin/sleep 0.1; else touch "$TEST_ROOT/home_publish_second_ready"; fi; fi' \
     'exec /bin/ln "$@"'
 
@@ -268,6 +292,9 @@ reset_fixture() {
         "$TEST_ROOT/fail_appops" \
         "$TEST_ROOT/fail_settings_get" \
         "$TEST_ROOT/fail_settings_put" \
+        "$TEST_ROOT/fail_settings_services_put_after_apply" \
+        "$TEST_ROOT/fail_settings_enabled_put_after_apply" \
+        "$TEST_ROOT/fail_accessibility_compensation_services" \
         "$TEST_ROOT/fail_pm_list" \
         "$TEST_ROOT/fail_pm_dump" \
         "$TEST_ROOT/fail_pm_enable" \
@@ -281,6 +308,9 @@ reset_fixture() {
         "$TEST_ROOT/pause_home_role_set" \
         "$TEST_ROOT/home_role_set_entered" \
         "$TEST_ROOT/allow_home_role_set" \
+        "$TEST_ROOT/pause_home_marker_publish" \
+        "$TEST_ROOT/home_marker_publish_entered" \
+        "$TEST_ROOT/allow_home_marker_publish" \
         "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
         "$TEST_ROOT/ignore_home_role_remove" \
@@ -293,6 +323,8 @@ reset_fixture() {
         "$TEST_ROOT/deactivate_during_first_appops" \
         "$TEST_ROOT/deactivate_during_package_path" \
         "$TEST_ROOT/deactivate_during_accessibility_read" \
+        "$TEST_ROOT/deactivate_during_accessibility_services_put" \
+        "$TEST_ROOT/deactivate_during_accessibility_enabled_put" \
         "$TEST_ROOT/deactivate_during_accessibility_rebind_remove" \
         "$TEST_ROOT/deactivate_during_accessibility_rebind_restore" \
         "$TEST_ROOT/caregiver_services_during_rebind_remove" \
@@ -303,8 +335,12 @@ reset_fixture() {
         "$TEST_ROOT/malformed_home_role_output" \
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
+        "$TEST_ROOT/switch_home_after_takeover_state_sync" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_add_after_apply" \
+        "$TEST_ROOT/pause_deviceidle_add" \
+        "$TEST_ROOT/deviceidle_add_entered" \
+        "$TEST_ROOT/allow_deviceidle_add" \
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_deviceidle_remove_after_apply" \
         "$TEST_ROOT/ignore_deviceidle_remove" \
@@ -870,6 +906,25 @@ test_home_marker_sync_failure_blocks_takeover() {
     pass "HOME takeover requires durable rollback marker"
 }
 
+test_home_role_preserves_choice_after_takeover_state_publish() {
+    reset_fixture
+    touch "$TEST_ROOT/switch_home_after_takeover_state_sync"
+    if repair_state; then
+        fail "HOME repair overwrote a choice made after pending-state publication"
+    fi
+    assert_equals "com.example.caregiverlauncher" \
+        "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "post-publication caregiver HOME choice"
+    assert_not_contains "$CALLS" \
+        "cmd package set-home-activity --user 0 com.yinxing.launcher/.feature.home.MainActivity"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "post-publication HOME choice retained original-holder evidence"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "post-publication HOME choice retained takeover state"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    pass "HOME preserves choice made after takeover state publication"
+}
+
 test_home_marker_sync_is_bounded() {
     local started_at elapsed
 
@@ -962,6 +1017,8 @@ test_repair_preserves_and_enables() {
     assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" "repair preserves existing services"
     assert_contains "$CALLS" "settings --user 0 put secure enabled_accessibility_services"
     assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "successful accessibility repair retained transaction evidence"
     pass "repair preserves and enables"
 }
 
@@ -976,6 +1033,94 @@ test_repair_is_idempotent() {
     [[ "$(grep -oF "$ACCESSIBILITY_COMPONENT" "$SERVICES" | wc -l)" -eq 1 ]] || fail "service appears more than once"
     assert_not_contains "$CALLS" "settings --user 0 put secure"
     pass "repair is idempotent"
+}
+
+test_accessibility_applied_write_errors_are_compensated() {
+    local phase control
+
+    for phase in services enabled; do
+        reset_fixture
+        printf 'talkback:other\n' > "$SERVICES"
+        printf '0\n' > "$ACCESSIBILITY_ENABLED"
+        case "$phase" in
+            services) control="$TEST_ROOT/fail_settings_services_put_after_apply" ;;
+            enabled) control="$TEST_ROOT/fail_settings_enabled_put_after_apply" ;;
+        esac
+        touch "$control"
+        if repair_state; then
+            fail "applied accessibility write error unexpectedly succeeded ($phase)"
+        fi
+        assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" \
+            "applied accessibility write restores services ($phase)"
+        assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+            "applied accessibility write restores global switch ($phase)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    done
+    pass "applied accessibility write errors are compensated"
+}
+
+test_accessibility_initial_writes_roll_back_after_module_deactivation() {
+    local phase control
+
+    for phase in services enabled; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        printf 'talkback:other\n' > "$SERVICES"
+        printf '0\n' > "$ACCESSIBILITY_ENABLED"
+        case "$phase" in
+            services) control="$TEST_ROOT/deactivate_during_accessibility_services_put" ;;
+            enabled) control="$TEST_ROOT/deactivate_during_accessibility_enabled_put" ;;
+        esac
+        printf 'disable\n' > "$control"
+        if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "accessibility repair survived module deactivation ($phase)"
+        fi
+        assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" \
+            "deactivated accessibility repair restores services ($phase)"
+        assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+            "deactivated accessibility repair restores global switch ($phase)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    done
+    pass "accessibility initial writes roll back after module deactivation"
+}
+
+test_accessibility_failed_compensation_is_recovered_on_uninstall() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'talkback:other\n' > "$SERVICES"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'disable\n' > \
+        "$TEST_ROOT/deactivate_during_accessibility_enabled_put"
+    printf 'talkback:other\n' > \
+        "$TEST_ROOT/fail_accessibility_compensation_services"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "failed accessibility compensation unexpectedly succeeded"
+    fi
+    [[ -f "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "failed accessibility compensation lost durable evidence"
+    assert_equals "talkback:other:$ACCESSIBILITY_COMPONENT" \
+        "$(tr -d '\n' < "$SERVICES")" \
+        "failed accessibility compensation retains transaction-owned services"
+    assert_equals "1" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "failed accessibility compensation retains transaction-owned switch"
+
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    touch "$YINXING_GUARD_TEST_MODULE_DIR/remove"
+    rm -f "$TEST_ROOT/fail_accessibility_compensation_services"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "talkback:other" "$(tr -d '\n' < "$SERVICES")" \
+        "uninstall restores accessibility services after failed compensation"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "uninstall restores accessibility switch after failed compensation"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "uninstall retained recovered accessibility evidence"
+    [[ ! -e "$CLEANUP_TARGET" ]] || \
+        fail "uninstall retained accessibility recovery helper"
+    pass "failed accessibility compensation is recovered on uninstall"
 }
 
 test_repair_confirms_binding_after_crash() {
@@ -1060,7 +1205,7 @@ test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove() {
     reset_fixture
     mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
     printf 'talkback:other:%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
-    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf '0\n' > "$ACCESSIBILITY_ENABLED"
     printf 'caregiver.reader/service\n' > "$TEST_ROOT/caregiver_services_during_rebind_remove"
     printf 'disable\n' > "$TEST_ROOT/deactivate_during_accessibility_rebind_remove"
     cat > "$TEST_ROOT/accessibility_dump" <<EOF
@@ -1079,7 +1224,10 @@ EOF
     fi
     assert_equals "caregiver.reader/service" "$(tr -d '\n' < "$SERVICES")" \
         "interrupted rebind preserves newer caregiver services"
-    assert_not_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "interrupted rebind restores the original accessibility switch"
+    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 1"
+    assert_contains "$CALLS" "settings --user 0 put secure accessibility_enabled 0"
     assert_not_contains "$CALLS" "cmd package set-home-activity"
     assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
     assert_not_contains "$CALLS" "am start"
@@ -1471,6 +1619,57 @@ test_doze_cross_boot_pending_absence_retries_once() {
         "$(grep -c '^cmd deviceidle whitelist +com.yinxing.launcher$' "$CALLS" || true)" \
         "cross-boot Doze retry count"
     pass "cross-boot pending Doze absence retries once"
+}
+
+test_doze_transaction_blocks_cleanup_while_add_is_in_flight() {
+    local action_status uninstall_status cleanup_status
+
+    reset_fixture
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/pause_deviceidle_add"
+    (set +e; repair_state) &
+    GUARD_PID=$!
+    for _ in $(seq 1 200); do
+        [[ -e "$TEST_ROOT/deviceidle_add_entered" ]] && break
+        /bin/sleep 0.01
+    done
+    [[ -e "$TEST_ROOT/deviceidle_add_entered" ]] || \
+        fail "Doze add did not reach the paused mutation boundary"
+    assert_equals "pending|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "in-flight Doze ownership state"
+
+    set +e
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    uninstall_status=$?
+    run_module_script "$CLEANUP_TARGET"
+    cleanup_status=$?
+    touch "$TEST_ROOT/allow_deviceidle_add"
+    wait "$GUARD_PID"
+    action_status=$?
+    set -e
+    GUARD_PID=""
+
+    [[ "$uninstall_status" -ne 0 ]] || \
+        fail "uninstall entered an in-flight Doze transaction"
+    [[ "$cleanup_status" -ne 0 ]] || \
+        fail "cleanup entered an in-flight Doze transaction"
+    assert_equals "0" "$action_status" "in-flight Doze action status"
+    [[ -e "$TEST_ROOT/doze_whitelisted" ]] || \
+        fail "serialized Doze add did not complete"
+    assert_equals "added" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/doze_added_by_module")" \
+        "serialized Doze ownership state"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "blocked Doze cleanup removed its retry helper"
+
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || \
+        fail "serialized Doze cleanup retained the whitelist"
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "serialized Doze cleanup retained ownership evidence"
+    pass "Doze transaction blocks cleanup while add is in flight"
 }
 
 test_home_launch_is_fixed() {
@@ -2216,6 +2415,60 @@ test_home_transaction_lock_serializes_concurrent_actions() {
     pass "HOME transaction lock serializes concurrent actions"
 }
 
+test_uninstall_waits_for_unpublished_home_transaction() {
+    local action_status uninstall_status cleanup_status
+
+    reset_fixture
+    touch "$TEST_ROOT/pause_home_marker_publish"
+    (set +e; repair_state) &
+    GUARD_PID=$!
+    for _ in $(seq 1 200); do
+        [[ -e "$TEST_ROOT/home_marker_publish_entered" ]] && break
+        /bin/sleep 0.01
+    done
+    [[ -e "$TEST_ROOT/home_marker_publish_entered" ]] || \
+        fail "HOME repair did not reach the unpublished transaction boundary"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "paused HOME transaction published ownership evidence too early"
+
+    set +e
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    uninstall_status=$?
+    run_module_script "$CLEANUP_TARGET"
+    cleanup_status=$?
+    touch "$TEST_ROOT/allow_home_marker_publish"
+    wait "$GUARD_PID"
+    action_status=$?
+    set -e
+    GUARD_PID=""
+
+    [[ "$uninstall_status" -ne 0 ]] || \
+        fail "uninstall entered an unpublished HOME transaction"
+    [[ "$cleanup_status" -ne 0 ]] || \
+        fail "cleanup entered an unpublished HOME transaction"
+    assert_equals "0" "$action_status" "unpublished HOME action status"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "HOME takeover after serialized uninstall"
+    assert_equals "com.oplus.launcher" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_previous_holder")" \
+        "serialized HOME original holder"
+    assert_equals "owned" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_takeover_state")" \
+        "serialized HOME ownership state"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "blocked HOME cleanup removed its retry helper"
+
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "serialized uninstall restores original HOME"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "serialized HOME cleanup retained original-holder evidence"
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "serialized HOME cleanup retained ownership state"
+    pass "uninstall waits for unpublished HOME transaction"
+}
+
 test_home_transaction_lock_reclaims_dead_owner() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state/home_transaction.lock"
@@ -2493,6 +2746,46 @@ test_cleanup_directory_target_is_rejected() {
     pass "cleanup directory target is rejected"
 }
 
+test_uninstall_recovers_global_only_accessibility_transaction() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf '%s\n' "$ACCESSIBILITY_COMPONENT" > "$SERVICES"
+    printf '1\n' > "$ACCESSIBILITY_ENABLED"
+    printf 'pending|0|1|%s|%s|\n' \
+        "$ACCESSIBILITY_COMPONENT" "$ACCESSIBILITY_COMPONENT" > \
+        "$TEST_ROOT/state/accessibility_transaction"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "$ACCESSIBILITY_COMPONENT" "$(tr -d '\n' < "$SERVICES")" \
+        "global-only accessibility recovery preserves services"
+    assert_equals "0" "$(tr -d '\n' < "$ACCESSIBILITY_ENABLED")" \
+        "global-only accessibility recovery restores switch"
+    assert_not_contains "$CALLS" \
+        "settings --user 0 put secure enabled_accessibility_services"
+    [[ ! -e "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "global-only accessibility recovery retained evidence"
+    [[ ! -e "$CLEANUP_TARGET" ]] || \
+        fail "global-only accessibility recovery retained helper"
+    pass "uninstall recovers global-only accessibility transaction"
+}
+
+test_uninstall_retains_malformed_accessibility_transaction() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'pending|0|1|original|primary|alternate|extra\n' > \
+        "$TEST_ROOT/state/accessibility_transaction"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "malformed accessibility transaction unexpectedly cleaned"
+    fi
+    [[ -f "$TEST_ROOT/state/accessibility_transaction" ]] || \
+        fail "malformed accessibility transaction lost evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "malformed accessibility transaction lost helper"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    pass "uninstall retains malformed accessibility transaction"
+}
+
 test_uninstall_retains_malformed_marker() {
     reset_fixture
     mkdir -p "$TEST_ROOT/state"
@@ -2763,7 +3056,9 @@ test_uninstall_waits_for_live_home_transaction() {
     LIVE_PID=$!
     printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/home_transaction.lock/pid"
     printf 'fixture-boot\n' > "$TEST_ROOT/state/home_transaction.lock/boot_id"
-    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$MODULE_ROOT/uninstall.sh"; then
+        fail "uninstall entered a live HOME transaction"
+    fi
     if run_module_script "$CLEANUP_TARGET"; then
         fail "uninstall cleanup entered a live HOME transaction"
     fi
@@ -3276,11 +3571,18 @@ case "$MODE" in
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         ;;
     --review-regressions-only)
+        test_accessibility_applied_write_errors_are_compensated
+        test_accessibility_initial_writes_roll_back_after_module_deactivation
+        test_accessibility_failed_compensation_is_recovered_on_uninstall
+        test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
         test_rebind_restores_original_enabled_state_after_interruption
         test_doze_same_boot_pending_absence_does_not_redispatch
         test_doze_visible_pending_state_promotes_to_owned
         test_doze_cross_boot_pending_absence_retries_once
+        test_doze_transaction_blocks_cleanup_while_add_is_in_flight
         test_home_transaction_lock_serializes_concurrent_actions
+        test_uninstall_waits_for_unpublished_home_transaction
+        test_home_role_preserves_choice_after_takeover_state_publish
         test_home_transaction_lock_reclaims_dead_owner
         test_home_transaction_lock_rejects_symlink
         test_guard_promotes_visible_pending_home_state
@@ -3293,6 +3595,8 @@ case "$MODE" in
         test_uninstall_rejects_owned_home_state_without_original
         test_uninstall_retains_same_boot_pending_home_absence
         test_uninstall_waits_for_live_home_transaction
+        test_uninstall_recovers_global_only_accessibility_transaction
+        test_uninstall_retains_malformed_accessibility_transaction
         ;;
     --guard-only)
         test_home_role_owned_is_idempotent
@@ -3314,10 +3618,14 @@ case "$MODE" in
         test_home_role_rejects_trailing_blank_marker
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
+        test_home_role_preserves_choice_after_takeover_state_publish
         test_home_marker_sync_is_bounded
         test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
         test_guard_rejects_stale_cleanup_helper_when_refresh_fails
+        test_accessibility_applied_write_errors_are_compensated
+        test_accessibility_initial_writes_roll_back_after_module_deactivation
+        test_accessibility_failed_compensation_is_recovered_on_uninstall
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
         test_rebind_stops_after_module_deactivates_during_restore
@@ -3335,6 +3643,7 @@ case "$MODE" in
         test_doze_same_boot_pending_absence_does_not_redispatch
         test_doze_visible_pending_state_promotes_to_owned
         test_doze_cross_boot_pending_absence_retries_once
+        test_doze_transaction_blocks_cleanup_while_add_is_in_flight
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
         test_guard_ignores_pid_from_previous_boot
@@ -3360,6 +3669,7 @@ case "$MODE" in
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         test_home_transaction_lock_serializes_concurrent_actions
+        test_uninstall_waits_for_unpublished_home_transaction
         test_home_transaction_lock_reclaims_dead_owner
         test_home_transaction_lock_rejects_symlink
         test_guard_promotes_visible_pending_home_state
@@ -3388,6 +3698,8 @@ case "$MODE" in
         test_uninstall_rejects_owned_home_state_without_original
         test_uninstall_retains_same_boot_pending_home_absence
         test_uninstall_waits_for_live_home_transaction
+        test_uninstall_recovers_global_only_accessibility_transaction
+        test_uninstall_retains_malformed_accessibility_transaction
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none
@@ -3444,12 +3756,16 @@ case "$MODE" in
         test_home_role_rejects_trailing_blank_marker
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
+        test_home_role_preserves_choice_after_takeover_state_publish
         test_home_marker_sync_is_bounded
         test_home_marker_uses_default_busybox_applets
         test_guard_requires_cleanup_helper_before_home_takeover
         test_guard_rejects_stale_cleanup_helper_when_refresh_fails
         test_repair_preserves_and_enables
         test_repair_is_idempotent
+        test_accessibility_applied_write_errors_are_compensated
+        test_accessibility_initial_writes_roll_back_after_module_deactivation
+        test_accessibility_failed_compensation_is_recovered_on_uninstall
         test_repair_confirms_binding_after_crash
         test_repair_confirms_binding_after_confirmed_unbound
         test_rebind_preserves_caregiver_change_when_module_deactivates_after_remove
@@ -3475,6 +3791,7 @@ case "$MODE" in
         test_doze_same_boot_pending_absence_does_not_redispatch
         test_doze_visible_pending_state_promotes_to_owned
         test_doze_cross_boot_pending_absence_retries_once
+        test_doze_transaction_blocks_cleanup_while_add_is_in_flight
         test_home_launch_is_fixed
         test_kiosk_home_command_requires_active_module
         test_kiosk_home_bounds_stalled_launch
@@ -3504,6 +3821,7 @@ case "$MODE" in
         test_repeated_home_takeover_never_clobbers_original_holder
         test_manual_yinxing_choice_after_inactive_rollback_is_preserved
         test_home_transaction_lock_serializes_concurrent_actions
+        test_uninstall_waits_for_unpublished_home_transaction
         test_home_transaction_lock_reclaims_dead_owner
         test_home_transaction_lock_rejects_symlink
         test_guard_promotes_visible_pending_home_state
@@ -3533,6 +3851,8 @@ case "$MODE" in
         test_uninstall_rejects_owned_home_state_without_original
         test_uninstall_retains_same_boot_pending_home_absence
         test_uninstall_waits_for_live_home_transaction
+        test_uninstall_recovers_global_only_accessibility_transaction
+        test_uninstall_retains_malformed_accessibility_transaction
         test_uninstall_retains_malformed_marker
         test_uninstall_restores_previous_home_holder
         test_uninstall_removes_owned_home_when_previous_was_none

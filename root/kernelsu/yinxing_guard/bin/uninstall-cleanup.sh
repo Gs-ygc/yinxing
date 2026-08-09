@@ -11,6 +11,7 @@ HOME_MARKER="$STATE_DIR/home_previous_holder"
 HOME_STATE_MARKER="$STATE_DIR/home_takeover_state"
 HOME_TRANSACTION_LOCK_DIR="$STATE_DIR/home_transaction.lock"
 HOME_TRANSACTION_RECLAIM_DIR="$STATE_DIR/home_transaction.reclaim"
+ACCESSIBILITY_MARKER="$STATE_DIR/accessibility_transaction"
 SELF_PATH="$0"
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
 HOME_MARKER_SYNC_COMMAND="${YINXING_GUARD_HOME_MARKER_SYNC_COMMAND:-sync}"
@@ -81,17 +82,18 @@ read_marker_line() {
 }
 
 cleanup_runtime_state() {
+    runtime_cleanup_status=0
     rm -f \
         "$STATE_DIR/guard.pid" \
         "$STATE_DIR/guard.boot_id" \
         "$STATE_DIR/last_repair" \
         "$STATE_DIR/last_repair.tmp."* \
+        "$STATE_DIR/accessibility_transaction.tmp."* \
         "$STATE_DIR/doze_added_by_module.tmp."* \
         "$STATE_DIR/home_previous_holder.tmp."* \
-        "$STATE_DIR/home_takeover_state.tmp."*
-    rm -rf "$STATE_DIR/guard.lock" "$HOME_TRANSACTION_LOCK_DIR" \
-        "$HOME_TRANSACTION_RECLAIM_DIR"
-    rmdir "$STATE_DIR" 2>/dev/null || true
+        "$STATE_DIR/home_takeover_state.tmp."* || runtime_cleanup_status=1
+    rm -rf "$STATE_DIR/guard.lock" || runtime_cleanup_status=1
+    return "$runtime_cleanup_status"
 }
 
 valid_android_package_name() {
@@ -123,6 +125,151 @@ valid_android_package_name() {
         [ -n "$package_value" ] || break
     done
     [ "$package_has_separator" -eq 1 ]
+}
+
+valid_accessibility_services_snapshot() {
+    services_snapshot="$1"
+    [ "${#services_snapshot}" -le 8192 ] || return 1
+    line_feed='
+'
+    case "$services_snapshot" in
+        *'|'*|*"$line_feed"*) return 1 ;;
+    esac
+    return 0
+}
+
+parse_accessibility_transaction_state() {
+    accessibility_transaction_state="$1"
+    case "$accessibility_transaction_state" in
+        pending\|*\|*\|*\|*\|*) ;;
+        *) return 1 ;;
+    esac
+    accessibility_transaction_remainder=${accessibility_transaction_state#pending|}
+    accessibility_original_enabled=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_temporary_enabled=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_original_services=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_primary_services=${accessibility_transaction_remainder%%|*}
+    accessibility_alternate_services=${accessibility_transaction_remainder#*|}
+    case "$accessibility_alternate_services" in
+        *'|'*) return 1 ;;
+    esac
+    case "$accessibility_original_enabled:$accessibility_temporary_enabled" in
+        0:0|0:1|1:0|1:1) ;;
+        *) return 1 ;;
+    esac
+    valid_accessibility_services_snapshot "$accessibility_original_services" || \
+        return 1
+    valid_accessibility_services_snapshot "$accessibility_primary_services" || \
+        return 1
+    valid_accessibility_services_snapshot "$accessibility_alternate_services"
+}
+
+normalize_accessibility_enabled() {
+    case "$1" in
+        0|1) printf '%s\n' "$1" ;;
+        null|NULL|"") printf '0\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+cleanup_accessibility_transaction() {
+    path_exists "$ACCESSIBILITY_MARKER" || return 0
+    if ! accessibility_state="$(read_marker_line "$ACCESSIBILITY_MARKER")" || \
+        ! parse_accessibility_transaction_state "$accessibility_state"; then
+        log_event "uninstall_accessibility_transaction_invalid"
+        return 1
+    fi
+
+    if ! observed_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        log_event "uninstall_accessibility_services_read_failed"
+        return 1
+    fi
+    case "$observed_services" in
+        null|NULL) observed_services="" ;;
+    esac
+    if ! confirmed_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        log_event "uninstall_accessibility_services_confirm_failed"
+        return 1
+    fi
+    case "$confirmed_services" in
+        null|NULL) confirmed_services="" ;;
+    esac
+    if [ "$confirmed_services" != "$observed_services" ]; then
+        log_event "uninstall_accessibility_services_unstable"
+        return 1
+    fi
+    if [ "$observed_services" = "$accessibility_original_services" ]; then
+        :
+    elif [ "$observed_services" = "$accessibility_primary_services" ] || \
+        [ "$observed_services" = "$accessibility_alternate_services" ]; then
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            enabled_accessibility_services "$accessibility_original_services" \
+            >/dev/null 2>&1; then
+            log_event "uninstall_accessibility_services_restore_failed"
+            return 1
+        fi
+        if ! restored_services="$(run_guard_command settings --user \
+            "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+            2>/dev/null)"; then
+            return 1
+        fi
+        case "$restored_services" in
+            null|NULL) restored_services="" ;;
+        esac
+        [ "$restored_services" = "$accessibility_original_services" ] || \
+            return 1
+    else
+        log_event "uninstall_accessibility_preserved_new_services"
+    fi
+
+    observed_enabled_raw="$(run_guard_command settings --user "$ANDROID_USER_ID" \
+        get secure accessibility_enabled 2>/dev/null)" || return 1
+    observed_enabled="$(normalize_accessibility_enabled \
+        "$observed_enabled_raw")" || return 1
+    confirmed_enabled_raw="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)" || \
+        return 1
+    confirmed_enabled="$(normalize_accessibility_enabled \
+        "$confirmed_enabled_raw")" || return 1
+    if [ "$confirmed_enabled" != "$observed_enabled" ]; then
+        log_event "uninstall_accessibility_enabled_unstable"
+        return 1
+    fi
+    if [ "$observed_enabled" = "$accessibility_original_enabled" ]; then
+        :
+    elif [ "$observed_enabled" = "$accessibility_temporary_enabled" ]; then
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            accessibility_enabled "$accessibility_original_enabled" \
+            >/dev/null 2>&1; then
+            log_event "uninstall_accessibility_enabled_restore_failed"
+            return 1
+        fi
+        restored_enabled_raw="$(run_guard_command settings --user \
+            "$ANDROID_USER_ID" get secure accessibility_enabled \
+            2>/dev/null)" || return 1
+        restored_enabled="$(normalize_accessibility_enabled \
+            "$restored_enabled_raw")" || return 1
+        [ "$restored_enabled" = "$accessibility_original_enabled" ] || \
+            return 1
+    else
+        log_event "uninstall_accessibility_preserved_new_enabled"
+    fi
+
+    rm -f "$ACCESSIBILITY_MARKER" 2>/dev/null || return 1
+    run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f "$STATE_DIR" \
+        >/dev/null 2>&1 || return 1
+    if path_exists "$ACCESSIBILITY_MARKER"; then
+        return 1
+    fi
+    log_event "uninstall_accessibility_transaction_restored"
+    return 0
 }
 
 valid_doze_marker_value() {
@@ -631,20 +778,41 @@ cleanup_doze() {
     return 0
 }
 
+cleanup_transaction() {
+    if ! acquire_home_transaction_lock; then
+        log_event "uninstall_transaction_lock_failed"
+        return 1
+    fi
+
+    cleanup_failed=0
+    cleanup_accessibility_transaction || cleanup_failed=1
+    cleanup_home_role_locked || cleanup_failed=1
+    cleanup_doze || cleanup_failed=1
+
+    if [ "$cleanup_failed" -ne 0 ] || path_exists "$ACCESSIBILITY_MARKER" || \
+        path_exists "$HOME_MARKER" || path_exists "$HOME_STATE_MARKER" || \
+        path_exists "$MARKER"; then
+        release_home_transaction_lock || cleanup_failed=1
+        return 1
+    fi
+
+    cleanup_runtime_state || cleanup_failed=1
+    if ! release_home_transaction_lock; then
+        cleanup_failed=1
+    fi
+    if [ "$cleanup_failed" -eq 0 ]; then
+        rmdir "$STATE_DIR" 2>/dev/null || true
+    fi
+    return "$cleanup_failed"
+}
+
 if [ -d "$MODULE_DIR" ] && [ ! -f "$MODULE_DIR/remove" ]; then
     exit 0
 fi
 
-cleanup_failed=0
-cleanup_home_role || cleanup_failed=1
-cleanup_doze || cleanup_failed=1
-
-if [ "$cleanup_failed" -ne 0 ] || path_exists "$HOME_MARKER" || \
-    path_exists "$HOME_STATE_MARKER" || path_exists "$MARKER"; then
+if ! cleanup_transaction; then
     exit 1
 fi
-
-cleanup_runtime_state
 log_event "uninstall_cleanup_complete"
 rm -f "$SELF_PATH"
 exit 0

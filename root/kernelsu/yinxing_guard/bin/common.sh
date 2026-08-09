@@ -10,6 +10,7 @@ HOME_PREVIOUS_HOLDER_MARKER="$STATE_DIR/home_previous_holder"
 HOME_TAKEOVER_STATE_MARKER="$STATE_DIR/home_takeover_state"
 HOME_TRANSACTION_LOCK_DIR="$STATE_DIR/home_transaction.lock"
 HOME_TRANSACTION_RECLAIM_DIR="$STATE_DIR/home_transaction.reclaim"
+ACCESSIBILITY_TRANSACTION_MARKER="$STATE_DIR/accessibility_transaction"
 DOZE_OWNERSHIP_MARKER="$STATE_DIR/doze_added_by_module"
 MODULE_STATE_DIR="${YINXING_GUARD_MODULE_STATE_DIR:-/data/adb/modules/yinxing_guard}"
 LOG_TAG="YinxingGuard"
@@ -236,11 +237,262 @@ confirm_accessibility_service_rebind() {
     return 1
 }
 
+valid_accessibility_services_snapshot() {
+    services_snapshot="$1"
+    [ "${#services_snapshot}" -le 8192 ] || return 1
+    line_feed='
+'
+    case "$services_snapshot" in
+        *'|'*|*"$line_feed"*) return 1 ;;
+    esac
+    return 0
+}
+
+parse_accessibility_transaction_state() {
+    accessibility_transaction_state="$1"
+    case "$accessibility_transaction_state" in
+        pending\|*\|*\|*\|*\|*) ;;
+        *) return 1 ;;
+    esac
+    accessibility_transaction_remainder=${accessibility_transaction_state#pending|}
+    accessibility_original_enabled=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_temporary_enabled=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_original_services=${accessibility_transaction_remainder%%|*}
+    accessibility_transaction_remainder=${accessibility_transaction_remainder#*|}
+    accessibility_primary_services=${accessibility_transaction_remainder%%|*}
+    accessibility_alternate_services=${accessibility_transaction_remainder#*|}
+    case "$accessibility_alternate_services" in
+        *'|'*) return 1 ;;
+    esac
+    case "$accessibility_original_enabled:$accessibility_temporary_enabled" in
+        0:0|0:1|1:0|1:1) ;;
+        *) return 1 ;;
+    esac
+    valid_accessibility_services_snapshot "$accessibility_original_services" || \
+        return 1
+    valid_accessibility_services_snapshot "$accessibility_primary_services" || \
+        return 1
+    valid_accessibility_services_snapshot "$accessibility_alternate_services"
+}
+
+read_accessibility_transaction() {
+    [ ! -L "$ACCESSIBILITY_TRANSACTION_MARKER" ] && \
+        [ -f "$ACCESSIBILITY_TRANSACTION_MARKER" ] || return 1
+    if ! accessibility_marker_output="$(
+        cat "$ACCESSIBILITY_TRANSACTION_MARKER" 2>/dev/null
+        accessibility_marker_status=$?
+        printf '|'
+        exit "$accessibility_marker_status"
+    )"; then
+        return 1
+    fi
+    case "$accessibility_marker_output" in
+        *'|') accessibility_marker_output=${accessibility_marker_output%|} ;;
+        *) return 1 ;;
+    esac
+    line_feed='
+'
+    case "$accessibility_marker_output" in
+        *"$line_feed")
+            accessibility_marker_output=${accessibility_marker_output%"$line_feed"}
+            ;;
+        *) return 1 ;;
+    esac
+    case "$accessibility_marker_output" in
+        *"$line_feed"*) return 1 ;;
+    esac
+    parse_accessibility_transaction_state "$accessibility_marker_output" || return 1
+    printf '%s\n' "$accessibility_marker_output"
+}
+
+write_accessibility_transaction() {
+    accessibility_original_enabled_value="$1"
+    accessibility_temporary_enabled_value="$2"
+    accessibility_original_services_value="$3"
+    accessibility_primary_services_value="$4"
+    accessibility_alternate_services_value="$5"
+    accessibility_state_value="pending|$accessibility_original_enabled_value|$accessibility_temporary_enabled_value|$accessibility_original_services_value|$accessibility_primary_services_value|$accessibility_alternate_services_value"
+    parse_accessibility_transaction_state "$accessibility_state_value" || return 1
+    ensure_state_dir || return 1
+    if [ -e "$ACCESSIBILITY_TRANSACTION_MARKER" ] || \
+        [ -L "$ACCESSIBILITY_TRANSACTION_MARKER" ]; then
+        log_event "accessibility_transaction_already_present"
+        return 1
+    fi
+    accessibility_marker_tmp="$ACCESSIBILITY_TRANSACTION_MARKER.tmp.$$"
+    rm -f "$accessibility_marker_tmp" 2>/dev/null || true
+    if ! { printf '%s\n' "$accessibility_state_value" > \
+            "$accessibility_marker_tmp"; } 2>/dev/null || \
+        ! chmod 0600 "$accessibility_marker_tmp" 2>/dev/null || \
+        ! mv -f "$accessibility_marker_tmp" \
+            "$ACCESSIBILITY_TRANSACTION_MARKER" 2>/dev/null; then
+        rm -f "$accessibility_marker_tmp" 2>/dev/null || true
+        log_event "accessibility_transaction_write_failed"
+        return 1
+    fi
+    if ! published_accessibility_state="$(read_accessibility_transaction)" || \
+        [ "$published_accessibility_state" != "$accessibility_state_value" ]; then
+        log_event "accessibility_transaction_changed"
+        return 1
+    fi
+    if ! run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f \
+        "$ACCESSIBILITY_TRANSACTION_MARKER" "$STATE_DIR" \
+        >/dev/null 2>&1; then
+        log_event "accessibility_transaction_sync_failed"
+        return 1
+    fi
+    if ! synced_accessibility_state="$(read_accessibility_transaction)" || \
+        [ "$synced_accessibility_state" != "$accessibility_state_value" ]; then
+        log_event "accessibility_transaction_changed"
+        return 1
+    fi
+    return 0
+}
+
+clear_accessibility_transaction() {
+    if [ ! -e "$ACCESSIBILITY_TRANSACTION_MARKER" ] && \
+        [ ! -L "$ACCESSIBILITY_TRANSACTION_MARKER" ]; then
+        return 0
+    fi
+    read_accessibility_transaction >/dev/null || return 1
+    rm -f "$ACCESSIBILITY_TRANSACTION_MARKER" 2>/dev/null || return 1
+    run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f "$STATE_DIR" \
+        >/dev/null 2>&1 || return 1
+    [ ! -e "$ACCESSIBILITY_TRANSACTION_MARKER" ] && \
+        [ ! -L "$ACCESSIBILITY_TRANSACTION_MARKER" ]
+}
+
+normalize_accessibility_enabled() {
+    case "$1" in
+        0|1) printf '%s\n' "$1" ;;
+        null|NULL|"") printf '0\n' ;;
+        *) return 1 ;;
+    esac
+}
+
+restore_accessibility_transaction() {
+    accessibility_state="$(read_accessibility_transaction)" || {
+        log_event "accessibility_transaction_invalid"
+        return 1
+    }
+    parse_accessibility_transaction_state "$accessibility_state" || return 1
+
+    if ! observed_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        log_event "accessibility_transaction_services_read_failed"
+        return 1
+    fi
+    case "$observed_services" in
+        null|NULL) observed_services="" ;;
+    esac
+    if ! confirmed_services="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+        2>/dev/null)"; then
+        log_event "accessibility_transaction_services_confirm_failed"
+        return 1
+    fi
+    case "$confirmed_services" in
+        null|NULL) confirmed_services="" ;;
+    esac
+    if [ "$confirmed_services" != "$observed_services" ]; then
+        log_event "accessibility_transaction_services_unstable"
+        return 1
+    fi
+    if [ "$observed_services" = "$accessibility_original_services" ]; then
+        :
+    elif [ "$observed_services" = "$accessibility_primary_services" ] || \
+        [ "$observed_services" = "$accessibility_alternate_services" ]; then
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            enabled_accessibility_services "$accessibility_original_services" \
+            >/dev/null 2>&1; then
+            log_event "accessibility_transaction_services_restore_failed"
+            return 1
+        fi
+        if ! restored_services="$(run_guard_command settings --user \
+            "$ANDROID_USER_ID" get secure enabled_accessibility_services \
+            2>/dev/null)"; then
+            log_event "accessibility_transaction_services_restore_unreadable"
+            return 1
+        fi
+        case "$restored_services" in
+            null|NULL) restored_services="" ;;
+        esac
+        if [ "$restored_services" != "$accessibility_original_services" ]; then
+            log_event "accessibility_transaction_services_restore_unconfirmed"
+            return 1
+        fi
+    else
+        log_event "accessibility_transaction_preserved_new_services"
+    fi
+
+    observed_enabled_raw="$(run_guard_command settings --user "$ANDROID_USER_ID" \
+        get secure accessibility_enabled 2>/dev/null)" || {
+        log_event "accessibility_transaction_enabled_read_failed"
+        return 1
+    }
+    observed_enabled="$(normalize_accessibility_enabled \
+        "$observed_enabled_raw")" || {
+        log_event "accessibility_transaction_enabled_invalid"
+        return 1
+    }
+    confirmed_enabled_raw="$(run_guard_command settings --user \
+        "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)" || {
+        log_event "accessibility_transaction_enabled_confirm_failed"
+        return 1
+    }
+    confirmed_enabled="$(normalize_accessibility_enabled \
+        "$confirmed_enabled_raw")" || {
+        log_event "accessibility_transaction_enabled_invalid"
+        return 1
+    }
+    if [ "$confirmed_enabled" != "$observed_enabled" ]; then
+        log_event "accessibility_transaction_enabled_unstable"
+        return 1
+    fi
+    if [ "$observed_enabled" = "$accessibility_original_enabled" ]; then
+        :
+    elif [ "$observed_enabled" = "$accessibility_temporary_enabled" ]; then
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            accessibility_enabled "$accessibility_original_enabled" \
+            >/dev/null 2>&1; then
+            log_event "accessibility_transaction_enabled_restore_failed"
+            return 1
+        fi
+        restored_enabled_raw="$(run_guard_command settings --user \
+            "$ANDROID_USER_ID" get secure accessibility_enabled \
+            2>/dev/null)" || return 1
+        restored_enabled="$(normalize_accessibility_enabled \
+            "$restored_enabled_raw")" || return 1
+        if [ "$restored_enabled" != "$accessibility_original_enabled" ]; then
+            log_event "accessibility_transaction_enabled_restore_unconfirmed"
+            return 1
+        fi
+    else
+        log_event "accessibility_transaction_preserved_new_enabled"
+    fi
+
+    clear_accessibility_transaction || {
+        log_event "accessibility_transaction_clear_failed"
+        return 1
+    }
+    log_event "accessibility_transaction_restored"
+    return 0
+}
+
 restore_accessibility_after_interrupted_rebind() {
     temporary_services="$1"
     original_services="$2"
     temporary_enabled="$3"
     original_enabled="$4"
+
+    if [ -e "$ACCESSIBILITY_TRANSACTION_MARKER" ] || \
+        [ -L "$ACCESSIBILITY_TRANSACTION_MARKER" ]; then
+        restore_accessibility_transaction
+        return $?
+    fi
 
     if ! observed_services="$(run_guard_command settings --user "$ANDROID_USER_ID" \
         get secure enabled_accessibility_services 2>/dev/null)"; then
@@ -253,11 +505,11 @@ restore_accessibility_after_interrupted_rebind() {
     if [ "$observed_services" != "$original_services" ] && \
         [ "$observed_services" != "$temporary_services" ]; then
         log_event "accessibility_service_rebind_preserved_new_choice"
-        return 0
-    fi
-    if [ "$observed_services" = "$temporary_services" ]; then
+    elif [ "$observed_services" = "$temporary_services" ] && \
+        [ "$temporary_services" != "$original_services" ]; then
         if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
-            enabled_accessibility_services "$original_services"; then
+            enabled_accessibility_services "$original_services" \
+            >/dev/null 2>&1; then
             log_event "accessibility_service_rebind_compensation_write_failed"
             return 1
         fi
@@ -289,7 +541,7 @@ restore_accessibility_after_interrupted_rebind() {
             return 0
         fi
         if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
-            accessibility_enabled "$original_enabled"; then
+            accessibility_enabled "$original_enabled" >/dev/null 2>&1; then
             log_event "accessibility_service_rebind_enabled_compensation_write_failed"
             return 1
         fi
@@ -329,9 +581,12 @@ rebind_accessibility_service() {
         log_event "accessibility_service_rebind_enabled_changed"
         return 1
     fi
-    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$without"; then
-        restore_accessibility_after_interrupted_rebind "$without" "$current" \
-            "$temporary_enabled" "$original_enabled" || true
+    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+        enabled_accessibility_services "$without" >/dev/null 2>&1; then
+        if ! restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled"; then
+            log_event "accessibility_service_rebind_compensation_failed"
+        fi
         log_event "accessibility_service_rebind_remove_failed"
         return 1
     fi
@@ -348,9 +603,12 @@ rebind_accessibility_service() {
             log_event "accessibility_service_rebind_compensation_failed"
         return 1
     fi
-    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged"; then
-        restore_accessibility_after_interrupted_rebind "$without" "$current" \
-            "$temporary_enabled" "$original_enabled" || true
+    if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+        enabled_accessibility_services "$merged" >/dev/null 2>&1; then
+        if ! restore_accessibility_after_interrupted_rebind "$without" "$current" \
+            "$temporary_enabled" "$original_enabled"; then
+            log_event "accessibility_service_rebind_compensation_failed"
+        fi
         log_event "accessibility_service_rebind_restore_failed"
         return 1
     fi
@@ -1079,6 +1337,23 @@ repair_home_role_locked() {
         write_home_takeover_state released || true
         return 1
     fi
+    if ! post_publish_home_holder="$(read_home_role_holder)"; then
+        log_event "home_role_post_publish_query_failed"
+        return 1
+    fi
+    if [ "$post_publish_home_holder" != "$refreshed_home_holder" ]; then
+        if ! write_home_takeover_state released || \
+            ! clear_released_home_evidence; then
+            log_event "home_role_post_publish_release_failed"
+            return 1
+        fi
+        log_event "home_role_changed_after_state_publish"
+        return 1
+    fi
+    if ! module_is_active; then
+        write_home_takeover_state released || true
+        return 1
+    fi
     if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
         "$HOME_COMPONENT" >/dev/null 2>&1; then
         log_event "home_role_set_failed"
@@ -1163,6 +1438,11 @@ install_cleanup_helper() {
 }
 
 repair_accessibility() {
+    if [ -e "$ACCESSIBILITY_TRANSACTION_MARKER" ] || \
+        [ -L "$ACCESSIBILITY_TRANSACTION_MARKER" ]; then
+        restore_accessibility_transaction || return 1
+        module_is_active || return 1
+    fi
     if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_missing"
         return 1
@@ -1184,6 +1464,11 @@ repair_accessibility() {
         log_event "accessibility_services_read_failed"
         return 1
     fi
+    case "$current" in
+        null|NULL|"") current="" ;;
+        *[![:space:]]*) ;;
+        *) current="" ;;
+    esac
     module_is_active || return 1
     if ! enabled="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
         log_event "accessibility_enabled_read_failed"
@@ -1210,22 +1495,51 @@ repair_accessibility() {
     fi
 
     merged="$(merge_accessibility_services "$current" "$ACCESSIBILITY_COMPONENT")"
+    accessibility_alternate="$(remove_accessibility_service \
+        "$merged" "$ACCESSIBILITY_COMPONENT")"
+    accessibility_transaction_started=0
     accessibility_changed=0
+    if [ "$merged" != "$current" ] || [ "$enabled" != "1" ]; then
+        if ! write_accessibility_transaction "$enabled" 1 "$current" \
+            "$merged" "$accessibility_alternate"; then
+            log_event "accessibility_transaction_start_failed"
+            return 1
+        fi
+        accessibility_transaction_started=1
+    fi
     if [ "$merged" != "$current" ]; then
-        run_guard_command settings --user "$ANDROID_USER_ID" put secure enabled_accessibility_services "$merged" || {
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            enabled_accessibility_services "$merged" >/dev/null 2>&1; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                "$enabled" "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
             log_event "accessibility_services_write_failed"
             return 1
-        }
-        module_is_active || return 1
+        fi
+        if ! module_is_active; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                "$enabled" "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
+            return 1
+        fi
         accessibility_changed=1
     fi
 
     if [ "$enabled" != "1" ]; then
-        run_guard_command settings --user "$ANDROID_USER_ID" put secure accessibility_enabled 1 || {
+        if ! run_guard_command settings --user "$ANDROID_USER_ID" put secure \
+            accessibility_enabled 1 >/dev/null 2>&1; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                1 "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
             log_event "accessibility_enabled_write_failed"
             return 1
-        }
-        module_is_active || return 1
+        fi
+        if ! module_is_active; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                1 "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
+            return 1
+        fi
         accessibility_changed=1
     fi
 
@@ -1234,18 +1548,68 @@ repair_accessibility() {
     fi
 
     binding_state="$(accessibility_service_binding_state)"
-    module_is_active || return 1
+    if ! module_is_active; then
+        if [ "$accessibility_transaction_started" -eq 1 ]; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                1 "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
+        fi
+        return 1
+    fi
     case "$binding_state" in
         crashed)
-            rebind_accessibility_service "$current" "$merged" "$enabled" || return 1
+            if [ "$accessibility_transaction_started" -eq 0 ]; then
+                if ! write_accessibility_transaction "$enabled" 1 "$current" \
+                    "$merged" "$accessibility_alternate"; then
+                    log_event "accessibility_transaction_start_failed"
+                    return 1
+                fi
+                accessibility_transaction_started=1
+            fi
+            if ! rebind_accessibility_service "$current" "$merged" "$enabled"; then
+                if [ "$accessibility_transaction_started" -eq 1 ]; then
+                    restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                        1 "$enabled" || \
+                        log_event "accessibility_repair_compensation_failed"
+                fi
+                return 1
+            fi
             ;;
         unbound)
             if [ "$target_was_fully_enabled" -eq 1 ]; then
-                rebind_accessibility_service "$current" "$merged" "$enabled" || return 1
+                if [ "$accessibility_transaction_started" -eq 0 ]; then
+                    if ! write_accessibility_transaction "$enabled" 1 \
+                        "$current" "$merged" "$accessibility_alternate"; then
+                        log_event "accessibility_transaction_start_failed"
+                        return 1
+                    fi
+                    accessibility_transaction_started=1
+                fi
+                if ! rebind_accessibility_service "$current" "$merged" "$enabled"; then
+                    if [ "$accessibility_transaction_started" -eq 1 ]; then
+                        restore_accessibility_after_interrupted_rebind \
+                            "$merged" "$current" 1 "$enabled" || \
+                            log_event "accessibility_repair_compensation_failed"
+                    fi
+                    return 1
+                fi
             fi
             ;;
     esac
-    module_is_active || return 1
+    if ! module_is_active; then
+        if [ "$accessibility_transaction_started" -eq 1 ]; then
+            restore_accessibility_after_interrupted_rebind "$merged" "$current" \
+                1 "$enabled" || \
+                log_event "accessibility_repair_compensation_failed"
+        fi
+        return 1
+    fi
+    if [ "$accessibility_transaction_started" -eq 1 ]; then
+        clear_accessibility_transaction || {
+            log_event "accessibility_transaction_clear_failed"
+            return 1
+        }
+    fi
     return 0
 }
 
@@ -1357,7 +1721,7 @@ clear_doze_ownership_marker() {
         [ ! -L "$DOZE_OWNERSHIP_MARKER" ]
 }
 
-repair_keepalive() {
+repair_keepalive_locked() {
     module_is_active || return 1
     state_ready=1
     if ! ensure_state_dir; then
@@ -1492,14 +1856,53 @@ repair_keepalive() {
     return 0
 }
 
+repair_keepalive() {
+    if ! acquire_home_transaction_lock; then
+        log_event "doze_transaction_lock_failed"
+        return 1
+    fi
+    if repair_keepalive_locked; then
+        doze_repair_status=0
+    else
+        doze_repair_status=$?
+    fi
+    if ! release_home_transaction_lock; then
+        log_event "doze_transaction_unlock_failed"
+        doze_repair_status=1
+    fi
+    return "$doze_repair_status"
+}
+
 repair_state() {
     module_is_active || return 1
-    repair_accessibility || return 1
-    module_is_active || return 1
-    repair_home_role || return 1
-    module_is_active || return 1
-    repair_keepalive || return 1
-    module_is_active
+    if ! acquire_home_transaction_lock; then
+        log_event "repair_transaction_lock_failed"
+        return 1
+    fi
+    repair_accessibility
+    repair_state_status=$?
+    if [ "$repair_state_status" -eq 0 ]; then
+        module_is_active || repair_state_status=1
+    fi
+    if [ "$repair_state_status" -eq 0 ]; then
+        repair_home_role_locked
+        repair_state_status=$?
+    fi
+    if [ "$repair_state_status" -eq 0 ]; then
+        module_is_active || repair_state_status=1
+    fi
+    if [ "$repair_state_status" -eq 0 ]; then
+        repair_keepalive_locked
+        repair_state_status=$?
+    fi
+    if [ "$repair_state_status" -eq 0 ]; then
+        module_is_active || repair_state_status=1
+    fi
+    if ! release_home_transaction_lock; then
+        log_event "repair_transaction_unlock_failed"
+        repair_state_status=1
+    fi
+    return "$repair_state_status"
 }
 
 launch_home() {
