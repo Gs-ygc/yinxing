@@ -269,7 +269,7 @@
     <string name="settings_root_recover_failed">Root 修复未完成，请检查 KernelSU 授权</string>
     <string name="settings_root_tip_title">安全边界</string>
     <string name="settings_root_tip_no_system">只调用银杏 Root Guard 固定脚本，不修改系统分区。</string>
-    <string name="settings_root_tip_rollback">卸载模块会恢复接管前的桌面；仅禁用会停止继续修复。</string>
+    <string name="settings_root_tip_rollback">卸载时若银杏仍是当前桌面，会尝试恢复接管前桌面；之后的手动选择会保留。</string>
     <string name="settings_root_tip_manual">没有 Root 时，视频自动操作仍可从权限页面手动开启。</string>
     <string name="settings_root_value_ready">正常</string>
     <string name="settings_root_value_pending">待处理</string>

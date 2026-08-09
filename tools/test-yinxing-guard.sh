@@ -147,7 +147,7 @@ write_fake pm \
     'if [[ -e "$TEST_ROOT/hang_pm_path" && "${args[0]:-}" == "path" ]]; then /bin/sleep 5; fi' \
     'if [[ "${args[0]:-}" == "list" && "${args[1]:-}" == "packages" ]]; then [[ -e "$TEST_ROOT/fail_pm_list" ]] && exit 1; [[ -e "$TEST_ROOT/package_disabled" ]] && printf "package:com.yinxing.launcher\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "dump" ]]; then [[ -e "$TEST_ROOT/fail_pm_dump" ]] && exit 1; printf "Package com.yinxing.launcher\\n"; if [[ -e "$TEST_ROOT/component_disabled" ]]; then printf "disabledComponents: [%s]\\n" "$ACCESSIBILITY_COMPONENT"; else printf "Services: %s\\n" "$ACCESSIBILITY_COMPONENT"; fi; exit 0; fi' \
-    'if [[ "${args[0]:-}" == "path" && "${args[-1]:-}" == "com.oplus.launcher" ]]; then [[ -e "$TEST_ROOT/previous_home_missing" ]] && exit 1; printf "/system/priv-app/OplusLauncher/OplusLauncher.apk\\n"; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "path" && "${args[-1]:-}" == "com.oplus.launcher" ]]; then [[ -e "$TEST_ROOT/previous_home_missing" ]] && exit 1; [[ -e "$TEST_ROOT/switch_home_during_previous_path" ]] && printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; printf "/system/priv-app/OplusLauncher/OplusLauncher.apk\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "enable" ]]; then [[ -e "$TEST_ROOT/fail_pm_enable" ]] && exit 1; exit 0; fi' \
     'exit 2'
@@ -157,7 +157,7 @@ write_fake cmd \
     'printf "cmd %s\\n" "$*" >> "$CALLS"' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
     'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; target="${!#}"; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
-    'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; : > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
@@ -267,14 +267,17 @@ reset_fixture() {
         "$TEST_ROOT/fail_home_role_remove" \
         "$TEST_ROOT/hang_home_role_query" \
         "$TEST_ROOT/hang_home_role_set" \
+        "$TEST_ROOT/hang_home_role_remove" \
         "$TEST_ROOT/hang_home_marker_sync" \
         "$TEST_ROOT/ignore_home_role_set" \
+        "$TEST_ROOT/ignore_home_role_remove" \
         "$TEST_ROOT/fail_home_marker_sync" \
         "$TEST_ROOT/concurrent_home_marker_publish" \
         "$TEST_ROOT/home_publish_first_ready" \
         "$TEST_ROOT/home_publish_second_ready" \
         "$TEST_ROOT/malformed_home_role_output" \
         "$TEST_ROOT/previous_home_missing" \
+        "$TEST_ROOT/switch_home_during_previous_path" \
         "$TEST_ROOT/fail_deviceidle_query" \
         "$TEST_ROOT/fail_deviceidle_remove" \
         "$TEST_ROOT/fail_home_once" \
@@ -2032,6 +2035,201 @@ test_uninstall_completes_home_when_doze_cleanup_needs_retry() {
     pass "uninstall completes HOME while Doze cleanup retries"
 }
 
+test_uninstall_retains_nonregular_home_markers() {
+    local shape marker="$TEST_ROOT/state/home_previous_holder"
+
+    for shape in directory symlink dangling; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        case "$shape" in
+            directory)
+                mkdir "$marker"
+                ;;
+            symlink)
+                printf 'com.oplus.launcher\n' > "$TEST_ROOT/external-home-marker"
+                ln -s "$TEST_ROOT/external-home-marker" "$marker"
+                ;;
+            dangling)
+                ln -s "$TEST_ROOT/missing-home-marker" "$marker"
+                ;;
+        esac
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        [[ -x "$CLEANUP_TARGET" ]] || fail "nonregular HOME marker lost retry helper ($shape)"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "nonregular HOME marker cleanup unexpectedly succeeded ($shape)"
+        fi
+        if [[ "$shape" == "directory" ]]; then
+            [[ -d "$marker" ]] || fail "HOME marker directory was removed"
+        else
+            [[ -L "$marker" ]] || fail "HOME marker symlink was removed ($shape)"
+        fi
+        [[ -x "$CLEANUP_TARGET" ]] || fail "nonregular HOME marker removed retry helper ($shape)"
+        assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "nonregular HOME marker preserves holder ($shape)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    done
+    pass "uninstall retains nonregular HOME markers"
+}
+
+test_uninstall_retains_nonregular_doze_markers() {
+    local shape marker="$TEST_ROOT/state/doze_added_by_module"
+
+    for shape in directory symlink dangling; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        case "$shape" in
+            directory)
+                mkdir "$marker"
+                ;;
+            symlink)
+                printf 'added\n' > "$TEST_ROOT/external-doze-marker"
+                ln -s "$TEST_ROOT/external-doze-marker" "$marker"
+                ;;
+            dangling)
+                ln -s "$TEST_ROOT/missing-doze-marker" "$marker"
+                ;;
+        esac
+        touch "$TEST_ROOT/doze_whitelisted"
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        [[ -x "$CLEANUP_TARGET" ]] || fail "nonregular Doze marker lost retry helper ($shape)"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "nonregular Doze marker cleanup unexpectedly succeeded ($shape)"
+        fi
+        if [[ "$shape" == "directory" ]]; then
+            [[ -d "$marker" ]] || fail "Doze marker directory was removed"
+        else
+            [[ -L "$marker" ]] || fail "Doze marker symlink was removed ($shape)"
+        fi
+        [[ -x "$CLEANUP_TARGET" ]] || fail "nonregular Doze marker removed retry helper ($shape)"
+        [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "nonregular Doze marker changed whitelist ($shape)"
+        assert_not_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+    done
+    pass "uninstall retains nonregular Doze markers"
+}
+
+test_uninstall_rejects_trailing_blank_home_marker() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "trailing-blank HOME marker cleanup unexpectedly succeeded"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "trailing-blank marker preserves current HOME"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "trailing-blank HOME marker was removed"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "trailing-blank HOME marker lost retry helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "uninstall rejects trailing-blank HOME marker"
+}
+
+test_uninstall_rejects_trailing_blank_home_query() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n\n' > "$TEST_ROOT/malformed_home_role_output"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "trailing-blank HOME query cleanup unexpectedly succeeded"
+    fi
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "trailing-blank query preserves current HOME"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "trailing-blank query lost HOME marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "trailing-blank query lost retry helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    pass "uninstall rejects trailing-blank HOME query"
+}
+
+test_uninstall_preserves_choice_made_during_previous_home_validation() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/switch_home_during_previous_path"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "caregiver HOME choice made during validation wins"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "caregiver choice retained stale HOME marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "caregiver choice retained cleanup helper"
+    pass "uninstall preserves HOME choice made during package validation"
+}
+
+test_uninstall_retries_failed_or_unconfirmed_home_removal() {
+    local mode control
+
+    for mode in failed unconfirmed; do
+        reset_fixture
+        mkdir -p "$TEST_ROOT/state"
+        printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        case "$mode" in
+            failed) control="$TEST_ROOT/fail_home_role_remove" ;;
+            unconfirmed) control="$TEST_ROOT/ignore_home_role_remove" ;;
+        esac
+        touch "$control"
+        run_module_script "$MODULE_ROOT/uninstall.sh"
+        if run_module_script "$CLEANUP_TARGET"; then
+            fail "HOME removal unexpectedly succeeded ($mode)"
+        fi
+        assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "failed HOME removal preserves holder ($mode)"
+        [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "failed HOME removal lost marker ($mode)"
+        [[ -x "$CLEANUP_TARGET" ]] || fail "failed HOME removal lost retry helper ($mode)"
+    done
+    pass "uninstall retries failed or unconfirmed HOME removal"
+}
+
+test_uninstall_bounds_stalled_home_removal() {
+    local started_at elapsed
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/hang_home_role_remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    started_at=$SECONDS
+    if YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 run_module_script "$CLEANUP_TARGET"; then
+        fail "stalled HOME removal unexpectedly succeeded"
+    fi
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled HOME removal exceeded bound (${elapsed}s)"
+    assert_equals "com.yinxing.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "stalled HOME removal preserves holder"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "stalled HOME removal lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "stalled HOME removal lost retry helper"
+    pass "uninstall bounds stalled HOME removal"
+}
+
+test_uninstall_completes_doze_when_home_removal_needs_retry() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'none\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'added\n' > "$TEST_ROOT/state/doze_added_by_module"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    touch "$TEST_ROOT/doze_whitelisted" "$TEST_ROOT/fail_home_role_remove"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "partial HOME-removal/Doze cleanup unexpectedly succeeded"
+    fi
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || fail "completed Doze cleanup retained marker"
+    [[ ! -e "$TEST_ROOT/doze_whitelisted" ]] || fail "completed Doze cleanup retained whitelist"
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || fail "failed HOME removal lost marker"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "partial cleanup lost retry helper"
+    rm -f "$TEST_ROOT/fail_home_role_remove"
+    run_module_script "$CLEANUP_TARGET"
+    assert_equals "" "$(tr -d '\n' < "$HOME_HOLDER")" "HOME removal retry completes"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || fail "HOME retry retained marker"
+    [[ ! -e "$CLEANUP_TARGET" ]] || fail "completed retry retained helper"
+    pass "uninstall completes Doze while HOME removal retries"
+}
+
 test_module_package() {
     local rejection
 
@@ -2178,6 +2376,14 @@ case "$MODE" in
         test_uninstall_retains_invalid_home_marker
         test_uninstall_bounds_stalled_home_restore
         test_uninstall_completes_home_when_doze_cleanup_needs_retry
+        test_uninstall_retains_nonregular_home_markers
+        test_uninstall_retains_nonregular_doze_markers
+        test_uninstall_rejects_trailing_blank_home_marker
+        test_uninstall_rejects_trailing_blank_home_query
+        test_uninstall_preserves_choice_made_during_previous_home_validation
+        test_uninstall_retries_failed_or_unconfirmed_home_removal
+        test_uninstall_bounds_stalled_home_removal
+        test_uninstall_completes_doze_when_home_removal_needs_retry
         ;;
     all)
         test_merge_cases
@@ -2274,6 +2480,14 @@ case "$MODE" in
         test_uninstall_retains_invalid_home_marker
         test_uninstall_bounds_stalled_home_restore
         test_uninstall_completes_home_when_doze_cleanup_needs_retry
+        test_uninstall_retains_nonregular_home_markers
+        test_uninstall_retains_nonregular_doze_markers
+        test_uninstall_rejects_trailing_blank_home_marker
+        test_uninstall_rejects_trailing_blank_home_query
+        test_uninstall_preserves_choice_made_during_previous_home_validation
+        test_uninstall_retries_failed_or_unconfirmed_home_removal
+        test_uninstall_bounds_stalled_home_removal
+        test_uninstall_completes_doze_when_home_removal_needs_retry
         test_module_package
         if [[ -z "${YINXING_TEST_SHELL:-}" ]] && command -v busybox >/dev/null 2>&1; then
             YINXING_TEST_SHELL=busybox bash "$0" all

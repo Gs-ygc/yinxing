@@ -45,6 +45,37 @@ log_event() {
     fi
 }
 
+path_exists() {
+    [ -e "$1" ] || [ -L "$1" ]
+}
+
+read_marker_line() {
+    marker_path="$1"
+    [ ! -L "$marker_path" ] && [ -f "$marker_path" ] || return 1
+    if ! marker_output="$(
+        cat "$marker_path" 2>/dev/null
+        marker_status=$?
+        printf '|'
+        exit "$marker_status"
+    )"; then
+        return 1
+    fi
+    case "$marker_output" in
+        *'|') marker_output=${marker_output%|} ;;
+        *) return 1 ;;
+    esac
+    line_feed='
+'
+    case "$marker_output" in
+        *"$line_feed") marker_output=${marker_output%"$line_feed"} ;;
+        *) return 1 ;;
+    esac
+    case "$marker_output" in
+        *"$line_feed"*) return 1 ;;
+    esac
+    printf '%s\n' "$marker_output"
+}
+
 cleanup_runtime_state() {
     rm -f \
         "$STATE_DIR/guard.pid" \
@@ -66,14 +97,31 @@ valid_home_holder() {
 }
 
 read_home_role_holder() {
-    if ! home_output="$(run_guard_command cmd role get-role-holders \
-        --user "$ANDROID_USER_ID" "$HOME_ROLE_NAME" 2>/dev/null)"; then
+    if ! home_output="$(
+        run_guard_command cmd role get-role-holders \
+            --user "$ANDROID_USER_ID" "$HOME_ROLE_NAME" 2>/dev/null
+        home_status=$?
+        printf '|'
+        exit "$home_status"
+    )"; then
         return 1
     fi
+    case "$home_output" in
+        *'|') home_output=${home_output%|} ;;
+        *) return 1 ;;
+    esac
     if [ -z "$home_output" ]; then
         printf 'none\n'
         return 0
     fi
+    line_feed='
+'
+    case "$home_output" in
+        *"$line_feed")
+            home_output=${home_output%"$line_feed"}
+            [ -n "$home_output" ] || return 1
+            ;;
+    esac
     case "$home_output" in
         *[!A-Za-z0-9_.]*|.*|*.|*..*) return 1 ;;
     esac
@@ -84,17 +132,11 @@ read_home_role_holder() {
 }
 
 cleanup_home_role() {
-    if [ -L "$HOME_MARKER" ]; then
+    path_exists "$HOME_MARKER" || return 0
+    if ! previous_home="$(read_marker_line "$HOME_MARKER")"; then
         log_event "uninstall_home_marker_invalid"
         return 1
     fi
-    [ -e "$HOME_MARKER" ] || return 0
-    if [ ! -f "$HOME_MARKER" ]; then
-        log_event "uninstall_home_marker_invalid"
-        return 1
-    fi
-
-    previous_home="$(cat "$HOME_MARKER" 2>/dev/null || true)"
     if [ "$previous_home" != "none" ] && ! valid_home_holder "$previous_home"; then
         log_event "uninstall_home_marker_invalid"
         return 1
@@ -111,6 +153,15 @@ cleanup_home_role() {
     fi
 
     if [ "$previous_home" = "none" ]; then
+        if ! current_before_remove="$(read_home_role_holder)"; then
+            log_event "uninstall_home_pre_remove_query_failed"
+            return 1
+        fi
+        if [ "$current_before_remove" != "$PACKAGE_NAME" ]; then
+            rm -f "$HOME_MARKER" || return 1
+            log_event "uninstall_home_preserved_new_choice"
+            return 0
+        fi
         if ! run_guard_command cmd role remove-role-holder --user "$ANDROID_USER_ID" \
             "$HOME_ROLE_NAME" "$PACKAGE_NAME" >/dev/null 2>&1; then
             log_event "uninstall_home_remove_failed"
@@ -126,6 +177,15 @@ cleanup_home_role() {
             >/dev/null 2>&1; then
             log_event "uninstall_home_previous_missing"
             return 1
+        fi
+        if ! current_before_restore="$(read_home_role_holder)"; then
+            log_event "uninstall_home_pre_restore_query_failed"
+            return 1
+        fi
+        if [ "$current_before_restore" != "$PACKAGE_NAME" ]; then
+            rm -f "$HOME_MARKER" || return 1
+            log_event "uninstall_home_preserved_new_choice"
+            return 0
         fi
         if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
             "$previous_home" >/dev/null 2>&1; then
@@ -145,8 +205,9 @@ cleanup_home_role() {
 }
 
 cleanup_doze() {
-    [ -e "$MARKER" ] || return 0
-    if [ ! -f "$MARKER" ] || [ "$(cat "$MARKER" 2>/dev/null)" != "added" ]; then
+    path_exists "$MARKER" || return 0
+    if ! marker_value="$(read_marker_line "$MARKER")" || \
+        [ "$marker_value" != "added" ]; then
         log_event "uninstall_marker_invalid"
         return 1
     fi
@@ -167,7 +228,7 @@ cleanup_failed=0
 cleanup_home_role || cleanup_failed=1
 cleanup_doze || cleanup_failed=1
 
-if [ "$cleanup_failed" -ne 0 ] || [ -e "$HOME_MARKER" ] || [ -e "$MARKER" ]; then
+if [ "$cleanup_failed" -ne 0 ] || path_exists "$HOME_MARKER" || path_exists "$MARKER"; then
     exit 1
 fi
 
