@@ -4,14 +4,14 @@
 
 **Goal:** Bound every Android command used by the Root module so a ColorOS Binder stall cannot leave the background Guard alive but permanently unable to repair accessibility or keepalive state.
 
-**Architecture:** Add one internal BusyBox `timeout -k 1` helper in `bin/common.sh` with a sanitized two-second default and wrap only existing literal Android command call sites. The standalone uninstall cleanup script gets the same local wrapper because it must survive module removal; external APK Root routing and output/status schemas remain unchanged.
+**Architecture:** Add one internal helper in `bin/common.sh` that runs BusyBox `timeout -k 1` inside a new BusyBox `setsid` session with a sanitized two-second default, then cleans only that session's process group so wrapper descendants cannot outlive the bound. Wrap only existing literal Android command call sites. The standalone uninstall cleanup script gets the same local helper because it must survive module removal; external APK Root routing and output/status schemas remain unchanged.
 
-**Tech Stack:** KernelSU BusyBox `ash` standalone mode, POSIX shell, Bash host harness, BusyBox `timeout` applet, Gradle 9.3.1, Android SDK Build Tools 36.0.0.
+**Tech Stack:** KernelSU BusyBox `ash` standalone mode, POSIX shell, Bash host harness, BusyBox `setsid`/`timeout`/`kill` applets, Gradle 9.3.1, Android SDK Build Tools 36.0.0.
 
 ## Global Constraints
 
 - Keep exactly three fixed, no-argument Root paths: `status.sh`, `action.sh`, and `kiosk-home.sh`.
-- Do not add arbitrary shell, user-supplied arguments, package/component input, coordinates, process targeting, or private ColorOS APIs.
+- Do not add arbitrary shell, user-supplied arguments, package/component input, coordinates, targeting of pre-existing processes, or private ColorOS APIs; cleanup is limited to the wrapper's newly created command process group.
 - The internal timeout helper is called only at literal source-controlled call sites and is not exposed through the APK bridge.
 - Default internal Android command timeout is `2` seconds; malformed or non-positive test overrides fall back to `2`.
 - A timed-out accessibility diagnostic remains `unknown` and side-effect free.
@@ -43,7 +43,7 @@ if [[ -e "$TEST_ROOT/hang_deviceidle_remove" &&
       "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi
 ```
 
-Use the existing `reset_fixture()` cleanup list for all four marker files. Do not replace existing fake behavior or use the harness's fake `sleep`; explicit `/bin/sleep` makes the missing timeout observable.
+Use the existing `reset_fixture()` cleanup list for all four marker files. Do not replace existing fake behavior or use the harness's fake `sleep`; explicit `/bin/sleep` makes the missing timeout observable and proves a wrapper descendant cannot keep the caller's output pipe open.
 
 - [ ] **Step 2: Add the stalled-diagnostic RED test.**
 
@@ -102,13 +102,24 @@ GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
 case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
     ''|*[!0-9]*|0) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
 esac
+GUARD_BUSYBOX_BIN="${YINXING_GUARD_BUSYBOX_BIN:-/data/adb/ksu/bin/busybox}"
+if [ ! -x "$GUARD_BUSYBOX_BIN" ]; then
+    GUARD_BUSYBOX_BIN="$(command -v busybox 2>/dev/null || true)"
+fi
 
 run_guard_command() {
-    timeout -k 1 "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@"
+    [ -n "$GUARD_BUSYBOX_BIN" ] || return 127
+    "$GUARD_BUSYBOX_BIN" setsid \
+        "$GUARD_BUSYBOX_BIN" timeout -k 1 "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@" &
+    guard_command_runner_pid=$!
+    wait "$guard_command_runner_pid"
+    guard_command_status=$?
+    "$GUARD_BUSYBOX_BIN" kill -KILL "-$guard_command_runner_pid" >/dev/null 2>&1 || true
+    return "$guard_command_status"
 }
 ```
 
-The helper must not fall back to an unbounded direct invocation if `timeout` is unavailable; the resulting nonzero status is safer and is handled by existing callers.
+The explicit KernelSU BusyBox path provides the production applets even outside standalone `ash`; the host fallback exists for tests. The helper must not fall back to an unbounded direct invocation if BusyBox or an applet is unavailable; the resulting nonzero status is safer and is handled by existing callers. Process-group cleanup may target only the new `setsid` group identified by the just-started runner PID.
 
 - [ ] **Step 2: Wrap common/status/guard commands without changing semantics.**
 

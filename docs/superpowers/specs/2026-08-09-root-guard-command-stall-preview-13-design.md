@@ -11,8 +11,9 @@ process that no longer repairs accessibility or keepalive state.
 
 KernelSU documents that module scripts run in BusyBox `ash` standalone mode and
 ships a complete BusyBox binary at `/data/adb/ksu/bin/busybox`. The module can
-therefore use the fixed BusyBox `timeout` applet as an internal containment
-primitive without adding a new Root command or depending on a ROM-private API.
+therefore use the fixed BusyBox `setsid`, `timeout`, and `kill` applets as an
+internal containment boundary without adding a new Root command or depending
+on a ROM-private API.
 
 ## Goals
 
@@ -28,7 +29,8 @@ primitive without adding a new Root command or depending on a ROM-private API.
 
 ## Non-Goals
 
-- No process killing outside the timeout wrapper's own child command.
+- No process killing outside the timeout wrapper's newly created command
+  session; no existing app, system, or user-selected PID is targeted.
 - No heartbeat file, watchdog kill policy, foreground Activity forcing, input
   injection, arbitrary shell arguments, package/component input, or new status
   schema value.
@@ -40,10 +42,20 @@ primitive without adding a new Root command or depending on a ROM-private API.
 ### Internal command boundary
 
 Add one shared internal helper in `bin/common.sh` that invokes a fixed Android
-command through BusyBox `timeout -k 1`. The default bound is two seconds and a
-positive numeric test override is accepted through the existing module-test
-environment convention. The helper is only called at literal internal call
-sites; it is not exposed through the APK bridge.
+command through explicit KernelSU BusyBox applets. It starts
+`busybox timeout -k 1` in a new `busybox setsid` session, waits for the timeout
+runner, and then kills only that newly allocated process group so a shell
+wrapper's stalled descendant cannot keep a command-substitution pipe open. The
+default bound is two seconds and a positive numeric test override is accepted
+through the existing module-test environment convention. The helper is only
+called at literal internal call sites; it is not exposed through the APK
+bridge.
+
+The production BusyBox path is fixed to `/data/adb/ksu/bin/busybox`. A
+test-environment override and `command -v busybox` fallback allow the same
+behavior suite to run on the host. If no BusyBox can be resolved, the helper
+fails closed with a nonzero status instead of invoking the Android command
+without a bound.
 
 Wrap these existing calls without changing their arguments or result handling:
 
