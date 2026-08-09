@@ -178,15 +178,21 @@ last_repair_state() {
 module_value="$(module_state)"
 guard_value="$(guard_state)"
 accessibility_value="$(accessibility_state)"
+if [ "$module_value" = "missing" ]; then
+    home_value="unknown"
+else
+    home_value="$(home_role_state)"
+fi
 doze_value="$(doze_state)"
 cleanup_value="$(cleanup_state)"
 last_repair_value="$(last_repair_state)"
 
-emit_status schema 1
+emit_status schema 2
 emit_status version "$MODULE_VERSION"
 emit_status module "$module_value"
 emit_status guard "$guard_value"
 emit_status accessibility "$accessibility_value"
+emit_status home "$home_value"
 emit_status doze "$doze_value"
 emit_status cleanup "$cleanup_value"
 emit_status last_repair "$last_repair_value"

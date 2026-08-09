@@ -3,8 +3,10 @@
 PACKAGE_NAME="com.yinxing.launcher"
 ACCESSIBILITY_COMPONENT="com.yinxing.launcher/com.google.android.accessibility.selecttospeak.SelectToSpeakService"
 HOME_COMPONENT="com.yinxing.launcher/.feature.home.MainActivity"
+HOME_ROLE_NAME="android.app.role.HOME"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
+HOME_PREVIOUS_HOLDER_MARKER="$STATE_DIR/home_previous_holder"
 LOG_TAG="YinxingGuard"
 MODULE_VERSION="1.10.0-root-preview.13"
 GUARD_OWNER_ACTIVE_STATUS=76
@@ -289,6 +291,122 @@ record_repair_result() {
     return 0
 }
 
+valid_home_holder() {
+    case "$1" in
+        ''|none|.*|*.|*..*|*[!A-Za-z0-9_.]*) return 1 ;;
+        *.*) [ "$1" != "$PACKAGE_NAME" ] ;;
+        *) return 1 ;;
+    esac
+}
+
+read_home_role_holder() {
+    if ! home_output="$(run_guard_command cmd role get-role-holders \
+        --user "$ANDROID_USER_ID" "$HOME_ROLE_NAME" 2>/dev/null)"; then
+        return 1
+    fi
+    if [ -z "$home_output" ]; then
+        printf 'none\n'
+        return 0
+    fi
+    case "$home_output" in
+        *[!A-Za-z0-9_.]*|.*|*.|*..*) return 1 ;;
+    esac
+    case "$home_output" in
+        *.*) printf '%s\n' "$home_output" ;;
+        *) return 1 ;;
+    esac
+}
+
+home_role_state() {
+    if ! home_holder="$(read_home_role_holder)"; then
+        printf 'unknown\n'
+        return 0
+    fi
+    case "$home_holder" in
+        "$PACKAGE_NAME") printf 'owned\n' ;;
+        none) printf 'none\n' ;;
+        *) printf 'other\n' ;;
+    esac
+}
+
+record_home_previous_holder() {
+    previous_holder="$1"
+    if [ "$previous_holder" != "none" ] && ! valid_home_holder "$previous_holder"; then
+        log_event "home_role_previous_holder_invalid"
+        return 1
+    fi
+    ensure_state_dir || return 1
+
+    if [ -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        log_event "home_role_marker_invalid"
+        return 1
+    fi
+    if [ -e "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        if [ ! -f "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+            log_event "home_role_marker_invalid"
+            return 1
+        fi
+        saved_holder="$(cat "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null || true)"
+        if [ "$saved_holder" != "none" ] && ! valid_home_holder "$saved_holder"; then
+            log_event "home_role_marker_invalid"
+            return 1
+        fi
+        return 0
+    fi
+
+    marker_tmp="$HOME_PREVIOUS_HOLDER_MARKER.tmp.$$"
+    rm -f "$marker_tmp" 2>/dev/null || true
+    if ! { printf '%s\n' "$previous_holder" > "$marker_tmp"; } 2>/dev/null || \
+        ! chmod 0600 "$marker_tmp" 2>/dev/null || \
+        ! mv -f "$marker_tmp" "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null; then
+        rm -f "$marker_tmp" 2>/dev/null || true
+        log_event "home_role_marker_write_failed"
+        return 1
+    fi
+    return 0
+}
+
+repair_home_role() {
+    if ! current_home_holder="$(read_home_role_holder)"; then
+        log_event "home_role_query_failed"
+        return 1
+    fi
+
+    if [ -L "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        log_event "home_role_marker_invalid"
+        return 1
+    fi
+    if [ -e "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+        if [ ! -f "$HOME_PREVIOUS_HOLDER_MARKER" ]; then
+            log_event "home_role_marker_invalid"
+            return 1
+        fi
+        saved_home_holder="$(cat "$HOME_PREVIOUS_HOLDER_MARKER" 2>/dev/null || true)"
+        if [ "$saved_home_holder" != "none" ] && ! valid_home_holder "$saved_home_holder"; then
+            log_event "home_role_marker_invalid"
+            return 1
+        fi
+    fi
+
+    [ "$current_home_holder" = "$PACKAGE_NAME" ] && return 0
+    record_home_previous_holder "$current_home_holder" || return 1
+    if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
+        "$HOME_COMPONENT" >/dev/null 2>&1; then
+        log_event "home_role_set_failed"
+        return 1
+    fi
+    if ! confirmed_home_holder="$(read_home_role_holder)"; then
+        log_event "home_role_confirm_failed"
+        return 1
+    fi
+    if [ "$confirmed_home_holder" != "$PACKAGE_NAME" ]; then
+        log_event "home_role_unconfirmed"
+        return 1
+    fi
+    log_event "home_role_repaired"
+    return 0
+}
+
 install_cleanup_helper() {
     source_path="$1"
     cleanup_dir=${CLEANUP_TARGET%/*}
@@ -428,6 +546,7 @@ repair_keepalive() {
 
 repair_state() {
     repair_accessibility || return 1
+    repair_home_role || return 1
     repair_keepalive
     return 0
 }
