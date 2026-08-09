@@ -161,6 +161,22 @@ write_fake dumpsys \
     '[[ -f "$TEST_ROOT/accessibility_dump" ]] && cat "$TEST_ROOT/accessibility_dump"' \
     'exit 0'
 
+write_proc_stat() {
+    local pid="$1"
+    local start_time="$2"
+    mkdir -p "$TEST_ROOT/proc/$pid"
+    {
+        printf '%s (yinxing-guard) S' "$pid"
+        for _ in $(seq 1 18); do printf ' 1'; done
+        printf ' %s\n' "$start_time"
+    } > "$TEST_ROOT/proc/$pid/stat"
+}
+
+read_host_proc_start_time() {
+    local pid="$1"
+    awk '{ sub(/^.*\) /, ""); print $20; exit }' "/proc/$pid/stat"
+}
+
 # The assertions describe observable state and command effects, not source text.
 source "$MODULE_ROOT/bin/common.sh"
 export ACCESSIBILITY_COMPONENT
@@ -186,6 +202,7 @@ reset_fixture() {
         "$TEST_ROOT/use_real_sleep" \
         "$TEST_ROOT/accessibility_dump" \
         "$TEST_ROOT/fail_accessibility_dump" \
+        "$TEST_ROOT/proc" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
@@ -311,6 +328,27 @@ test_status_reports_stale_guard_as_degraded() {
     assert_contains_text "$output" "accessibility=disabled"
     assert_contains_text "$output" "last_repair=unknown"
     pass "status reports stale guard"
+}
+
+test_status_reports_stale_guard_when_pid_identity_mismatches() {
+    reset_fixture
+    prepare_healthy_status_fixture
+    rm -rf "$TEST_ROOT/state/guard.lock/test-boot"
+    mkdir -p "$TEST_ROOT/state/guard.lock/test-boot"
+    /bin/sleep 30 &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/test-boot/pid"
+    printf 'test-boot\n' > "$TEST_ROOT/state/guard.lock/test-boot/boot_id"
+    write_proc_stat "$LIVE_PID" 111
+    printf '222\n' > "$TEST_ROOT/state/guard.lock/test-boot/start_time"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_PROC_ROOT="$TEST_ROOT/proc" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "guard=stale"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    pass "status reports stale guard on PID identity mismatch"
 }
 
 test_status_reports_missing_module() {
@@ -554,6 +592,117 @@ test_guard_reclaims_dead_same_boot_lock() {
         run_module_script "$MODULE_ROOT/bin/guard.sh"
     assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" "dead same-boot lock must be reclaimed"
     pass "guard reclaims dead same-boot lock"
+}
+
+test_guard_reclaims_live_pid_with_mismatched_start_time() {
+    reset_fixture
+    printf 'same-boot-id\n' > "$TEST_ROOT/boot_id"
+    mkdir -p "$TEST_ROOT/state/guard.lock/same-boot-id"
+    /bin/sleep 30 &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/same-boot-id/pid"
+    printf 'same-boot-id\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/boot_id"
+    printf '999999999999999\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/start_time"
+    local status
+    set +e
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    status=$?
+    set -e
+    assert_equals "0" "$status" "PID identity mismatch should reclaim the stale lock"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "PID identity mismatch must allow one health cycle"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    pass "guard reclaims live PID with mismatched start time"
+}
+
+test_guard_keeps_matching_live_owner_active() {
+    reset_fixture
+    printf 'same-boot-id\n' > "$TEST_ROOT/boot_id"
+    mkdir -p "$TEST_ROOT/state/guard.lock/same-boot-id"
+    /bin/sleep 30 &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/same-boot-id/pid"
+    printf 'same-boot-id\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/boot_id"
+    read_host_proc_start_time "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/same-boot-id/start_time"
+    local status
+    set +e
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    status=$?
+    set -e
+    assert_equals "76" "$status" "matching owner identity should remain active"
+    assert_equals "0" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "matching owner identity must block duplicate health cycles"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    pass "guard keeps matching live owner active"
+}
+
+test_guard_keeps_live_owner_active_when_identity_unreadable() {
+    reset_fixture
+    printf 'same-boot-id\n' > "$TEST_ROOT/boot_id"
+    mkdir -p "$TEST_ROOT/state/guard.lock/same-boot-id"
+    /bin/sleep 30 &
+    LIVE_PID=$!
+    printf '%s\n' "$LIVE_PID" > "$TEST_ROOT/state/guard.lock/same-boot-id/pid"
+    printf 'same-boot-id\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/boot_id"
+    printf '111\n' > "$TEST_ROOT/state/guard.lock/same-boot-id/start_time"
+    mkdir -p "$TEST_ROOT/proc"
+    local status
+    set +e
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_PROC_ROOT="$TEST_ROOT/proc" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh"
+    status=$?
+    set -e
+    assert_equals "76" "$status" "unreadable identity should remain conservative"
+    assert_equals "0" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "unreadable identity must block duplicate health cycles"
+    kill "$LIVE_PID" 2>/dev/null || true
+    wait "$LIVE_PID" 2>/dev/null || true
+    LIVE_PID=""
+    pass "guard keeps live owner active when identity is unreadable"
+}
+
+test_guard_publishes_owner_start_time_before_pid() {
+    reset_fixture
+    printf 'publish-boot-id\n' > "$TEST_ROOT/boot_id"
+    touch "$TEST_ROOT/use_real_sleep"
+    YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=2 \
+        YINXING_GUARD_MAX_CYCLES=1 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh" &
+    GUARD_PID=$!
+    local lock_dir="$TEST_ROOT/state/guard.lock/publish-boot-id"
+    local found=0
+    for _ in $(seq 1 100); do
+        if [ -s "$lock_dir/pid" ] && [ -s "$lock_dir/start_time" ]; then
+            found=1
+            break
+        fi
+        /bin/sleep 0.05
+    done
+    assert_equals "1" "$found" "Guard must publish start_time before its PID"
+    [[ "$(tr -d '\n' < "$lock_dir/start_time")" =~ ^[0-9]+$ ]] || \
+        fail "published owner start_time is not numeric"
+    kill "$GUARD_PID" 2>/dev/null || true
+    wait "$GUARD_PID" 2>/dev/null || true
+    GUARD_PID=""
+    pass "guard publishes owner start time before PID"
 }
 
 test_guard_preserves_incomplete_lock_for_service_retry() {
@@ -932,6 +1081,7 @@ case "$MODE" in
         test_status_reports_stale_when_accessibility_service_crashed
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
+        test_status_reports_stale_guard_when_pid_identity_mismatches
         test_status_reports_missing_module
         ;;
     --package-only)
@@ -943,6 +1093,10 @@ case "$MODE" in
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
         test_guard_reclaims_dead_same_boot_lock
+        test_guard_reclaims_live_pid_with_mismatched_start_time
+        test_guard_keeps_matching_live_owner_active
+        test_guard_keeps_live_owner_active_when_identity_unreadable
+        test_guard_publishes_owner_start_time_before_pid
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
         test_service_restarts_non_lock_guard_failure
@@ -969,6 +1123,7 @@ case "$MODE" in
         test_status_reports_stale_when_accessibility_service_crashed
         test_status_output_contract_ignores_log_noise
         test_status_reports_stale_guard_as_degraded
+        test_status_reports_stale_guard_when_pid_identity_mismatches
         test_status_reports_missing_module
         test_repair_preserves_and_enables
         test_repair_is_idempotent
@@ -987,6 +1142,10 @@ case "$MODE" in
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
         test_guard_reclaims_dead_same_boot_lock
+        test_guard_reclaims_live_pid_with_mismatched_start_time
+        test_guard_keeps_matching_live_owner_active
+        test_guard_keeps_live_owner_active_when_identity_unreadable
+        test_guard_publishes_owner_start_time_before_pid
         test_guard_preserves_incomplete_lock_for_service_retry
         test_service_retries_incomplete_lock
         test_service_restarts_non_lock_guard_failure
