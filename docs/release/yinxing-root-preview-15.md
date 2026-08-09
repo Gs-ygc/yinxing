@@ -46,6 +46,17 @@ Preview 14 Release：<https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-roo
 
 ## 验证记录
 
-最终发布前会重新执行完整 Host/BusyBox Shell 矩阵、强制 Android 单元测试与 Debug 构建、确定性模块打包、APK 元数据/签名检查，以及远端发布资产的字节和 SHA-256 复核。最终命令耗时和校验值记录在本文件的发布提交中。
+- 所有 KernelSU Shell 脚本通过 `sh -n`，系统命令扫描确认 `cmd`、`pm`、`settings`、`am` 与 `dumpsys` 均继续经过既有的受限超时执行器。
+- `bash tools/test-yinxing-guard.sh all` 退出码为 0，耗时 176.30 秒；包含宿主 Shell、递归 KernelSU BusyBox Shell 与确定性模块打包检查。
+- `:app:testDebugUnitTest :app:assembleDebug --rerun-tasks --no-daemon` 构建成功，48 个任务重新执行，耗时 84.56 秒。43 个 JUnit XML 合计 353 tests、0 failures、0 errors、0 skipped。
+- `aapt2` 确认 APK 为 `com.yinxing.launcher`、`versionCode=31`、`versionName=1.10.0-root-preview.15`、`minSdk=24`、`targetSdk=36`；`apksigner` 确认单一 Android Debug 签名和 v2 签名有效。
+- `unzip -t` 验证模块 ZIP 无错误；独立重新打包与发布 ZIP 逐字节一致。
 
-本 Preview 尚未连接真实一加 15；不会把本地模拟或 AOSP 命令验证表述为 ColorOS 16 真机验证。真机体验应重点确认 ColorOS 的 resolver 输出、接管后 Home 键路由、模块卸载后的原桌面恢复、无障碍绑定和重启保活。
+## SHA-256
+
+```text
+46151044f7393488833d2d292dee4c7f9ea96989ed8b7f561c3d60199d4514ce  yinxing-1.10.0-root-preview.15-debug.apk
+deb6dae0e17434ee083daf161f4a324b4da4894b2cfcd2f90d0e3ff47ec94366  yinxing-guard-1.10.0-root-preview.15.zip
+```
+
+本 Preview 尚未连接真实一加 15：`adb devices -l` 未发现设备。不会把本地模拟或 AOSP 命令验证表述为 ColorOS 16 真机验证。真机体验应重点确认 ColorOS 的 resolver 输出、接管后 Home 键路由、模块卸载后的原桌面恢复、无障碍绑定和重启保活。
