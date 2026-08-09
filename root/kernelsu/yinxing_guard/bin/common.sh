@@ -456,6 +456,64 @@ record_home_previous_holder() {
     return 0
 }
 
+rollback_home_after_inactive_takeover() {
+    if ! rollback_previous_home="$(read_home_previous_holder)"; then
+        log_event "home_role_inactive_rollback_marker_invalid"
+        return 1
+    fi
+    if ! rollback_current_home="$(read_home_role_holder)"; then
+        log_event "home_role_inactive_rollback_query_failed"
+        return 1
+    fi
+    if [ "$rollback_current_home" != "$PACKAGE_NAME" ]; then
+        rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
+        log_event "home_role_inactive_rollback_preserved_new_choice"
+        return 0
+    fi
+
+    if [ "$rollback_previous_home" = "none" ]; then
+        if ! run_guard_command cmd role remove-role-holder --user "$ANDROID_USER_ID" \
+            "$HOME_ROLE_NAME" "$PACKAGE_NAME" >/dev/null 2>&1; then
+            log_event "home_role_inactive_remove_failed"
+            return 1
+        fi
+        if ! rollback_confirmed_home="$(read_home_role_holder)" || \
+            [ "$rollback_confirmed_home" = "$PACKAGE_NAME" ]; then
+            log_event "home_role_inactive_remove_unconfirmed"
+            return 1
+        fi
+    else
+        if ! run_guard_command pm path --user "$ANDROID_USER_ID" "$rollback_previous_home" \
+            >/dev/null 2>&1; then
+            log_event "home_role_inactive_previous_missing"
+            return 1
+        fi
+        if ! rollback_current_home="$(read_home_role_holder)"; then
+            log_event "home_role_inactive_pre_restore_query_failed"
+            return 1
+        fi
+        if [ "$rollback_current_home" != "$PACKAGE_NAME" ]; then
+            rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
+            log_event "home_role_inactive_rollback_preserved_new_choice"
+            return 0
+        fi
+        if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
+            "$rollback_previous_home" >/dev/null 2>&1; then
+            log_event "home_role_inactive_restore_failed"
+            return 1
+        fi
+        if ! rollback_confirmed_home="$(read_home_role_holder)" || \
+            [ "$rollback_confirmed_home" != "$rollback_previous_home" ]; then
+            log_event "home_role_inactive_restore_unconfirmed"
+            return 1
+        fi
+    fi
+
+    rm -f "$HOME_PREVIOUS_HOLDER_MARKER" || return 1
+    log_event "home_role_inactive_rollback_complete"
+    return 0
+}
+
 repair_home_role() {
     if ! current_home_holder="$(read_home_role_holder)"; then
         log_event "home_role_query_failed"
@@ -492,15 +550,33 @@ repair_home_role() {
     module_is_active || return 1
     if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
         "$HOME_COMPONENT" >/dev/null 2>&1; then
+        if ! module_is_active; then
+            rollback_home_after_inactive_takeover || \
+                log_event "home_role_inactive_rollback_failed"
+        fi
         log_event "home_role_set_failed"
         return 1
     fi
+    if ! module_is_active; then
+        rollback_home_after_inactive_takeover || \
+            log_event "home_role_inactive_rollback_failed"
+        return 1
+    fi
     if ! confirmed_home_holder="$(read_home_role_holder)"; then
+        if ! module_is_active; then
+            rollback_home_after_inactive_takeover || \
+                log_event "home_role_inactive_rollback_failed"
+        fi
         log_event "home_role_confirm_failed"
         return 1
     fi
     if [ "$confirmed_home_holder" != "$PACKAGE_NAME" ]; then
         log_event "home_role_unconfirmed"
+        return 1
+    fi
+    if ! module_is_active; then
+        rollback_home_after_inactive_takeover || \
+            log_event "home_role_inactive_rollback_failed"
         return 1
     fi
     log_event "home_role_repaired"
@@ -536,24 +612,29 @@ repair_accessibility() {
         log_event "package_missing"
         return 1
     fi
+    module_is_active || return 1
 
     if ! run_guard_command pm enable --user "$ANDROID_USER_ID" "$PACKAGE_NAME" >/dev/null 2>&1; then
         log_event "package_enable_failed"
         return 1
     fi
+    module_is_active || return 1
     if ! run_guard_command pm enable --user "$ANDROID_USER_ID" "$ACCESSIBILITY_COMPONENT" >/dev/null 2>&1; then
         log_event "service_enable_failed"
         return 1
     fi
+    module_is_active || return 1
 
     if ! current="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure enabled_accessibility_services 2>/dev/null)"; then
         log_event "accessibility_services_read_failed"
         return 1
     fi
+    module_is_active || return 1
     if ! enabled="$(run_guard_command settings --user "$ANDROID_USER_ID" get secure accessibility_enabled 2>/dev/null)"; then
         log_event "accessibility_enabled_read_failed"
         return 1
     fi
+    module_is_active || return 1
 
     target_was_enabled=0
     case ":$current:" in
@@ -572,6 +653,7 @@ repair_accessibility() {
             log_event "accessibility_services_write_failed"
             return 1
         }
+        module_is_active || return 1
         accessibility_changed=1
     fi
 
@@ -580,6 +662,7 @@ repair_accessibility() {
             log_event "accessibility_enabled_write_failed"
             return 1
         }
+        module_is_active || return 1
         accessibility_changed=1
     fi
 
@@ -588,6 +671,7 @@ repair_accessibility() {
     fi
 
     binding_state="$(accessibility_service_binding_state)"
+    module_is_active || return 1
     case "$binding_state" in
         crashed)
             rebind_accessibility_service "$current" "$merged" || return 1
@@ -598,6 +682,7 @@ repair_accessibility() {
             fi
             ;;
     esac
+    module_is_active || return 1
     return 0
 }
 
@@ -610,6 +695,7 @@ doze_contains_package() {
 }
 
 repair_keepalive() {
+    module_is_active || return 1
     state_ready=1
     if ! ensure_state_dir; then
         state_ready=0
@@ -617,6 +703,7 @@ repair_keepalive() {
 
     doze_contains_package
     doze_status=$?
+    module_is_active || return 1
     if [ "$doze_status" -eq 1 ]; then
         if [ "$state_ready" -ne 1 ]; then
             log_event "doze_whitelist_skipped_no_state"
@@ -632,30 +719,48 @@ repair_keepalive() {
                 run_guard_command cmd deviceidle whitelist "-$PACKAGE_NAME" >/dev/null 2>&1 || \
                     log_event "doze_rollback_failed"
             fi
+            if ! module_is_active; then
+                log_event "doze_add_completed_after_module_inactive"
+                return 1
+            fi
         else
             log_event "doze_whitelist_failed"
         fi
     fi
 
+    module_is_active || return 1
     run_guard_command cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_IN_BACKGROUND allow \
         >/dev/null 2>&1 || log_event "background_appop_unsupported"
+    module_is_active || return 1
     run_guard_command cmd appops set --user "$ANDROID_USER_ID" "$PACKAGE_NAME" RUN_ANY_IN_BACKGROUND allow \
         >/dev/null 2>&1 || log_event "any_background_appop_unsupported"
+    module_is_active || return 1
     return 0
 }
 
 repair_state() {
+    module_is_active || return 1
     repair_accessibility || return 1
+    module_is_active || return 1
     repair_home_role || return 1
-    repair_keepalive
-    return 0
+    module_is_active || return 1
+    repair_keepalive || return 1
+    module_is_active
 }
 
 launch_home() {
+    if ! module_is_active; then
+        log_event "home_launch_skipped_module_inactive"
+        return 1
+    fi
     run_guard_command am start --user "$ANDROID_USER_ID" -n "$HOME_COMPONENT" >/dev/null 2>&1 || {
         log_event "home_launch_failed"
         return 1
     }
+    if ! module_is_active; then
+        log_event "home_launch_completed_after_module_inactive"
+        return 1
+    fi
     log_event "home_launched"
     return 0
 }

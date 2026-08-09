@@ -204,8 +204,13 @@ run_health_cycle() {
         log_event "repair_cycle_failed"
         return 1
     fi
+    if ! module_is_active; then
+        record_repair_result failed || true
+        log_event "guard_module_inactive_after_repair"
+        return 2
+    fi
     record_repair_result ok || true
-    if [ "$HOME_LAUNCHED" -eq 0 ] && launch_home; then
+    if module_is_active && [ "$HOME_LAUNCHED" -eq 0 ] && launch_home; then
         HOME_LAUNCHED=1
     fi
     return 0

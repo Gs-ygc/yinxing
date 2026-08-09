@@ -134,34 +134,38 @@ write_fake() {
 write_fake settings \
     '#!/usr/bin/env bash' \
     'printf "settings %s\\n" "$*" >> "$CALLS"' \
+    'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
     'shift_if_user() { if [[ "${1:-}" == "--user" ]]; then shift 2; fi; printf "%s" "$*"; }' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
-    'if [[ "${args[0]:-}" == "get" ]]; then [[ -e "$TEST_ROOT/fail_settings_get" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then [[ -s "$SERVICES" ]] && cat "$SERVICES" || printf "null\\n"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then cat "$ACCESSIBILITY_ENABLED"; else exit 2; fi; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "get" ]]; then [[ -e "$TEST_ROOT/fail_settings_get" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_accessibility_read"; [[ -s "$SERVICES" ]] && cat "$SERVICES" || printf "null\\n"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then cat "$ACCESSIBILITY_ENABLED"; else exit 2; fi; exit 0; fi' \
     'if [[ "${args[0]:-}" == "put" ]]; then [[ -e "$TEST_ROOT/fail_settings_put" ]] && exit 1; if [[ "${args[2]:-}" == "enabled_accessibility_services" ]]; then printf "%s\\n" "${args[3]:-}" > "$SERVICES"; elif [[ "${args[2]:-}" == "accessibility_enabled" ]]; then printf "%s\\n" "${args[3]:-}" > "$ACCESSIBILITY_ENABLED"; fi; exit 0; fi' \
     'exit 2'
 
 write_fake pm \
     '#!/usr/bin/env bash' \
     'printf "pm %s\\n" "$*" >> "$CALLS"' \
+    'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
     'args=("$@"); if [[ "${args[0]:-}" == "--user" ]]; then args=("${args[@]:2}"); fi' \
     'if [[ -e "$TEST_ROOT/hang_pm_path" && "${args[0]:-}" == "path" ]]; then /bin/sleep 5; fi' \
     'if [[ "${args[0]:-}" == "list" && "${args[1]:-}" == "packages" ]]; then [[ -e "$TEST_ROOT/fail_pm_list" ]] && exit 1; [[ -e "$TEST_ROOT/package_disabled" ]] && printf "package:com.yinxing.launcher\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "dump" ]]; then [[ -e "$TEST_ROOT/fail_pm_dump" ]] && exit 1; printf "Package com.yinxing.launcher\\n"; if [[ -e "$TEST_ROOT/component_disabled" ]]; then printf "disabledComponents: [%s]\\n" "$ACCESSIBILITY_COMPONENT"; else printf "Services: %s\\n" "$ACCESSIBILITY_COMPONENT"; fi; exit 0; fi' \
     'if [[ "${args[0]:-}" == "path" && "${args[-1]:-}" == "com.oplus.launcher" ]]; then [[ -e "$TEST_ROOT/previous_home_missing" ]] && exit 1; [[ -e "$TEST_ROOT/switch_home_during_previous_path" ]] && printf "com.example.caregiverlauncher\\n" > "$HOME_HOLDER"; printf "/system/priv-app/OplusLauncher/OplusLauncher.apk\\n"; exit 0; fi' \
-    'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
+    'if [[ "${args[0]:-}" == "path" ]]; then [[ -e "$TEST_ROOT/package_missing" ]] && exit 1; if [[ -e "$TEST_ROOT/package_missing_once" ]]; then rm -f "$TEST_ROOT/package_missing_once"; exit 1; fi; deactivate_from "$TEST_ROOT/deactivate_during_package_path"; printf "/data/app/com.yinxing.launcher/base.apk\\n"; exit 0; fi' \
     'if [[ "${args[0]:-}" == "enable" ]]; then [[ -e "$TEST_ROOT/fail_pm_enable" ]] && exit 1; exit 0; fi' \
     'exit 2'
 
 write_fake cmd \
     '#!/usr/bin/env bash' \
     'printf "cmd %s\\n" "$*" >> "$CALLS"' \
+    'deactivate_from() { control="$1"; [[ -f "$control" ]] || return 0; marker="$(cat "$control")"; mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"; touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"; }' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "get-role-holders" ]]; then [[ -e "$TEST_ROOT/hang_home_role_query" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_query" ]] && exit 1; [[ -f "$TEST_ROOT/malformed_home_role_output" ]] && cat "$TEST_ROOT/malformed_home_role_output" && exit 0; [[ -s "$HOME_HOLDER" ]] && cat "$HOME_HOLDER"; exit 0; fi' \
-    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; target="${!#}"; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
+    'if [[ "${1:-}" == "package" && "${2:-}" == "set-home-activity" ]]; then [[ -e "$TEST_ROOT/hang_home_role_set" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_set" ]] && exit 1; target="${!#}"; [[ "${target%%/*}" == "com.yinxing.launcher" ]] && deactivate_from "$TEST_ROOT/deactivate_during_home_role_set"; [[ -e "$TEST_ROOT/ignore_home_role_set" ]] || printf "%s\\n" "${target%%/*}" > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ "${1:-}" == "role" && "${2:-}" == "remove-role-holder" ]]; then [[ -e "$TEST_ROOT/hang_home_role_remove" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_role_remove" ]] && exit 1; [[ -e "$TEST_ROOT/ignore_home_role_remove" ]] || : > "$HOME_HOLDER"; exit 0; fi' \
     'if [[ -e "$TEST_ROOT/hang_deviceidle_remove" && "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then /bin/sleep 5; fi' \
+    'if [[ "${1:-}" == "appops" && "${6:-}" == "RUN_IN_BACKGROUND" ]]; then deactivate_from "$TEST_ROOT/deactivate_during_first_appops"; fi' \
     'if [[ "${1:-}" == "appops" && -e "$TEST_ROOT/fail_appops" ]]; then exit 1; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && $# -eq 2 ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_query" ]] && exit 1; [[ -e "$TEST_ROOT/doze_whitelisted" ]] && printf "user,%s\\n" "com.yinxing.launcher"; exit 0; fi' \
-    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then printf added > "$TEST_ROOT/doze_whitelisted"; fi' \
+    'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == +com.yinxing.launcher ]]; then deactivate_from "$TEST_ROOT/deactivate_during_doze_add"; printf added > "$TEST_ROOT/doze_whitelisted"; fi' \
     'if [[ "${1:-}" == "deviceidle" && "${2:-}" == "whitelist" && "${3:-}" == -com.yinxing.launcher ]]; then [[ -e "$TEST_ROOT/fail_deviceidle_remove" ]] && exit 1; rm -f "$TEST_ROOT/doze_whitelisted"; fi' \
     'exit 0'
 
@@ -277,6 +281,11 @@ reset_fixture() {
         "$TEST_ROOT/concurrent_home_marker_publish" \
         "$TEST_ROOT/home_publish_first_ready" \
         "$TEST_ROOT/home_publish_second_ready" \
+        "$TEST_ROOT/deactivate_during_home_role_set" \
+        "$TEST_ROOT/deactivate_during_doze_add" \
+        "$TEST_ROOT/deactivate_during_first_appops" \
+        "$TEST_ROOT/deactivate_during_package_path" \
+        "$TEST_ROOT/deactivate_during_accessibility_read" \
         "$TEST_ROOT/malformed_home_role_output" \
         "$TEST_ROOT/previous_home_missing" \
         "$TEST_ROOT/switch_home_during_previous_path" \
@@ -1749,6 +1758,129 @@ test_action_rejects_disabled_or_removing_module() {
     pass "action rejects disabled or removing module"
 }
 
+test_action_rolls_back_home_when_module_deactivates_during_set() {
+    local marker
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        printf '%s\n' "$marker" > "$TEST_ROOT/deactivate_during_home_role_set"
+        if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "action succeeded after module deactivated during HOME set ($marker)"
+        fi
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "mid-set deactivation restores prior HOME ($marker)"
+        assert_equals "2" \
+            "$(grep -c '^cmd package set-home-activity --user 0 ' "$CALLS" || true)" \
+            "mid-set deactivation takeover/rollback count ($marker)"
+        assert_contains "$CALLS" \
+            "cmd package set-home-activity --user 0 com.oplus.launcher"
+        [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+            fail "successful mid-set rollback retained HOME marker ($marker)"
+        assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+        assert_not_contains "$CALLS" "cmd appops set"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "action rolls back HOME after mid-set module deactivation"
+}
+
+test_action_removes_home_after_mid_set_deactivation_when_prior_was_none() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    : > "$HOME_HOLDER"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_home_role_set"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after no-holder HOME set deactivated module"
+    fi
+    assert_equals "" "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "mid-set deactivation restores no-holder HOME"
+    assert_contains "$CALLS" \
+        "cmd role remove-role-holder --user 0 android.app.role.HOME com.yinxing.launcher"
+    [[ ! -e "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "successful no-holder rollback retained HOME marker"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "cmd appops set"
+    assert_not_contains "$CALLS" "am start"
+    pass "action restores no-holder HOME after mid-set deactivation"
+}
+
+test_action_stops_after_module_deactivates_during_doze_add() {
+    local marker
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        printf '%s\n' "$marker" > "$TEST_ROOT/deactivate_during_doze_add"
+        if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "action succeeded after module deactivated during Doze add ($marker)"
+        fi
+        [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "mid-add Doze state was lost ($marker)"
+        [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || \
+            fail "mid-add deactivation lost Doze ownership marker ($marker)"
+        assert_not_contains "$CALLS" "cmd appops set"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "action stops after mid-Doze module deactivation"
+}
+
+test_action_stops_after_module_deactivates_during_first_appop() {
+    local marker
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+        touch "$TEST_ROOT/doze_whitelisted"
+        printf '%s\n' "$marker" > "$TEST_ROOT/deactivate_during_first_appops"
+        if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "action succeeded after module deactivated during AppOps ($marker)"
+        fi
+        assert_contains "$CALLS" \
+            "cmd appops set --user 0 com.yinxing.launcher RUN_IN_BACKGROUND allow"
+        assert_not_contains "$CALLS" "RUN_ANY_IN_BACKGROUND"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "action stops after first AppOps deactivates module"
+}
+
+test_action_stops_after_module_deactivates_during_package_probe() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_package_path"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after module deactivated during package probe"
+    fi
+    assert_not_contains "$CALLS" "pm --user 0 enable"
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "cmd appops set"
+    assert_not_contains "$CALLS" "am start"
+    pass "action stops after package probe deactivates module"
+}
+
+test_action_stops_after_module_deactivates_during_accessibility_read() {
+    reset_fixture
+    mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+    printf 'disable\n' > "$TEST_ROOT/deactivate_during_accessibility_read"
+    if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action succeeded after module deactivated during accessibility read"
+    fi
+    assert_not_contains "$CALLS" "settings --user 0 put secure"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist +com.yinxing.launcher"
+    assert_not_contains "$CALLS" "cmd appops set"
+    assert_not_contains "$CALLS" "am start"
+    pass "action stops after accessibility read deactivates module"
+}
+
 test_guard_prevents_concurrent_processes() {
     reset_fixture
     touch "$TEST_ROOT/use_real_sleep"
@@ -2484,6 +2616,12 @@ case "$MODE" in
         test_guard_rejects_inactive_module_before_initial_repair
         test_guard_stops_home_enforcement_after_disable_or_remove
         test_action_rejects_disabled_or_removing_module
+        test_action_rolls_back_home_when_module_deactivates_during_set
+        test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_action_stops_after_module_deactivates_during_doze_add
+        test_action_stops_after_module_deactivates_during_first_appop
+        test_action_stops_after_module_deactivates_during_package_probe
+        test_action_stops_after_module_deactivates_during_accessibility_read
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
@@ -2593,6 +2731,12 @@ case "$MODE" in
         test_guard_rejects_inactive_module_before_initial_repair
         test_guard_stops_home_enforcement_after_disable_or_remove
         test_action_rejects_disabled_or_removing_module
+        test_action_rolls_back_home_when_module_deactivates_during_set
+        test_action_removes_home_after_mid_set_deactivation_when_prior_was_none
+        test_action_stops_after_module_deactivates_during_doze_add
+        test_action_stops_after_module_deactivates_during_first_appop
+        test_action_stops_after_module_deactivates_during_package_probe
+        test_action_stops_after_module_deactivates_during_accessibility_read
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_action_bounds_stalled_package_query

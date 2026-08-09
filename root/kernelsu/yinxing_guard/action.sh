@@ -17,5 +17,7 @@ if ! repair_state; then
     record_repair_result failed || true
     exit 1
 fi
+module_is_active || exit 1
 record_repair_result ok || true
+module_is_active || exit 1
 launch_home
