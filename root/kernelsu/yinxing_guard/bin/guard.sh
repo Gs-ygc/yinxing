@@ -187,6 +187,10 @@ wait_for_boot() {
 }
 
 run_health_cycle() {
+    if ! module_is_active; then
+        log_event "guard_module_inactive"
+        return 2
+    fi
     if [ ! -f "$CLEANUP_TARGET" ] || [ ! -x "$CLEANUP_TARGET" ]; then
         install_cleanup_helper "$CLEANUP_SOURCE" || true
     fi
@@ -202,6 +206,7 @@ run_health_cycle() {
     return 0
 }
 
+module_is_active || exit 0
 ensure_state_dir || exit 1
 if ! acquire_lock; then
     # Keep an incomplete lock intact and let service.sh retry after its writer
@@ -214,12 +219,14 @@ trap release_lock EXIT
 trap 'exit 143' INT TERM
 
 wait_for_boot || exit 1
+module_is_active || exit 0
 HOME_LAUNCHED=0
 run_health_cycle
 
 cycles=0
 while [ "$MAX_CYCLES" -eq 0 ] || [ "$cycles" -lt "$MAX_CYCLES" ]; do
     sleep "$HEALTH_INTERVAL_SECONDS"
+    module_is_active || break
     run_health_cycle
     cycles=$((cycles + 1))
 done

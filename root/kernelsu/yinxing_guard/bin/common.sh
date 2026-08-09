@@ -7,6 +7,7 @@ HOME_ROLE_NAME="android.app.role.HOME"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 HOME_PREVIOUS_HOLDER_MARKER="$STATE_DIR/home_previous_holder"
+MODULE_STATE_DIR="${YINXING_GUARD_MODULE_STATE_DIR:-/data/adb/modules/yinxing_guard}"
 LOG_TAG="YinxingGuard"
 MODULE_VERSION="1.10.0-root-preview.14"
 GUARD_OWNER_ACTIVE_STATUS=76
@@ -45,6 +46,12 @@ log_event() {
     if command -v log >/dev/null 2>&1; then
         log -t "$LOG_TAG" -- "version=$MODULE_VERSION $message" >/dev/null 2>&1 || true
     fi
+}
+
+module_is_active() {
+    [ -d "$MODULE_STATE_DIR" ] && \
+        [ ! -e "$MODULE_STATE_DIR/disable" ] && \
+        [ ! -e "$MODULE_STATE_DIR/remove" ]
 }
 
 merge_accessibility_services() {
@@ -389,6 +396,10 @@ repair_home_role() {
     fi
 
     [ "$current_home_holder" = "$PACKAGE_NAME" ] && return 0
+    if ! module_is_active; then
+        log_event "home_role_skipped_module_inactive"
+        return 1
+    fi
     record_home_previous_holder "$current_home_holder" || return 1
     if ! run_guard_command cmd package set-home-activity --user "$ANDROID_USER_ID" \
         "$HOME_COMPONENT" >/dev/null 2>&1; then

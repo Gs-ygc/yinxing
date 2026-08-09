@@ -22,13 +22,6 @@ case "$OWNER_RETRY_SECONDS" in
     ''|*[!0-9]*) OWNER_RETRY_SECONDS=30 ;;
 esac
 
-MODULE_STATE_DIR=${YINXING_GUARD_MODULE_STATE_DIR:-$MODDIR}
-module_is_active() {
-    [ -d "$MODULE_STATE_DIR" ] && \
-        [ ! -e "$MODULE_STATE_DIR/disable" ] && \
-        [ ! -e "$MODULE_STATE_DIR/remove" ]
-}
-
 (
     while module_is_active; do
         sh "$MODDIR/bin/guard.sh"

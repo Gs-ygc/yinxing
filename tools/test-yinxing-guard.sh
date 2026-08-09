@@ -51,6 +51,7 @@ export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER
 export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
+export YINXING_GUARD_MODULE_STATE_DIR="$MODULE_ROOT"
 export PATH="$FAKE_BIN:$PATH"
 
 run_module_script() {
@@ -1433,6 +1434,79 @@ test_service_stops_when_module_disabled_or_removing() {
     pass "service stops when module disabled or removing"
 }
 
+test_guard_rejects_inactive_module_before_initial_repair() {
+    local marker
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"
+        YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+            YINXING_GUARD_INTERVAL_SECONDS=0 \
+            YINXING_GUARD_MAX_CYCLES=1 \
+            run_module_script "$MODULE_ROOT/bin/guard.sh"
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "inactive Guard changed HOME ($marker)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "Guard rejects inactive module before initial repair"
+}
+
+test_guard_stops_home_enforcement_after_disable_or_remove() {
+    local marker observed
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        touch "$TEST_ROOT/use_real_sleep"
+        YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+            YINXING_GUARD_INTERVAL_SECONDS=1 \
+            YINXING_GUARD_MAX_CYCLES=1 \
+            run_module_script "$MODULE_ROOT/bin/guard.sh" &
+        GUARD_PID=$!
+        observed=0
+        for _ in $(seq 1 100); do
+            if [ "$(tr -d '\n' < "$HOME_HOLDER")" = "com.yinxing.launcher" ]; then
+                observed=1
+                break
+            fi
+            /bin/sleep 0.05
+        done
+        assert_equals "1" "$observed" "Guard did not complete initial HOME takeover ($marker)"
+        touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"
+        printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+        : > "$CALLS"
+        wait "$GUARD_PID"
+        GUARD_PID=""
+        assert_equals "com.example.caregiverlauncher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "inactive Guard reclaimed caregiver HOME ($marker)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+    done
+    pass "Guard stops HOME enforcement after disable or remove"
+}
+
+test_action_rejects_disabled_or_removing_module() {
+    local marker
+
+    for marker in disable remove; do
+        reset_fixture
+        mkdir -p "$YINXING_GUARD_TEST_MODULE_DIR"
+        touch "$YINXING_GUARD_TEST_MODULE_DIR/$marker"
+        if YINXING_GUARD_MODULE_STATE_DIR="$YINXING_GUARD_TEST_MODULE_DIR" \
+            run_module_script "$MODULE_ROOT/action.sh"; then
+            fail "action accepted inactive module ($marker)"
+        fi
+        assert_equals "com.oplus.launcher" "$(tr -d '\n' < "$HOME_HOLDER")" \
+            "inactive action changed HOME ($marker)"
+        assert_not_contains "$CALLS" "cmd package set-home-activity"
+        assert_not_contains "$CALLS" "am start"
+    done
+    pass "action rejects disabled or removing module"
+}
+
 test_guard_prevents_concurrent_processes() {
     reset_fixture
     touch "$TEST_ROOT/use_real_sleep"
@@ -1929,6 +2003,9 @@ case "$MODE" in
         test_service_restarts_non_lock_guard_failure
         test_service_reclaims_lock_after_owner_disappears
         test_service_stops_when_module_disabled_or_removing
+        test_guard_rejects_inactive_module_before_initial_repair
+        test_guard_stops_home_enforcement_after_disable_or_remove
+        test_action_rejects_disabled_or_removing_module
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_cleanup_helper_waits_for_module_removal
@@ -2015,6 +2092,9 @@ case "$MODE" in
         test_service_restarts_non_lock_guard_failure
         test_service_reclaims_lock_after_owner_disappears
         test_service_stops_when_module_disabled_or_removing
+        test_guard_rejects_inactive_module_before_initial_repair
+        test_guard_stops_home_enforcement_after_disable_or_remove
+        test_action_rejects_disabled_or_removing_module
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
         test_action_bounds_stalled_package_query
