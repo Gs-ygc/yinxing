@@ -738,6 +738,13 @@ release_home_evidence_after_check() {
         safe|exact) ;;
         *) return 1 ;;
     esac
+    if ! release_retry_state="$(read_marker_line "$HOME_STATE_MARKER")"; then
+        return 1
+    fi
+    case "$release_retry_state" in
+        owned|pending\|*) ;;
+        *) return 1 ;;
+    esac
     if ! release_before_holder="$(read_home_role_holder)"; then
         log_event "uninstall_home_release_holder_query_failed"
         return 1
@@ -750,21 +757,35 @@ release_home_evidence_after_check() {
         home_resolver_matches_holder "$release_expected_holder" || return 1
     fi
     if ! write_home_takeover_state released; then
+        write_home_takeover_state "$release_retry_state" || \
+            log_event "uninstall_home_release_state_restore_failed"
         return 1
     fi
     if ! release_after_holder="$(read_home_role_holder)" || \
         [ "$release_after_holder" != "$release_before_holder" ]; then
         log_event "uninstall_home_release_holder_changed"
+        write_home_takeover_state "$release_retry_state" || \
+            log_event "uninstall_home_release_state_restore_failed"
         return 1
     fi
     if [ "$release_route_mode" = safe ]; then
-        home_route_safe_for_release || return 1
+        home_route_safe_for_release || {
+            write_home_takeover_state "$release_retry_state" || \
+                log_event "uninstall_home_release_state_restore_failed"
+            return 1
+        }
     else
-        home_resolver_matches_holder "$release_expected_holder" || return 1
+        home_resolver_matches_holder "$release_expected_holder" || {
+            write_home_takeover_state "$release_retry_state" || \
+                log_event "uninstall_home_release_state_restore_failed"
+            return 1
+        }
     fi
     if ! release_after_route_holder="$(read_home_role_holder)" || \
         [ "$release_after_route_holder" != "$release_before_holder" ]; then
         log_event "uninstall_home_release_holder_changed_after_route"
+        write_home_takeover_state "$release_retry_state" || \
+            log_event "uninstall_home_release_state_restore_failed"
         return 1
     fi
     clear_home_evidence

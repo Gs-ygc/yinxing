@@ -1200,7 +1200,7 @@ home_release_evidence_locked() {
         return 1
     fi
     if [ "$release_clear_evidence" = yes ]; then
-        clear_released_home_evidence
+        clear_released_home_evidence || return 1
     fi
     return 0
 }
@@ -1714,7 +1714,13 @@ repair_home_role_locked() {
         log_event "home_route_unconfirmed"
         return 1
     fi
-    ensure_owned_home_route_locked || return 1
+    if ! ensure_owned_home_route_locked; then
+        if ! module_is_active; then
+            rollback_home_after_inactive_takeover || \
+                log_event "home_role_inactive_rollback_failed"
+        fi
+        return 1
+    fi
     if ! module_is_active; then
         rollback_home_after_inactive_takeover || \
             log_event "home_role_inactive_rollback_failed"
