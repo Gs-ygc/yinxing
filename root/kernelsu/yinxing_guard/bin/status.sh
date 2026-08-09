@@ -122,6 +122,13 @@ accessibility_state() {
             if [ "$enabled_state" = "1" ]; then
                 case "$(accessibility_service_binding_state)" in
                     crashed|unbound) printf 'stale\n' ;;
+                    binding)
+                        if accessibility_binding_stall_is_persistent; then
+                            printf 'stale\n'
+                        else
+                            printf 'enabled\n'
+                        fi
+                        ;;
                     *) printf 'enabled\n' ;;
                 esac
             else

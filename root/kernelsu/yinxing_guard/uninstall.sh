@@ -28,6 +28,8 @@ rm -f \
     "$STATE_DIR/last_repair" \
     "$STATE_DIR/last_repair.tmp."* \
     "$STATE_DIR/accessibility_transaction.tmp."* \
+    "$STATE_DIR/accessibility_binding_stall" \
+    "$STATE_DIR/accessibility_binding_stall.tmp."* \
     "$STATE_DIR/doze_added_by_module.tmp."* \
     "$STATE_DIR/home_previous_holder.tmp."* \
     "$STATE_DIR/home_takeover_state.tmp."* || uninstall_status=1

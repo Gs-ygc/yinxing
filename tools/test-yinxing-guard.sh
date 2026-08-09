@@ -1866,6 +1866,7 @@ test_binding_stall_rebinds_once_at_threshold() {
 
 test_binding_stall_resets_observation_after_unresolved_rebind() {
     prepare_binding_stall_fixture
+    mkdir -p "$TEST_ROOT/state"
     printf 'binding|fixture-boot|0|1\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     : > "$CALLS"
     repair_accessibility || fail "observation after unresolved rebind should remain non-fatal"
@@ -1879,14 +1880,15 @@ test_binding_stall_resets_observation_after_unresolved_rebind() {
 
 test_binding_stall_stops_after_maximum_rebinds() {
     prepare_binding_stall_fixture
-    printf 'binding|fixture-boot|0|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
+    mkdir -p "$TEST_ROOT/state"
+    printf 'binding|fixture-boot|1|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     : > "$CALLS"
     if repair_accessibility; then
         fail "binding stall at the retry budget should fail closed"
     fi
     assert_not_contains "$CALLS" \
         "settings --user 0 put secure enabled_accessibility_services"
-    assert_equals "binding|fixture-boot|1|2" \
+    assert_equals "binding|fixture-boot|2|2" \
         "$(tr -d '\n' < "$ACCESSIBILITY_BINDING_STALL_MARKER")" \
         "maxed binding evidence should remain retry-budgeted"
     pass "binding stall stops after maximum rebinds"
@@ -1894,6 +1896,7 @@ test_binding_stall_stops_after_maximum_rebinds() {
 
 test_binding_stall_resets_budget_on_new_boot() {
     prepare_binding_stall_fixture
+    mkdir -p "$TEST_ROOT/state"
     printf 'binding|fixture-boot|2|2\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     printf 'next-boot\n' > "$TEST_ROOT/boot_id"
     repair_accessibility || fail "new boot should reset binding stall evidence"
@@ -1907,6 +1910,7 @@ test_binding_stall_resets_budget_on_new_boot() {
 
 test_binding_stall_clears_when_bound() {
     prepare_binding_stall_fixture
+    mkdir -p "$TEST_ROOT/state"
     printf 'binding|fixture-boot|2|1\n' > "$ACCESSIBILITY_BINDING_STALL_MARKER"
     cat > "$TEST_ROOT/accessibility_dump" <<EOF
 User state[
