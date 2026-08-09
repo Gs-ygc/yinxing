@@ -7,6 +7,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import android.view.accessibility.AccessibilityEvent
 import androidx.test.core.app.ApplicationProvider
+import com.yinxing.launcher.common.root.RootHomeLauncher
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import com.yinxing.launcher.feature.home.MainActivity
@@ -88,6 +89,68 @@ class KioskLauncherGuardTest {
     }
 
     @Test
+    fun newerUserAppWindowSuppressesStaleLauncherRecovery() = runTest {
+        val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
+        val service = controller.get()
+        val rootLauncher = RecordingRootHomeLauncher()
+        LauncherPreferences.getInstance(service).setKioskModeEnabled(true)
+        val guard = newGuard(service, rootLauncher, this)
+        guard.init()
+
+        assertTrue(guard.onWindowStateChanged(SYSTEM_HOME_PACKAGE, "Launcher"))
+        assertFalse(guard.onWindowStateChanged("com.example.user", "UserActivity"))
+        advanceTimeBy(450L)
+        runCurrent()
+
+        assertNull(shadowOf(service).nextStartedActivity)
+        assertEquals(0, rootLauncher.calls)
+        guard.shutdown()
+        controller.destroy()
+    }
+
+    @Test
+    fun rootHomeFallbackRunsOnceAfterNormalRecoveryStillShowsLauncher() = runTest {
+        val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
+        val service = controller.get()
+        val rootLauncher = RecordingRootHomeLauncher()
+        LauncherPreferences.getInstance(service).setKioskModeEnabled(true)
+        val guard = newGuard(service, rootLauncher, this)
+        guard.init()
+
+        assertTrue(guard.onWindowStateChanged(SYSTEM_HOME_PACKAGE, "Launcher"))
+        advanceTimeBy(450L + 350L + 600L)
+        runCurrent()
+
+        assertEquals(1, rootLauncher.calls)
+        advanceTimeBy(2_000L)
+        runCurrent()
+        assertEquals(1, rootLauncher.calls)
+
+        guard.shutdown()
+        controller.destroy()
+    }
+
+    @Test
+    fun shutdownCancelsPendingRootHomeFallback() = runTest {
+        val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
+        val service = controller.get()
+        val rootLauncher = RecordingRootHomeLauncher()
+        LauncherPreferences.getInstance(service).setKioskModeEnabled(true)
+        val guard = newGuard(service, rootLauncher, this)
+        guard.init()
+
+        assertTrue(guard.onWindowStateChanged(SYSTEM_HOME_PACKAGE, "Launcher"))
+        advanceTimeBy(450L + 350L)
+        runCurrent()
+        guard.shutdown()
+        advanceTimeBy(600L)
+        runCurrent()
+
+        assertEquals(0, rootLauncher.calls)
+        controller.destroy()
+    }
+
+    @Test
     fun serviceIsNotPublishedBeforeAccessibilityConnectionIsReady() {
         val controller = Robolectric.buildService(SelectToSpeakService::class.java).create()
 
@@ -127,6 +190,27 @@ class KioskLauncherGuardTest {
         val field = LauncherPreferences::class.java.getDeclaredField("instance")
         field.isAccessible = true
         field.set(null, null)
+    }
+
+    private fun newGuard(
+        service: SelectToSpeakService,
+        rootHomeLauncher: RootHomeLauncher,
+        scope: kotlinx.coroutines.CoroutineScope
+    ): KioskLauncherGuard = KioskLauncherGuard(
+        service = service,
+        scope = scope,
+        launcherActivityClass = MainActivity::class.java,
+        activeSession = { false },
+        rootHomeLauncher = rootHomeLauncher
+    )
+
+    private class RecordingRootHomeLauncher : RootHomeLauncher {
+        var calls = 0
+
+        override suspend fun launchHome(): Boolean {
+            calls += 1
+            return true
+        }
     }
 
     private companion object {

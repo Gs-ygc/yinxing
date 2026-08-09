@@ -10,8 +10,11 @@ import android.os.Bundle
 import androidx.annotation.MainThread
 import androidx.annotation.RequiresApi
 import com.yinxing.launcher.automation.wechat.util.AccessibilityUtil
+import com.yinxing.launcher.common.root.RootHomeLauncher
+import com.yinxing.launcher.common.root.SuRootHomeLauncher
 import com.yinxing.launcher.common.util.DebugLog
 import com.yinxing.launcher.data.home.LauncherPreferences
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -38,13 +41,15 @@ internal class KioskLauncherGuard(
     private val service: AccessibilityService,
     private val scope: CoroutineScope,
     private val launcherActivityClass: Class<*>,
-    private val activeSession: () -> Boolean
+    private val activeSession: () -> Boolean,
+    private val rootHomeLauncher: RootHomeLauncher = SuRootHomeLauncher()
 ) {
     private companion object {
         private const val TAG = "KioskLauncherGuard"
         private const val LAUNCHER_STATE_SETTLE_DELAY_MS = 450L
         private const val HIBOARD_OVERVIEW_SUPPRESS_WINDOW_MS = 1500L
         private const val LAUNCHER_RETRY_DELAY_MS = 350L
+        private const val ROOT_HOME_FALLBACK_DELAY_MS = 600L
         private const val PKG_BBK_LAUNCHER = "com.bbk.launcher2"
         private const val PKG_VIVO_HIBOARD = "com.vivo.hiboard"
         private const val OVERVIEW_PANEL_ID = "com.vivo.recents:id/overview_panel2"
@@ -56,10 +61,14 @@ internal class KioskLauncherGuard(
     private var lastLauncherOverviewAt = 0L
     private var bringBackJob: Job? = null
     private var retryJob: Job? = null
+    private var rootFallbackJob: Job? = null
+    private var rootFallbackGeneration: Long? = null
+    private var latestWindowPackage: String? = null
     private val callbackGeneration = AutomationCallbackGeneration()
 
     fun init() {
         cancelPendingConfirm()
+        latestWindowPackage = null
         systemLauncherPackages = resolveSystemLauncherPackages()
         defaultLauncherPackage = resolveDefaultLauncherPackage()
     }
@@ -68,6 +77,12 @@ internal class KioskLauncherGuard(
      * @return true 表示当前事件是"桌面前台"事件，已被本 Guard 处理，调用方不应再处理。
      */
     fun onWindowStateChanged(pkg: String, className: String?): Boolean {
+        if (!isTransientWindowPackage(pkg)) {
+            latestWindowPackage = pkg
+            if (pkg !in systemLauncherPackages) {
+                cancelRootFallback()
+            }
+        }
         if (shouldObserveLauncherForeground(pkg)) {
             scheduleLauncherBringBackConfirmation(triggerPkg = pkg, triggerClassName = className)
             return true
@@ -80,6 +95,7 @@ internal class KioskLauncherGuard(
 
     fun shutdown() {
         cancelPendingConfirm()
+        latestWindowPackage = null
     }
 
     private fun cancelPendingConfirm() {
@@ -88,7 +104,38 @@ internal class KioskLauncherGuard(
         bringBackJob = null
         retryJob?.cancel()
         retryJob = null
+        cancelRootFallback()
     }
+
+    private fun cancelRootFallback() {
+        rootFallbackJob?.cancel()
+        rootFallbackJob = null
+        rootFallbackGeneration = null
+    }
+
+    private fun isTransientWindowPackage(pkg: String): Boolean {
+        return pkg == "android" ||
+            pkg == "com.android.systemui" ||
+            pkg.contains("inputmethod", ignoreCase = true) ||
+            pkg.contains("permissioncontroller", ignoreCase = true)
+    }
+
+    private fun readActiveWindow(): ActiveWindow {
+        val root = service.rootInActiveWindow ?: return ActiveWindow()
+        return try {
+            ActiveWindow(
+                packageName = root.packageName?.toString(),
+                className = root.className?.toString()
+            )
+        } finally {
+            AccessibilityUtil.safeRecycle(root)
+        }
+    }
+
+    private data class ActiveWindow(
+        val packageName: String? = null,
+        val className: String? = null
+    )
 
     private fun shouldObserveLauncherForeground(pkg: String): Boolean {
         if (!LauncherPreferences.getInstance(service).isKioskModeEnabled()) return false
@@ -109,10 +156,9 @@ internal class KioskLauncherGuard(
             if (!LauncherPreferences.getInstance(service).isKioskModeEnabled()) return@launch
             if (activeSession()) return@launch
 
-            val activeRoot = service.rootInActiveWindow
-            val activePkg = activeRoot?.packageName?.toString() ?: triggerPkg
-            val activeClassName = activeRoot?.className?.toString()
-            AccessibilityUtil.safeRecycle(activeRoot)
+            val activeWindow = readActiveWindow()
+            val activePkg = activeWindow.packageName ?: latestWindowPackage ?: triggerPkg
+            val activeClassName = activeWindow.className
 
             val effectiveClassName = if (activePkg == triggerPkg) {
                 triggerClassName ?: activeClassName
@@ -234,12 +280,7 @@ internal class KioskLauncherGuard(
             retryJob = scope.launch {
                 delay(LAUNCHER_RETRY_DELAY_MS)
                 if (!canExecuteRecovery(generation)) return@launch
-                val activeRoot = service.rootInActiveWindow
-                val activePackage = try {
-                    activeRoot?.packageName?.toString()
-                } finally {
-                    AccessibilityUtil.safeRecycle(activeRoot)
-                }
+                val activePackage = readActiveWindow().packageName ?: latestWindowPackage
                 if (!canExecuteRecovery(generation)) return@launch
                 if (activePackage != null && activePackage in systemLauncherPackages) {
                     DebugLog.d(TAG) { "bringLauncherToFront: retry after settle, activePackage=$activePackage" }
@@ -251,6 +292,7 @@ internal class KioskLauncherGuard(
                             trySendLauncherPendingIntent(intent, source = "retryPendingIntent")
                         }
                     }
+                    scheduleRootHomeFallback(generation)
                 }
                 if (callbackGeneration.isCurrent(generation)) {
                     retryJob = null
@@ -262,6 +304,36 @@ internal class KioskLauncherGuard(
         if (!canExecuteRecovery(generation)) return
         val homeOk = service.performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
         DebugLog.d(TAG) { "bringLauncherToFront: fallback globalHome=$homeOk" }
+        scheduleRootHomeFallback(generation)
+    }
+
+    private fun scheduleRootHomeFallback(generation: Long) {
+        if (!canExecuteRecovery(generation)) return
+        if (rootFallbackGeneration == generation) return
+        val activePackage = readActiveWindow().packageName ?: latestWindowPackage
+        if (activePackage == null || activePackage !in systemLauncherPackages) return
+
+        rootFallbackGeneration = generation
+        rootFallbackJob = scope.launch {
+            delay(ROOT_HOME_FALLBACK_DELAY_MS)
+            if (!canExecuteRecovery(generation)) return@launch
+            val settledPackage = readActiveWindow().packageName ?: latestWindowPackage
+            if (settledPackage == null || settledPackage !in systemLauncherPackages) return@launch
+            val launched = try {
+                rootHomeLauncher.launchHome()
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                DebugLog.w(TAG, "root kiosk home fallback failed error=${error.message}")
+                false
+            }
+            DebugLog.d(TAG) {
+                "root kiosk home fallback package=$settledPackage launched=$launched"
+            }
+            if (callbackGeneration.isCurrent(generation)) {
+                rootFallbackJob = null
+            }
+        }
     }
 
     private fun canExecuteRecovery(generation: Long): Boolean {
