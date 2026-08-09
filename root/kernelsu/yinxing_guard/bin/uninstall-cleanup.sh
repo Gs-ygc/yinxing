@@ -9,8 +9,11 @@ SELF_PATH="$0"
 MODULE_DIR="${YINXING_GUARD_TEST_MODULE_DIR:-/data/adb/modules/yinxing_guard}"
 GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
 case "$GUARD_COMMAND_TIMEOUT_SECONDS" in
-    ''|*[!0-9]*|0) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
+    ''|*[!0-9]*) GUARD_COMMAND_TIMEOUT_SECONDS=2 ;;
 esac
+if ! [ "$GUARD_COMMAND_TIMEOUT_SECONDS" -gt 0 ] 2>/dev/null; then
+    GUARD_COMMAND_TIMEOUT_SECONDS=2
+fi
 GUARD_BUSYBOX_BIN="${YINXING_GUARD_BUSYBOX_BIN:-/data/adb/ksu/bin/busybox}"
 if [ ! -x "$GUARD_BUSYBOX_BIN" ]; then
     GUARD_BUSYBOX_BIN="$(command -v busybox 2>/dev/null || true)"
@@ -20,12 +23,17 @@ run_guard_command() {
     [ -n "$GUARD_BUSYBOX_BIN" ] || return 127
 
     "$GUARD_BUSYBOX_BIN" setsid \
-        "$GUARD_BUSYBOX_BIN" timeout -k 1 "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@" &
-    guard_command_runner_pid=$!
-    wait "$guard_command_runner_pid"
-    guard_command_status=$?
-    "$GUARD_BUSYBOX_BIN" kill -KILL "-$guard_command_runner_pid" >/dev/null 2>&1 || true
-    return "$guard_command_status"
+        "$GUARD_BUSYBOX_BIN" sh -c '
+            guard_busybox_bin=$1
+            guard_timeout_seconds=$2
+            shift 2
+            "$guard_busybox_bin" timeout -k 1 "$guard_timeout_seconds" "$@"
+            guard_command_status=$?
+            if [ "$guard_command_status" -ne 0 ]; then
+                "$guard_busybox_bin" kill -KILL "-$$" >/dev/null 2>&1 || true
+            fi
+            exit "$guard_command_status"
+        ' yinxing-guard-command "$GUARD_BUSYBOX_BIN" "$GUARD_COMMAND_TIMEOUT_SECONDS" "$@"
 }
 
 log_event() {
