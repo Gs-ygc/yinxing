@@ -18,12 +18,11 @@ class FloatingStatusView(private val context: Context) {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var floatingView: View? = null
     private var isShowing = false
-    private var onCancelLongClick: (() -> Unit)? = null
+    private var onCancelRequest: (() -> Unit)? = null
 
     fun setOnCancelListener(listener: () -> Unit) {
-        onCancelLongClick = listener
-        // 如果悬浮窗已经显示，绑定一下
-        floatingView?.let { bindCancelButton(it) }
+        onCancelRequest = listener
+        floatingView?.let(::bindCancelAction)
     }
 
     fun show(message: String, stepLabel: String? = null) {
@@ -59,7 +58,7 @@ class FloatingStatusView(private val context: Context) {
                 }
 
                 bindText(message, stepLabel)
-                floatingView?.let { bindCancelButton(it) }
+                floatingView?.let(::bindCancelAction)
                 windowManager.addView(floatingView, params)
                 isShowing = true
             } catch (_: Exception) {
@@ -89,24 +88,26 @@ class FloatingStatusView(private val context: Context) {
         }
     }
 
-    private fun bindCancelButton(view: View) {
-        val cancelBtn = view.findViewById<TextView>(R.id.tv_cancel) ?: return
-        cancelBtn.setOnLongClickListener {
-            onCancelLongClick?.invoke()
-            true
+    internal fun bindCancelAction(view: View) {
+        view.findViewById<View>(R.id.tv_cancel)?.setOnClickListener {
+            onCancelRequest?.invoke()
         }
     }
 
     private fun bindText(message: String, stepLabel: String?) {
         val view = floatingView ?: return
-        view.findViewById<TextView>(R.id.tv_status)?.text = message
+        bindText(view, message, stepLabel)
+    }
+
+    internal fun bindText(view: View, title: String, status: String?) {
+        view.findViewById<TextView>(R.id.tv_status)?.text = title
         val stepView = view.findViewById<TextView>(R.id.tv_status_step)
-        if (stepLabel.isNullOrBlank()) {
+        if (status.isNullOrBlank()) {
             stepView.visibility = View.GONE
             stepView.text = ""
         } else {
             stepView.visibility = View.VISIBLE
-            stepView.text = stepLabel
+            stepView.text = status
         }
     }
 }
