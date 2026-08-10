@@ -33,7 +33,7 @@
 - Produces: `internal fun bindCancelAction(view: View)` for listener binding without adding a WindowManager view in tests.
 - Produces: `internal fun bindText(view: View, title: String, status: String?)` for deterministic two-line rendering.
 
-- [ ] **Step 1: Write failing overlay layout and interaction tests**
+- [x] **Step 1: Write failing overlay layout and interaction tests**
 
 Create a Robolectric test that inflates `floating_status` and requires the elder-facing contract:
 
@@ -91,7 +91,7 @@ class FloatingStatusViewTest {
 
 The local `dp` helper multiplies by `resources.displayMetrics.density` and rounds to `Int`.
 
-- [ ] **Step 2: Run Task 1 test and confirm RED**
+- [x] **Step 2: Run Task 1 test and confirm RED**
 
 Run:
 
@@ -104,7 +104,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: test compilation fails because `bindCancelAction` and the view-accepting `bindText` overload do not exist. The current layout also contains `x`, has a 36dp target, and lacks the new resources.
 
-- [ ] **Step 3: Implement the explicit action and testable binding boundary**
+- [x] **Step 3: Implement the explicit action and testable binding boundary**
 
 Add exact resources:
 
@@ -142,7 +142,7 @@ internal fun bindText(view: View, title: String, status: String?) {
 
 Keep private wrappers that use `floatingView ?: return`, so the public `show` and `updateMessage` signatures remain unchanged.
 
-- [ ] **Step 4: Run Task 1 GREEN and commit**
+- [x] **Step 4: Run Task 1 GREEN and commit**
 
 Run the Step 2 command, then:
 
@@ -167,7 +167,7 @@ git commit -m "feat: make video takeover easy to cancel"
 - Produces: `internal fun Context.videoCallOverlayTitle(rawContactName: String): String`.
 - Consumes: unchanged `FloatingStatusView.show(title: String, stepLabel: String?)` and `updateMessage(title: String, stepLabel: String?)` signatures.
 
-- [ ] **Step 1: Write failing contact-title tests**
+- [x] **Step 1: Write failing contact-title tests**
 
 ```kotlin
 @RunWith(RobolectricTestRunner::class)
@@ -187,7 +187,7 @@ class VideoCallOverlayCopyTest {
 }
 ```
 
-- [ ] **Step 2: Run Task 2 test and confirm RED**
+- [x] **Step 2: Run Task 2 test and confirm RED**
 
 Run:
 
@@ -200,7 +200,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: compilation fails because `videoCallOverlayTitle` is missing.
 
-- [ ] **Step 3: Implement localized title formatting and service wiring**
+- [x] **Step 3: Implement localized title formatting and service wiring**
 
 Add:
 
@@ -235,7 +235,7 @@ floatingView?.updateMessage(
 
 At successful completion use the same title with `视频通话已发起` as status. Remove the now-unused `VideoCallSession.stepLabel()` function. Preserve `stepNumber()` and `stepName()` because logs and metrics still consume them.
 
-- [ ] **Step 4: Run copy, overlay, and service lifecycle tests GREEN, then commit**
+- [x] **Step 4: Run copy, overlay, and service lifecycle tests GREEN, then commit**
 
 Run:
 
@@ -272,7 +272,7 @@ git commit -m "feat: keep video contact visible during takeover"
 - Removes: `VideoCallContactAdapter.setAnimationsEnabled`, `animationsEnabled`, `animatedIds`, and `animateInIfFirstShow`.
 - Preserves: `setLowPerformanceMode(enabled: Boolean)` and every contact/action callback.
 
-- [ ] **Step 1: Write failing no-animation tests**
+- [x] **Step 1: Write failing no-animation tests**
 
 Add to `VideoCallActivitySmokeTest`:
 
@@ -292,7 +292,7 @@ assertEquals(1f, holder.itemView.alpha, 0f)
 assertEquals(0f, holder.itemView.translationY, 0f)
 ```
 
-- [ ] **Step 2: Run Task 3 tests and confirm RED**
+- [x] **Step 2: Run Task 3 tests and confirm RED**
 
 Run:
 
@@ -306,7 +306,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: the Activity exposes `DefaultItemAnimator`, and a newly bound normal-performance row starts with zero alpha/positive translation.
 
-- [ ] **Step 3: Remove presentation delays without changing image performance**
+- [x] **Step 3: Remove presentation delays without changing image performance**
 
 In `VideoCallActivity.applyPerformanceMode`, keep cache sizing and low-performance propagation, but always set:
 
@@ -327,7 +327,7 @@ override fun onBindViewHolder(holder: ViewHolder, position: Int) {
 
 Keep thumbnail cancellation and all call/action accessibility binding unchanged.
 
-- [ ] **Step 4: Run Task 3 and all video tests GREEN, then commit**
+- [x] **Step 4: Run Task 3 and all video tests GREEN, then commit**
 
 Run:
 
@@ -363,7 +363,7 @@ git commit -m "perf: make video contacts immediately actionable"
 - Produces: `out/release/yinxing-1.10.0-root-preview.23-debug.apk` and `out/release/SHA256SUMS.txt`.
 - Produces: GitHub prerelease tag `v1.10.0-root-preview.23` with no new KernelSU module asset.
 
-- [ ] **Step 1: Bump exact Preview 23 metadata and add acceptance notes**
+- [x] **Step 1: Bump exact Preview 23 metadata and add acceptance notes**
 
 Set:
 
@@ -374,7 +374,7 @@ versionName = "1.10.0-root-preview.23"
 
 Write release notes covering the explicit cancel action, persistent contact/status, removed video-list animation, unchanged automation/Root/BusyBox boundary, OnePlus 15 acceptance sequence, Preview 22 rollback URL, and exact local verification evidence.
 
-- [ ] **Step 2: Run the focused suite and changed-boundary checks**
+- [x] **Step 2: Run the focused suite and changed-boundary checks**
 
 Run all new and directly affected tests. Require:
 
@@ -392,7 +392,7 @@ rg -n 'setOnLongClickListener|第[0-9].*共|stepLabel\(' \
 
 Review `v1.10.0-root-preview.22..HEAD` for cancel listener lifecycle, overlay clipping at large font, WindowManager touch/focus behavior, stale-session progress, RecyclerView recycling, accessibility semantics, and test weakness. Resolve every Critical/Important finding and rerun affected tests.
 
-- [ ] **Step 4: Run final forced Android verification and classify lint**
+- [x] **Step 4: Run final forced Android verification and classify lint**
 
 Run in isolation:
 
@@ -405,7 +405,7 @@ Run in isolation:
 
 Require all tasks successful, all JUnit XML failures/errors/skips zero, both APKs present, and fresh test counts recorded. Then run `:app:lintDebug`; classify the existing `RootCommandRunner.kt` minSdk findings separately and require no new error in a Preview 23 changed file.
 
-- [ ] **Step 5: Verify candidate metadata, signature, hash, and device boundary**
+- [x] **Step 5: Verify candidate metadata, signature, hash, and device boundary**
 
 Use SDK `aapt2` and `apksigner` to require package `com.yinxing.launcher`, versionCode `39`, versionName `1.10.0-root-preview.23`, minSdk `24`, targetSdk `36`, and v2 Debug signing. Require `adb devices` evidence before making any device claim.
 
