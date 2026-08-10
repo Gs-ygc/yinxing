@@ -259,7 +259,7 @@
     <string name="settings_root_hub_summary_degraded">无障碍、桌面或保活有一项需要修复</string>
     <string name="settings_root_hub_summary_healthy">桌面、保活、无障碍恢复和守护进程都在线</string>
     <string name="settings_root_entry_status_title">当前健康状态</string>
-    <string name="settings_root_entry_status_summary">模块 %1$s · 守护 %2$s · 无障碍 %3$s · 桌面 %4$s · 省电 %5$s · 清理 %6$s · 上次修复 %7$s</string>
+    <string name="settings_root_entry_status_summary">模块 %1$s · 守护 %2$s · 无障碍 %3$s · 桌面 %4$s · 前台确认 %5$s · 省电 %6$s · 清理 %7$s · 上次修复 %8$s</string>
     <string name="settings_root_entry_recover_title">立即修复并复查</string>
     <string name="settings_root_entry_recover_summary">通过 KernelSU 固定入口修复无障碍、保活和桌面</string>
     <string name="settings_root_entry_check">检查</string>

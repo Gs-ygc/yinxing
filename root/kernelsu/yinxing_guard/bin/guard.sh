@@ -10,6 +10,7 @@ HEALTH_INTERVAL_SECONDS=${YINXING_GUARD_INTERVAL_SECONDS:-60}
 MAX_CYCLES=${YINXING_GUARD_MAX_CYCLES:-0}
 BOOT_ID_FILE=${YINXING_GUARD_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}
 LOCK_ATTEMPTS=${YINXING_GUARD_LOCK_ATTEMPTS:-5}
+HOME_LAUNCH_MAX_ATTEMPTS=${YINXING_GUARD_HOME_LAUNCH_MAX_ATTEMPTS:-2}
 
 number_or_default() {
     value="$1"
@@ -26,6 +27,10 @@ HEALTH_INTERVAL_SECONDS="$(number_or_default "$HEALTH_INTERVAL_SECONDS" 60)"
 MAX_CYCLES="$(number_or_default "$MAX_CYCLES" 0)"
 LOCK_ATTEMPTS="$(number_or_default "$LOCK_ATTEMPTS" 5)"
 [ "$LOCK_ATTEMPTS" -gt 0 ] || LOCK_ATTEMPTS=5
+case "$HOME_LAUNCH_MAX_ATTEMPTS" in
+    1|2) ;;
+    *) HOME_LAUNCH_MAX_ATTEMPTS=2 ;;
+esac
 
 read_boot_id() {
     read_boot_id_from "$BOOT_ID_FILE"
@@ -209,11 +214,41 @@ run_health_cycle() {
         log_event "guard_module_inactive_after_repair"
         return 2
     fi
-    record_repair_result ok || true
-    if module_is_active && [ "$HOME_LAUNCHED" -eq 0 ] && launch_home; then
-        HOME_LAUNCHED=1
+    if [ "$HOME_LAUNCHED" -eq 1 ]; then
+        record_repair_result ok || true
+        return 0
     fi
-    return 0
+    if [ "$HOME_LAUNCH_UNKNOWN" -eq 1 ]; then
+        record_repair_result failed || true
+        log_event "home_launch_retry_blocked_unknown"
+        return 1
+    fi
+    if [ "$HOME_LAUNCH_ATTEMPTS" -ge "$HOME_LAUNCH_MAX_ATTEMPTS" ]; then
+        record_repair_result failed || true
+        log_event "home_launch_retry_exhausted"
+        return 1
+    fi
+    HOME_LAUNCH_ATTEMPTS=$((HOME_LAUNCH_ATTEMPTS + 1))
+    launch_home
+    home_launch_status=$?
+    case "$home_launch_status" in
+        0)
+            HOME_LAUNCHED=1
+            record_repair_result ok || true
+            return 0
+            ;;
+        3)
+            HOME_LAUNCH_UNKNOWN=1
+            record_repair_result failed || true
+            log_event "home_launch_cycle_unverified"
+            return 1
+            ;;
+        *)
+            record_repair_result failed || true
+            log_event "home_launch_cycle_failed"
+            return 1
+            ;;
+    esac
 }
 
 module_is_active || exit 0
@@ -231,6 +266,8 @@ trap 'exit 143' INT TERM
 wait_for_boot || exit 1
 module_is_active || exit 0
 HOME_LAUNCHED=0
+HOME_LAUNCH_ATTEMPTS=0
+HOME_LAUNCH_UNKNOWN=0
 run_health_cycle
 
 cycles=0

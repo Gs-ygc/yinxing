@@ -2,118 +2,92 @@
 
 ## Goal
 
-Make the fixed Root Guard prove that the Yinxing HOME activity is the
-foreground activity after a Root launch. A successful \`am start\` exit status
-is only a dispatch acknowledgement; it is not evidence that ColorOS 16
-actually resumed the launcher.
+Make the fixed Root Guard prove that the Yinxing HOME activity reached the
+foreground after a Root launch. An `am start` exit status is only a dispatch
+acknowledgement; it is not evidence that ColorOS 16 resumed the launcher.
+
+## Decision
+
+The Settings screen itself is an activity in the Yinxing app. Sampling the
+live foreground from `status.sh` would therefore incorrectly report a healthy
+user who opens Settings, WeChat, or another app as a failed launcher. Preview
+17 instead records a boot-scoped postcondition at the time a Root launch is
+performed:
+
+- `home=owned|other|none|unknown` remains the HOME role and resolver result.
+- `home_foreground=verified|unverified|unknown` records the most recent Root
+  launch result for the current boot only.
+- `status.sh` reads that durable evidence but never invokes an activity dump,
+  so status remains observational and is not distorted by its caller.
+
+The public status protocol is schema 3. Schema 1 and schema 2 remain
+parseable by the new APK as degraded legacy data; only schema 3 with both
+`home=owned` and `home_foreground=verified` can be healthy.
 
 ## Scope and constraints
 
-- Target remains the managed OnePlus 15 China ColorOS 16 device, user 0, and
-  the existing KernelSU module.
-- The only new Android operation is the fixed, read-only diagnostic command
-  \`dumpsys activity activities\`, executed through the existing bounded
-  \`run_guard_command\` wrapper.
-- The APK Root allowlist remains the same three fixed, no-argument paths:
-  \`status.sh\`, \`action.sh\`, and \`kiosk-home.sh\`. No arbitrary shell,
-  arguments, coordinates, process killing, package input, component input, or
-  private ColorOS API is introduced.
-- Existing schema 2 is retained. The \`home\` field becomes \`owned\` only
-  when role ownership, resolver routing, and foreground confirmation all
-  agree. Older schema 1/2 APKs remain parseable; no new status line is added.
-- Unknown, failed, timed-out, empty, or malformed foreground output is
-  fail-closed. It never triggers an additional launch or a route mutation.
+- Target: managed OnePlus 15, China ColorOS 16, KernelSU, Root, Android user
+  0.
+- The only new Android operation is the fixed read-only command `dumpsys
+  activity activities`, invoked through the existing bounded
+  `run_guard_command` wrapper.
+- The APK Root allowlist remains exactly `status.sh`, `action.sh`, and
+  `kiosk-home.sh`, all fixed no-argument paths.
+- No arbitrary shell, coordinates, package names, components, process kills,
+  or private ColorOS API is exposed.
 
-## Alternatives considered
+## Foreground confirmation
 
-1. Keep treating \`am start\` exit code 0 as success. This leaves a
-   false-healthy path on OEMs that acknowledge the request but do not resume
-   the activity.
-2. Add a new public schema field. That would require a protocol migration and
-   leave older APKs unable to display the distinction.
-3. Add a fixed foreground probe behind the existing \`home\` state and verify
-   it after each launch (chosen). This closes the user-visible gap with one
-   bounded read-only command while preserving the existing APK contract.
+`read_home_foreground_activity_state()` accepts only explicit
+`mResumedActivity:` and `mFocusedActivity:` records. Each recognized record
+must contain exactly one syntactically valid Android component token. The only
+accepted target aliases are:
 
-## Foreground parser
+- `com.yinxing.launcher/.feature.home.MainActivity`
+- `com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity`
 
-\`read_home_foreground_state()\` runs exactly \`dumpsys activity activities\`
-and captures output with the existing command-status sentinel pattern. It
-scans only explicit \`mResumedActivity:\` and \`mFocusedActivity:\` records. A
-record is accepted as the target only when its component token is exactly the
-fixed \`com.yinxing.launcher/.feature.home.MainActivity\` (or the equivalent
-fully qualified class form). A known record for another component returns
-\`other\`. No recognized record, conflicting resumed/focused records, command
-failure, extra sentinel data, or malformed component returns \`unknown\`.
+Both records must agree after target normalization. Missing records, malformed
+tokens, duplicate fields, conflict, command failure, timeout, oversized
+output, and unrelated target text all become `unknown`. A known valid other
+component becomes `other`.
 
-The parser does not search arbitrary text for the package name. It never
-accepts a target mention in a task history, stack trace, or unrelated activity
-record. If both fields are present they must agree; a resumed target plus a
-focused non-target is \`unknown\`, not \`owned\`.
+`launch_home()` writes `unverified|<boot-id>` before the fixed `am start`,
+then confirms the activity up to three times with a one-second default delay.
+It writes `verified|<boot-id>` only after the target postcondition succeeds.
+The marker is a regular non-symlink file, exact single-line canonical data,
+mode 0600, atomically published, read back, and fsynced through the existing
+Root command wrapper. Existing malformed or nonregular evidence is never
+overwritten.
 
-## Launch and retry flow
+## Failure behavior
 
-\`launch_home()\` keeps the existing module-active check and fixed
-\`am start\` invocation. After dispatch it polls the foreground probe at most
-three times with a one-second interval (defaults are sanitized to positive
-bounded values).
+- `target`: `launch_home()` succeeds and the evidence becomes `verified`.
+- `other`: `launch_home()` returns a distinct failure. A Guard process may
+  make one later launch attempt, with at most two starts per process.
+- `unknown`: `launch_home()` returns a distinct failure and blocks more HOME
+  starts in that Guard process. A broken diagnostic cannot create a launch
+  storm.
+- `action.sh` records `last_repair=ok` only after confirmed launch success.
+  Any launch evidence failure records `last_repair=failed`.
 
-- \`target\`: log \`home_launch_verified\` and return success.
-- \`other\`: log \`home_launch_foreground_other\` and return failure. The Guard
-  may make one further launch attempt in a later health cycle, bounded to two
-  attempts per process.
-- \`unknown\`: log \`home_launch_unverified\` and return failure. The Guard
-  does not retry in the same process based only on unknown evidence, preventing
-  a diagnostic outage from causing a launch storm.
+The Root bridge budgets are 3 seconds for status, 15 seconds for the bounded
+Kiosk launch, and 20 seconds for explicit full recovery. These are finite
+bounds, not background execution grants.
 
-\`guard.sh\` sets \`HOME_LAUNCHED=1\` only after verified success. It tracks the
-bounded attempt count and never exceeds two \`am start\` calls for one process.
-\`action.sh\` also returns failure when the foreground postcondition is not
-verified, so it records \`last_repair=failed\` and cannot report a false
-healthy repair. Existing role/resolver transaction and rollback behavior is
-unchanged.
+## Lifecycle
 
-## Status behavior
+The foreground evidence has no rollback meaning. Both direct uninstall and
+the deferred standalone cleanup remove its file and temporary publications
+without changing the HOME role, resolver, Doze ownership, or accessibility
+settings. Existing HOME rollback evidence remains independent.
 
-\`status.sh\` keeps its nine schema-2 lines. When role and resolver identify
-Yinxing, it calls the read-only foreground probe:
+## Verification matrix
 
-- target -> \`home=owned\`;
-- known other -> \`home=other\`;
-- unknown/unavailable -> \`home=unknown\`.
-
-Non-Yinxing role holders keep the existing \`other\`/\`none\` behavior without
-a foreground query. The status path performs no writes and remains bounded by
-the existing command timeout.
-
-## Safety and lifecycle
-
-- The probe is diagnostic only; it never starts an arbitrary component and
-  never changes the HOME role or resolver.
-- Foreground confirmation is performed after module-active checks and after
-  \`am start\`; if the module is disabled or removed, the result is failure.
-- Existing uninstall cleanup, HOME ownership markers, accessibility
-  transactions, Doze ownership, and command allowlist semantics remain
-  unchanged. The foreground probe is not persisted as mutable state, so there
-  is no new marker to restore or delete.
-
-## Test matrix
-
-The host and standalone BusyBox harness will cover:
-
-1. Exact resumed target and exact focused target are accepted.
-2. Fully qualified target class is accepted; target text in unrelated output
-   is rejected.
-3. Known other foreground, missing records, conflicting records, malformed
-   output, command failure, and timeout are fail-closed.
-4. \`launch_home()\` requires the target postcondition and polls at most three
-   times.
-5. Guard retries one known-other launch failure but never exceeds two attempts;
-   unknown evidence does not create a retry storm.
-6. Status reports \`home=owned|other|unknown\` through the existing schema 2.
-7. Existing HOME resolver, accessibility, Doze, uninstall, lock, packaging,
-   APK, and UI parser regressions remain green in host and BusyBox modes.
-
-Preview 17 is ready for packaging only after shell syntax checks, the complete
-shell suite, the Android JVM suite, a forced Debug build, deterministic module
-packaging, APK metadata/signature checks, and fresh GitHub asset verification.
+The host and standalone BusyBox suite covers strict activity parsing,
+bounded dumpsys timeout, atomic and boot-scoped evidence, verified and
+unverified launch results, Guard retry limits, action status correctness,
+status non-probing behavior, and evidence cleanup. JVM tests cover schema 3,
+legacy parsing, healthy-state derivation, Settings summaries, and the new
+Kiosk timeout budget. Release verification additionally runs full shell,
+JVM, Debug build, deterministic module packaging, APK signature checks, and
+fresh GitHub asset download checks.

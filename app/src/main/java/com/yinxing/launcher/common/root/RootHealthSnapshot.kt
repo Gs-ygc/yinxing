@@ -15,6 +15,7 @@ internal data class RootHealthSnapshot(
     val guard: String = "unknown",
     val accessibility: String = "unknown",
     val home: String = "unknown",
+    val homeForeground: String = "unknown",
     val doze: String = "unknown",
     val cleanup: String = "unknown",
     val lastRepair: String = "unknown"
@@ -32,14 +33,16 @@ internal data class RootHealthSnapshot(
             "last_repair"
         )
         private val schemaTwoKeys = schemaOneKeys + "home"
-        private val allKeys = schemaTwoKeys
+        private val schemaThreeKeys = schemaTwoKeys + "home_foreground"
+        private val allKeys = schemaThreeKeys
         private val versionPattern = Regex("[A-Za-z0-9._-]{1,64}")
         private val allowedValues = mapOf(
-            "schema" to setOf("1", "2"),
+            "schema" to setOf("1", "2", "3"),
             "module" to setOf("active", "disabled", "removing", "missing"),
             "guard" to setOf("running", "stale", "missing", "unknown"),
             "accessibility" to setOf("enabled", "disabled", "missing", "stale", "unknown"),
             "home" to setOf("owned", "other", "none", "unknown"),
+            "home_foreground" to setOf("verified", "unverified", "unknown"),
             "doze" to setOf("owned", "present", "absent", "unknown"),
             "cleanup" to setOf("ready", "missing", "invalid"),
             "last_repair" to setOf("ok", "failed", "unknown")
@@ -77,6 +80,7 @@ internal data class RootHealthSnapshot(
             val expectedKeys = when (schema) {
                 "1" -> schemaOneKeys
                 "2" -> schemaTwoKeys
+                "3" -> schemaThreeKeys
                 else -> return null
             }
             if (values.keys != expectedKeys || !versionPattern.matches(values.getValue("version"))) {
@@ -90,16 +94,18 @@ internal data class RootHealthSnapshot(
             val guard = values.getValue("guard")
             val accessibility = values.getValue("accessibility")
             val home = values["home"] ?: "unknown"
+            val homeForeground = values["home_foreground"] ?: "unknown"
             val doze = values.getValue("doze")
             val cleanup = values.getValue("cleanup")
             val lastRepair = values.getValue("last_repair")
             val state = when {
                 module == "missing" -> RootHealthState.MODULE_MISSING
-                schema == "2" &&
+                schema == "3" &&
                     module == "active" &&
                     guard == "running" &&
                     accessibility == "enabled" &&
                     home == "owned" &&
+                    homeForeground == "verified" &&
                     doze in setOf("owned", "present") &&
                     cleanup == "ready" &&
                     lastRepair == "ok" -> RootHealthState.HEALTHY
@@ -113,6 +119,7 @@ internal data class RootHealthSnapshot(
                 guard = guard,
                 accessibility = accessibility,
                 home = home,
+                homeForeground = homeForeground,
                 doze = doze,
                 cleanup = cleanup,
                 lastRepair = lastRepair

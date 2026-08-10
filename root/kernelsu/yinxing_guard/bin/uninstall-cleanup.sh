@@ -7,7 +7,7 @@ HOME_ROLE_NAME="android.app.role.HOME"
 ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 LOG_TAG="YinxingGuard"
-MODULE_VERSION="1.10.0-root-preview.16"
+MODULE_VERSION="1.10.0-root-preview.17"
 MARKER="$STATE_DIR/doze_added_by_module"
 HOME_MARKER="$STATE_DIR/home_previous_holder"
 HOME_STATE_MARKER="$STATE_DIR/home_takeover_state"
@@ -93,6 +93,8 @@ cleanup_runtime_state() {
         "$STATE_DIR/accessibility_transaction.tmp."* \
         "$STATE_DIR/accessibility_binding_stall" \
         "$STATE_DIR/accessibility_binding_stall.tmp."* \
+        "$STATE_DIR/home_foreground_evidence" \
+        "$STATE_DIR/home_foreground_evidence.tmp."* \
         "$STATE_DIR/doze_added_by_module.tmp."* \
         "$STATE_DIR/home_previous_holder.tmp."* \
         "$STATE_DIR/home_takeover_state.tmp."* || runtime_cleanup_status=1

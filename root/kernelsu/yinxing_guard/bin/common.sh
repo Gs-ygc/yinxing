@@ -8,6 +8,7 @@ ANDROID_USER_ID="0"
 STATE_DIR="${YINXING_GUARD_STATE_DIR:-/data/adb/yinxing_guard}"
 HOME_PREVIOUS_HOLDER_MARKER="$STATE_DIR/home_previous_holder"
 HOME_TAKEOVER_STATE_MARKER="$STATE_DIR/home_takeover_state"
+HOME_FOREGROUND_EVIDENCE_MARKER="$STATE_DIR/home_foreground_evidence"
 HOME_TRANSACTION_LOCK_DIR="$STATE_DIR/home_transaction.lock"
 HOME_TRANSACTION_RECLAIM_DIR="$STATE_DIR/home_transaction.reclaim"
 ACCESSIBILITY_TRANSACTION_MARKER="$STATE_DIR/accessibility_transaction"
@@ -15,7 +16,7 @@ ACCESSIBILITY_BINDING_STALL_MARKER="$STATE_DIR/accessibility_binding_stall"
 DOZE_OWNERSHIP_MARKER="$STATE_DIR/doze_added_by_module"
 MODULE_STATE_DIR="${YINXING_GUARD_MODULE_STATE_DIR:-/data/adb/modules/yinxing_guard}"
 LOG_TAG="YinxingGuard"
-MODULE_VERSION="1.10.0-root-preview.16"
+MODULE_VERSION="1.10.0-root-preview.17"
 GUARD_OWNER_ACTIVE_STATUS=76
 CLEANUP_TARGET="${YINXING_GUARD_TEST_CLEANUP_TARGET:-/data/adb/boot-completed.d/yinxing-guard-uninstall-cleanup.sh}"
 GUARD_COMMAND_TIMEOUT_SECONDS="${YINXING_GUARD_COMMAND_TIMEOUT_SECONDS:-2}"
@@ -2440,6 +2441,257 @@ current_guard_boot_id() {
     sanitize_boot_id "$(read_boot_id_from "$boot_id_file")"
 }
 
+valid_home_foreground_evidence() {
+    home_foreground_evidence="$1"
+    case "$home_foreground_evidence" in
+        verified\|*|unverified\|*)
+            home_foreground_boot_id=${home_foreground_evidence#*|}
+            ;;
+        *)
+            return 1
+            ;;
+    esac
+    case "$home_foreground_boot_id" in
+        ''|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    [ "${#home_foreground_boot_id}" -le 128 ]
+}
+
+read_home_foreground_evidence() {
+    [ ! -L "$HOME_FOREGROUND_EVIDENCE_MARKER" ] && \
+        [ -f "$HOME_FOREGROUND_EVIDENCE_MARKER" ] || return 1
+    if ! home_foreground_output="$(
+        cat "$HOME_FOREGROUND_EVIDENCE_MARKER" 2>/dev/null
+        home_foreground_status=$?
+        printf '|'
+        exit "$home_foreground_status"
+    )"; then
+        return 1
+    fi
+    case "$home_foreground_output" in
+        *'|') home_foreground_output=${home_foreground_output%|} ;;
+        *) return 1 ;;
+    esac
+    home_foreground_line_feed='
+'
+    case "$home_foreground_output" in
+        *"$home_foreground_line_feed")
+            home_foreground_output=${home_foreground_output%"$home_foreground_line_feed"}
+            ;;
+        *) return 1 ;;
+    esac
+    case "$home_foreground_output" in
+        *"$home_foreground_line_feed"*) return 1 ;;
+    esac
+    valid_home_foreground_evidence "$home_foreground_output" || return 1
+    printf '%s\n' "$home_foreground_output"
+}
+
+home_foreground_evidence_state() {
+    if ! home_foreground_evidence="$(read_home_foreground_evidence)"; then
+        printf 'unknown\n'
+        return 0
+    fi
+    home_foreground_boot_id=${home_foreground_evidence#*|}
+    if [ "$home_foreground_boot_id" != "$(current_guard_boot_id)" ]; then
+        printf 'unknown\n'
+        return 0
+    fi
+    printf '%s\n' "${home_foreground_evidence%%|*}"
+}
+
+write_home_foreground_evidence() {
+    home_foreground_state="$1"
+    case "$home_foreground_state" in
+        verified|unverified) ;;
+        *) return 1 ;;
+    esac
+    ensure_state_dir || return 1
+    home_foreground_value="$home_foreground_state|$(current_guard_boot_id)"
+    valid_home_foreground_evidence "$home_foreground_value" || return 1
+    if [ -e "$HOME_FOREGROUND_EVIDENCE_MARKER" ] || \
+        [ -L "$HOME_FOREGROUND_EVIDENCE_MARKER" ]; then
+        if [ -L "$HOME_FOREGROUND_EVIDENCE_MARKER" ] || \
+            [ ! -f "$HOME_FOREGROUND_EVIDENCE_MARKER" ] || \
+            ! read_home_foreground_evidence >/dev/null; then
+            log_event "home_foreground_evidence_invalid"
+            return 1
+        fi
+    fi
+    home_foreground_tmp="$HOME_FOREGROUND_EVIDENCE_MARKER.tmp.$$"
+    rm -f "$home_foreground_tmp" 2>/dev/null || true
+    if ! { printf '%s\n' "$home_foreground_value" > "$home_foreground_tmp"; } 2>/dev/null || \
+        ! chmod 0600 "$home_foreground_tmp" 2>/dev/null || \
+        ! mv -f "$home_foreground_tmp" "$HOME_FOREGROUND_EVIDENCE_MARKER" 2>/dev/null; then
+        rm -f "$home_foreground_tmp" 2>/dev/null || true
+        log_event "home_foreground_evidence_write_failed"
+        return 1
+    fi
+    if ! home_foreground_published="$(read_home_foreground_evidence)" || \
+        [ "$home_foreground_published" != "$home_foreground_value" ]; then
+        log_event "home_foreground_evidence_changed"
+        return 1
+    fi
+    if ! run_guard_command "$HOME_MARKER_SYNC_COMMAND" -f \
+        "$HOME_FOREGROUND_EVIDENCE_MARKER" "$STATE_DIR" >/dev/null 2>&1; then
+        log_event "home_foreground_evidence_sync_failed"
+        return 1
+    fi
+    if ! home_foreground_published="$(read_home_foreground_evidence)" || \
+        [ "$home_foreground_published" != "$home_foreground_value" ]; then
+        log_event "home_foreground_evidence_changed"
+        return 1
+    fi
+    return 0
+}
+
+read_home_foreground_activity_state() {
+    if ! home_foreground_dump="$(
+        run_guard_command dumpsys activity activities 2>/dev/null
+        home_foreground_status=$?
+        printf '|'
+        exit "$home_foreground_status"
+    )"; then
+        printf 'unknown\n'
+        return 0
+    fi
+    case "$home_foreground_dump" in
+        *'|') home_foreground_dump=${home_foreground_dump%|} ;;
+        *)
+            printf 'unknown\n'
+            return 0
+            ;;
+    esac
+    if [ "${#home_foreground_dump}" -gt 65536 ]; then
+        printf 'unknown\n'
+        return 0
+    fi
+    home_foreground_activity_state="$(printf '%s\n' "$home_foreground_dump" | awk '
+        function parse_component(record, fields, field_count, field_index, component_count, component) {
+            gsub(/[{}(),]/, " ", record)
+            field_count = split(record, fields, /[[:space:]]+/)
+            component_count = 0
+            component = ""
+            for (field_index = 1; field_index <= field_count; field_index++) {
+                if (fields[field_index] ~ /^[A-Za-z][A-Za-z0-9_]*([.][A-Za-z][A-Za-z0-9_]*)+\/([.][A-Za-z][A-Za-z0-9_.$]*|[A-Za-z][A-Za-z0-9_.$]*)$/) {
+                    component = fields[field_index]
+                    component_count++
+                }
+            }
+            if (component_count != 1) {
+                return ""
+            }
+            if (component == "com.yinxing.launcher/.feature.home.MainActivity" || \
+                component == "com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity") {
+                return "com.yinxing.launcher/.feature.home.MainActivity"
+            }
+            return component
+        }
+        /^[[:space:]]*mResumedActivity:[[:space:]]*/ {
+            if (++resumed_seen != 1) {
+                invalid = 1
+                next
+            }
+            record = $0
+            sub(/^[[:space:]]*mResumedActivity:[[:space:]]*/, "", record)
+            resumed_component = parse_component(record)
+            if (resumed_component == "") {
+                invalid = 1
+            }
+            next
+        }
+        /^[[:space:]]*mFocusedActivity:[[:space:]]*/ {
+            if (++focused_seen != 1) {
+                invalid = 1
+                next
+            }
+            record = $0
+            sub(/^[[:space:]]*mFocusedActivity:[[:space:]]*/, "", record)
+            focused_component = parse_component(record)
+            if (focused_component == "") {
+                invalid = 1
+            }
+            next
+        }
+        END {
+            if (invalid || (!resumed_seen && !focused_seen)) {
+                print "unknown"
+            } else if (resumed_seen && focused_seen && resumed_component != focused_component) {
+                print "unknown"
+            } else if (resumed_component == "com.yinxing.launcher/.feature.home.MainActivity" || \
+                focused_component == "com.yinxing.launcher/.feature.home.MainActivity") {
+                print "target"
+            } else {
+                print "other"
+            }
+        }
+    ' 2>/dev/null)"
+    case "$home_foreground_activity_state" in
+        target|other|unknown) printf '%s\n' "$home_foreground_activity_state" ;;
+        *) printf 'unknown\n' ;;
+    esac
+}
+
+home_foreground_confirmation_attempts() {
+    home_foreground_attempts="${YINXING_GUARD_HOME_CONFIRM_ATTEMPTS:-3}"
+    case "$home_foreground_attempts" in
+        [1-9]|[1-9][0-9]*) ;;
+        *) home_foreground_attempts=3 ;;
+    esac
+    if [ "$home_foreground_attempts" -gt 3 ]; then
+        home_foreground_attempts=3
+    fi
+    printf '%s\n' "$home_foreground_attempts"
+}
+
+home_foreground_confirmation_seconds() {
+    home_foreground_seconds="${YINXING_GUARD_HOME_CONFIRM_SECONDS:-1}"
+    case "$home_foreground_seconds" in
+        0|[1-9]|[1-9][0-9]*) ;;
+        *) home_foreground_seconds=1 ;;
+    esac
+    if [ "$home_foreground_seconds" -gt 5 ]; then
+        home_foreground_seconds=5
+    fi
+    printf '%s\n' "$home_foreground_seconds"
+}
+
+confirm_home_foreground() {
+    home_foreground_attempt_limit="$(home_foreground_confirmation_attempts)"
+    home_foreground_wait_seconds="$(home_foreground_confirmation_seconds)"
+    home_foreground_attempt=1
+    while [ "$home_foreground_attempt" -le "$home_foreground_attempt_limit" ]; do
+        module_is_active || return 1
+        home_foreground_state="$(read_home_foreground_activity_state)"
+        module_is_active || return 1
+        case "$home_foreground_state" in
+            target)
+                return 0
+                ;;
+            unknown)
+                log_event "home_launch_unverified"
+                return 3
+                ;;
+            other)
+                if [ "$home_foreground_attempt" -ge "$home_foreground_attempt_limit" ]; then
+                    log_event "home_launch_foreground_other"
+                    return 2
+                fi
+                module_is_active || return 1
+                sleep "$home_foreground_wait_seconds"
+                module_is_active || return 1
+                home_foreground_attempt=$((home_foreground_attempt + 1))
+                ;;
+            *)
+                log_event "home_launch_unverified"
+                return 3
+                ;;
+        esac
+    done
+    log_event "home_launch_unverified"
+    return 3
+}
+
 clear_doze_ownership_marker() {
     if [ ! -e "$DOZE_OWNERSHIP_MARKER" ] && \
         [ ! -L "$DOZE_OWNERSHIP_MARKER" ]; then
@@ -2642,6 +2894,14 @@ launch_home() {
         log_event "home_launch_skipped_module_inactive"
         return 1
     fi
+    if ! write_home_foreground_evidence unverified; then
+        log_event "home_launch_evidence_prepare_failed"
+        return 1
+    fi
+    if ! module_is_active; then
+        log_event "home_launch_skipped_module_inactive"
+        return 1
+    fi
     run_guard_command am start --user "$ANDROID_USER_ID" -n "$HOME_COMPONENT" >/dev/null 2>&1 || {
         log_event "home_launch_failed"
         return 1
@@ -2650,6 +2910,23 @@ launch_home() {
         log_event "home_launch_completed_after_module_inactive"
         return 1
     fi
-    log_event "home_launched"
-    return 0
+    confirm_home_foreground
+    home_launch_confirmation=$?
+    case "$home_launch_confirmation" in
+        0)
+            if ! module_is_active || ! write_home_foreground_evidence verified; then
+                log_event "home_launch_evidence_verify_failed"
+                return 1
+            fi
+            log_event "home_launch_verified"
+            return 0
+            ;;
+        2|3)
+            return "$home_launch_confirmation"
+            ;;
+        *)
+            log_event "home_launch_failed"
+            return 1
+            ;;
+    esac
 }

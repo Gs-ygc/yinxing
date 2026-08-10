@@ -17,13 +17,14 @@ class RootHealthSnapshotTest {
         assertEquals("running", snapshot?.guard)
         assertEquals("enabled", snapshot?.accessibility)
         assertEquals("owned", snapshot?.home)
+        assertEquals("verified", snapshot?.homeForeground)
         assertEquals("owned", snapshot?.doze)
     }
 
     @Test
-    fun schemaTwoRequiresOwnedHomeForHealthy() {
+    fun schemaThreeRequiresVerifiedForegroundForHealthy() {
         val snapshot = RootHealthSnapshot.parse(
-            validSnapshot().replace("home=owned", "home=other")
+            validSnapshot().replace("home_foreground=verified", "home_foreground=unverified")
         )
 
         assertNotNull(snapshot)
@@ -31,7 +32,7 @@ class RootHealthSnapshotTest {
     }
 
     @Test
-    fun schemaTwoOtherNoneAndUnknownHomeAreDegraded() {
+    fun schemaThreeOtherNoneAndUnknownHomeAreDegraded() {
         listOf("other", "none", "unknown").forEach { home ->
             val snapshot = RootHealthSnapshot.parse(
                 validSnapshot().replace("home=owned", "home=$home")
@@ -44,7 +45,7 @@ class RootHealthSnapshotTest {
     }
 
     @Test
-    fun schemaTwoRejectsMissingDuplicateAndUnsupportedHome() {
+    fun schemaThreeRejectsMissingDuplicateAndUnsupportedHomeForeground() {
         val missingHome = validSnapshot().trimEnd()
             .lineSequence()
             .filterNot { it.startsWith("home=") }
@@ -53,34 +54,58 @@ class RootHealthSnapshotTest {
         assertNull(RootHealthSnapshot.parse(missingHome))
         assertNull(RootHealthSnapshot.parse(validSnapshot() + "home=owned\n"))
         assertNull(RootHealthSnapshot.parse(validSnapshot().replace("home=owned", "home=default")))
+        assertNull(
+            RootHealthSnapshot.parse(
+                validSnapshot().replace("home_foreground=verified", "home_foreground=recent")
+            )
+        )
     }
 
     @Test
     fun schemaOneRemainsParseableButDegradedWithUnknownHome() {
         val legacySnapshot = validSnapshot()
-            .replace("schema=2", "schema=1")
+            .replace("schema=3", "schema=1")
             .trimEnd()
             .lineSequence()
-            .filterNot { it.startsWith("home=") }
+            .filterNot { it.startsWith("home=") || it.startsWith("home_foreground=") }
             .joinToString("\n", postfix = "\n")
 
         val snapshot = RootHealthSnapshot.parse(legacySnapshot)
 
         assertNotNull(snapshot)
         assertEquals("unknown", snapshot?.home)
+        assertEquals("unknown", snapshot?.homeForeground)
         assertEquals(RootHealthState.DEGRADED, snapshot?.state)
     }
 
     @Test
-    fun rejectsSchemaOneWithHomeAndSchemaTwoWithoutHome() {
-        val schemaOneWithHome = validSnapshot().replace("schema=2", "schema=1")
-        val schemaTwoWithoutHome = validSnapshot().trimEnd()
+    fun schemaTwoRemainsParseableButIsDegradedWithoutForegroundEvidence() {
+        val schemaTwo = validSnapshot()
+            .replace("schema=3", "schema=2")
+            .trimEnd()
             .lineSequence()
-            .filterNot { it.startsWith("home=") }
+            .filterNot { it.startsWith("home_foreground=") }
             .joinToString("\n", postfix = "\n")
 
-        assertNull(RootHealthSnapshot.parse(schemaOneWithHome))
-        assertNull(RootHealthSnapshot.parse(schemaTwoWithoutHome))
+        val snapshot = RootHealthSnapshot.parse(schemaTwo)
+
+        assertNotNull(snapshot)
+        assertEquals("unknown", snapshot?.homeForeground)
+        assertEquals(RootHealthState.DEGRADED, snapshot?.state)
+    }
+
+    @Test
+    fun rejectsSchemaOneWithModernKeysSchemaTwoWithForegroundAndSchemaThreeWithoutForeground() {
+        val schemaOneWithModernKeys = validSnapshot().replace("schema=3", "schema=1")
+        val schemaTwoWithForeground = validSnapshot().replace("schema=3", "schema=2")
+        val schemaThreeWithoutForeground = validSnapshot().trimEnd()
+            .lineSequence()
+            .filterNot { it.startsWith("home_foreground=") }
+            .joinToString("\n", postfix = "\n")
+
+        assertNull(RootHealthSnapshot.parse(schemaOneWithModernKeys))
+        assertNull(RootHealthSnapshot.parse(schemaTwoWithForeground))
+        assertNull(RootHealthSnapshot.parse(schemaThreeWithoutForeground))
     }
 
     @Test
@@ -154,12 +179,13 @@ class RootHealthSnapshotTest {
     }
 
     private fun validSnapshot(): String = """
-        schema=2
+        schema=3
         version=1.10.0-root-preview.3
         module=active
         guard=running
         accessibility=enabled
         home=owned
+        home_foreground=verified
         doze=owned
         cleanup=ready
         last_repair=ok

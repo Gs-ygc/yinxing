@@ -113,27 +113,34 @@ class SettingsActivitySmokeTest {
     }
 
     @Test
-    fun rootHealthStatusSummaryIncludesHomeOwnership() {
+    fun rootHealthStatusSummaryIncludesHomeOwnershipAndForegroundConfirmation() {
         val activity = buildActivity()
-        val schemaTwo = checkNotNull(RootHealthSnapshot.parse(schemaTwoRootHealth()))
+        val schemaThree = checkNotNull(RootHealthSnapshot.parse(schemaThreeRootHealth()))
         val otherHome = checkNotNull(
-            RootHealthSnapshot.parse(schemaTwoRootHealth().replace("home=owned", "home=other"))
+            RootHealthSnapshot.parse(
+                schemaThreeRootHealth()
+                    .replace("home=owned", "home=other")
+                    .replace("home_foreground=verified", "home_foreground=unknown")
+            )
         )
         val schemaOne = checkNotNull(
             RootHealthSnapshot.parse(
-                schemaTwoRootHealth()
-                    .replace("schema=2", "schema=1")
+                schemaThreeRootHealth()
+                    .replace("schema=3", "schema=1")
                     .lineSequence()
-                    .filterNot { it.startsWith("home=") }
+                    .filterNot { it.startsWith("home=") || it.startsWith("home_foreground=") }
                     .joinToString("\n")
             )
         )
 
-        assertEquals(RootHealthState.HEALTHY, schemaTwo.state)
+        assertEquals(RootHealthState.HEALTHY, schemaThree.state)
         assertEquals(RootHealthState.DEGRADED, schemaOne.state)
-        assertTrue(activity.rootHealthStatusSummary(schemaTwo).contains("桌面 正常"))
+        assertTrue(activity.rootHealthStatusSummary(schemaThree).contains("桌面 正常"))
+        assertTrue(activity.rootHealthStatusSummary(schemaThree).contains("前台确认 正常"))
         assertTrue(activity.rootHealthStatusSummary(otherHome).contains("桌面 待处理"))
+        assertTrue(activity.rootHealthStatusSummary(otherHome).contains("前台确认 未知"))
         assertTrue(activity.rootHealthStatusSummary(schemaOne).contains("桌面 未知"))
+        assertTrue(activity.rootHealthStatusSummary(schemaOne).contains("前台确认 未知"))
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -288,13 +295,14 @@ class SettingsActivitySmokeTest {
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
 
-    private fun schemaTwoRootHealth(): String = """
-        schema=2
+    private fun schemaThreeRootHealth(): String = """
+        schema=3
         version=1.10.0-root-preview.14
         module=active
         guard=running
         accessibility=enabled
         home=owned
+        home_foreground=verified
         doze=owned
         cleanup=ready
         last_repair=ok

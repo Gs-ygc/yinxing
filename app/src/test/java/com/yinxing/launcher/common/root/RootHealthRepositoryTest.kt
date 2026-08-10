@@ -78,12 +78,13 @@ class RootHealthRepositoryTest {
     }
 
     private fun healthyOutput(): String = """
-        schema=2
+        schema=3
         version=1.10.0-root-preview.3
         module=active
         guard=running
         accessibility=enabled
         home=owned
+        home_foreground=verified
         doze=owned
         cleanup=ready
         last_repair=ok

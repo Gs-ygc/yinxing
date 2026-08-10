@@ -17,11 +17,11 @@ internal enum class RootCommand(
     ),
     RECOVER(
         shellPath = "/data/adb/modules/yinxing_guard/action.sh",
-        timeoutMillis = 12_000L
+        timeoutMillis = 20_000L
     ),
     KIOSK_HOME(
         shellPath = "/data/adb/modules/yinxing_guard/bin/kiosk-home.sh",
-        timeoutMillis = 1_200L
+        timeoutMillis = 15_000L
     )
 }
 

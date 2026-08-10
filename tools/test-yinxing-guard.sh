@@ -208,6 +208,7 @@ write_fake yinxing-test-sync \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* && -e "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync" ]]; then printf "com.yinxing.launcher\\n" > "$HOME_HOLDER"; printf "com.oplus.launcher/.Launcher\\n" > "$HOME_RESOLVED_COMPONENT"; rm -f "$TEST_ROOT/switch_home_to_yinxing_during_marker_sync"; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/home_previous_holder "* ]]; then [[ -e "$TEST_ROOT/hang_home_marker_sync" ]] && /bin/sleep 5; [[ -e "$TEST_ROOT/fail_home_marker_sync" ]] && exit 1; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state/accessibility_binding_stall "* && -e "$TEST_ROOT/fail_accessibility_binding_stall_sync" ]]; then exit 1; fi' \
+    'if [[ " $* " == *" $TEST_ROOT/state/home_foreground_evidence "* && -e "$TEST_ROOT/fail_home_foreground_evidence_sync" ]]; then exit 1; fi' \
     'if [[ "$*" == "-f $TEST_ROOT/state" && -e "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once" ]]; then rm -f "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once"; exit 1; fi' \
     'if [[ " $* " == *" $TEST_ROOT/state "* && -e "$TEST_ROOT/fail_second_home_state_dir_sync" ]]; then reads="$(cat "$TEST_ROOT/home_state_dir_sync_count" 2>/dev/null || printf 0)"; reads=$((reads + 1)); printf "%s\\n" "$reads" > "$TEST_ROOT/home_state_dir_sync_count"; [[ "$reads" -ge 2 ]] && exit 1; fi' \
     'exit 0'
@@ -234,6 +235,7 @@ write_fake am \
     'if [[ -e "$TEST_ROOT/hang_am" ]]; then /bin/sleep 5; fi' \
     'if [[ -e "$TEST_ROOT/hang_am_descendant" ]]; then /bin/sleep 5 & child_pid=$!; printf "%s\\n" "$child_pid" > "$TEST_ROOT/hang_am_descendant_pid"; wait "$child_pid"; fi' \
     'if [[ -e "$TEST_ROOT/fail_home_once" ]]; then rm -f "$TEST_ROOT/fail_home_once"; exit 1; fi' \
+    'printf target > "$TEST_ROOT/home_foreground_target"' \
     'printf launched > "$TEST_ROOT/home_launched"'
 
 write_fake getprop \
@@ -256,6 +258,33 @@ write_fake sleep \
 write_fake dumpsys \
     '#!/usr/bin/env bash' \
     'printf "dumpsys %s\\n" "$*" >> "$CALLS"' \
+    'if [[ "${1:-}" == "activity" && "${2:-}" == "activities" ]]; then' \
+    '  [[ -e "$TEST_ROOT/hang_activity_dump" ]] && /bin/sleep 5' \
+    '  [[ -e "$TEST_ROOT/fail_activity_dump" ]] && exit 1' \
+    '  if [[ -d "$TEST_ROOT/activity_dump_sequence" ]]; then' \
+    '    sequence_call="$(cat "$TEST_ROOT/activity_dump_sequence_calls" 2>/dev/null || printf 0)"' \
+    '    sequence_call=$((sequence_call + 1))' \
+    '    printf "%s\\n" "$sequence_call" > "$TEST_ROOT/activity_dump_sequence_calls"' \
+    '    sequence_response="$TEST_ROOT/activity_dump_sequence/$sequence_call"' \
+    '    [[ -f "$sequence_response" ]] || sequence_response="$TEST_ROOT/activity_dump_sequence/last"' \
+    '    [[ -f "$sequence_response" ]] && cat "$sequence_response"' \
+    '    exit 0' \
+    '  fi' \
+    '  if [[ -f "$TEST_ROOT/activity_dump" ]]; then cat "$TEST_ROOT/activity_dump"; exit 0; fi' \
+    '  if [[ -e "$TEST_ROOT/home_foreground_target" ]]; then' \
+    '    printf "mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\\n"' \
+    '    printf "mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\\n"' \
+    '    exit 0' \
+    '  fi' \
+    '  holder="$(tr -d "\\n" < "$HOME_HOLDER" 2>/dev/null || true)"' \
+    '  if [[ "$holder" == "com.yinxing.launcher" ]]; then' \
+    '    printf "mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\\n"' \
+    '    printf "mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\\n"' \
+    '  elif [[ -n "$holder" ]]; then' \
+    '    printf "mResumedActivity: ActivityRecord{fixture %s/.Launcher}\\n" "$holder"' \
+    '  fi' \
+    '  exit 0' \
+    'fi' \
     '[[ "${1:-}" == "accessibility" ]] || exit 2' \
     'if [[ -e "$TEST_ROOT/hang_dumpsys" ]]; then /bin/sleep 5; fi' \
     '[[ -e "$TEST_ROOT/fail_accessibility_dump" ]] && exit 1' \
@@ -376,6 +405,10 @@ reset_fixture() {
         "$TEST_ROOT/doze_marker_directory_race" \
         "$TEST_ROOT/cleanup_boot_id" \
         "$TEST_ROOT/fail_home_once" \
+        "$TEST_ROOT/hang_activity_dump" \
+        "$TEST_ROOT/fail_activity_dump" \
+        "$TEST_ROOT/activity_dump" \
+        "$TEST_ROOT/activity_dump_sequence_calls" \
         "$TEST_ROOT/hang_dumpsys" \
         "$TEST_ROOT/hang_pm_path" \
         "$TEST_ROOT/hang_am" \
@@ -388,15 +421,18 @@ reset_fixture() {
         "$TEST_ROOT/fail_accessibility_dump" \
         "$TEST_ROOT/fail_accessibility_binding_stall_sync" \
         "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once" \
+        "$TEST_ROOT/fail_home_foreground_evidence_sync" \
         "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore" \
         "$TEST_ROOT/accessibility_binding_stall_marker_symlink" \
+        "$TEST_ROOT/home_foreground_target" \
         "$TEST_ROOT/home_launched" \
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
         "$TEST_ROOT/component_disabled" \
         "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
-        "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one"
+        "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one" \
+        "$TEST_ROOT/activity_dump_sequence"
     printf 'fixture-boot\n' > "$TEST_ROOT/boot_id"
     printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
     install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install baseline cleanup helper"
@@ -416,6 +452,7 @@ prepare_healthy_status_fixture() {
     printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
     printf 'com.yinxing.launcher/.feature.home.MainActivity\n' > \
         "$TEST_ROOT/home_resolved_component"
+    printf 'verified|test-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
     touch "$TEST_ROOT/doze_whitelisted"
 }
 
@@ -434,14 +471,16 @@ test_status_reports_healthy_state() {
     prepare_healthy_status_fixture
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
-    assert_contains_text "$output" "schema=2"
+    assert_contains_text "$output" "schema=3"
     assert_contains_text "$output" "module=active"
     assert_contains_text "$output" "guard=running"
     assert_contains_text "$output" "accessibility=enabled"
     assert_contains_text "$output" "home=owned"
+    assert_contains_text "$output" "home_foreground=verified"
     assert_contains_text "$output" "doze=owned"
     assert_contains_text "$output" "cleanup=ready"
     assert_contains_text "$output" "last_repair=ok"
+    assert_not_contains "$CALLS" "dumpsys activity activities"
     pass "status reports healthy state"
 }
 
@@ -463,7 +502,35 @@ test_status_reports_other_home_holder() {
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
     assert_contains_text "$output" "home=other"
+    assert_contains_text "$output" "home_foreground=unknown"
     pass "status reports another HOME holder"
+}
+
+test_status_reads_boot_scoped_home_foreground_evidence() {
+    local output
+
+    reset_fixture
+    prepare_healthy_status_fixture
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home_foreground=verified"
+    assert_not_contains "$CALLS" "dumpsys activity activities"
+
+    printf 'unverified|test-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home_foreground=unverified"
+
+    printf 'verified|previous-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home_foreground=unknown"
+
+    printf 'corrupt\n' > "$TEST_ROOT/state/home_foreground_evidence"
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home_foreground=unknown"
+    pass "status reads boot-scoped HOME foreground evidence"
 }
 
 test_status_reports_no_home_holder() {
@@ -584,7 +651,7 @@ test_status_output_contract_ignores_log_noise() {
     prepare_healthy_status_fixture
     touch "$TEST_ROOT/fail_deviceidle_query" "$TEST_ROOT/log_noise"
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id" run_module_script "$MODULE_ROOT/bin/status.sh")"
-    assert_equals "9" "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" "status output line count"
+    assert_equals "10" "$(printf '%s\n' "$output" | wc -l | tr -d ' ')" "status output line count"
     assert_not_contains_text "$output" "log-noise"
     pass "status output contract ignores log noise"
 }
@@ -811,6 +878,100 @@ test_home_resolver_bounds_stalled_query() {
     assert_contains_text "$output" "home=unknown"
     assert_not_contains "$CALLS" "cmd package set-home-activity"
     pass "HOME resolver query is bounded"
+}
+
+test_home_foreground_parser_accepts_fixed_target_components() {
+    reset_fixture
+    cat > "$TEST_ROOT/activity_dump" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+EOF
+    assert_equals target "$(read_home_foreground_activity_state)" \
+        "short fixed foreground component"
+
+    reset_fixture
+    cat > "$TEST_ROOT/activity_dump" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity}
+mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/com.yinxing.launcher.feature.home.MainActivity}
+EOF
+    assert_equals target "$(read_home_foreground_activity_state)" \
+        "fully-qualified fixed foreground component"
+    pass "HOME foreground parser accepts fixed target components"
+}
+
+test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence() {
+    local activity_output
+
+    for activity_output in \
+        $'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' \
+        $'mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\nmFocusedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' \
+        $'Task{untrusted mention com.yinxing.launcher/.feature.home.MainActivity}\n' \
+        $'mResumedActivity: ActivityRecord{fixture not-a-component}\n'; do
+        reset_fixture
+        printf '%s' "$activity_output" > "$TEST_ROOT/activity_dump"
+        case "$activity_output" in
+            *'com.oplus.launcher/.Launcher'* )
+                if [[ "$activity_output" == mResumedActivity:* && "$activity_output" != *mFocusedActivity:* ]]; then
+                    assert_equals other "$(read_home_foreground_activity_state)" \
+                        "known other foreground activity"
+                    continue
+                fi
+                ;;
+        esac
+        assert_equals unknown "$(read_home_foreground_activity_state)" \
+            "ambiguous or untrusted foreground evidence"
+    done
+    pass "HOME foreground parser rejects ambiguous or untrusted evidence"
+}
+
+test_home_foreground_parser_bounds_failed_or_stalled_probe() {
+    local elapsed started_at
+
+    reset_fixture
+    touch "$TEST_ROOT/fail_activity_dump"
+    assert_equals unknown "$(read_home_foreground_activity_state)" \
+        "failed foreground dump"
+
+    reset_fixture
+    touch "$TEST_ROOT/hang_activity_dump"
+    started_at=$SECONDS
+    assert_equals unknown "$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        read_home_foreground_activity_state)" "stalled foreground dump"
+    elapsed=$((SECONDS - started_at))
+    [[ "$elapsed" -lt 4 ]] || fail "stalled foreground dump exceeded bound (${elapsed}s)"
+    pass "HOME foreground parser bounds failed or stalled probes"
+}
+
+test_home_foreground_evidence_is_boot_scoped_and_safe() {
+    local marker="$TEST_ROOT/state/home_foreground_evidence"
+
+    reset_fixture
+    write_home_foreground_evidence verified || fail "could not persist verified HOME foreground evidence"
+    assert_equals verified "$(home_foreground_evidence_state)" \
+        "current boot verified foreground evidence"
+    assert_equals "verified|fixture-boot" "$(tr -d '\n' < "$marker")" \
+        "persisted foreground evidence"
+    assert_equals "600" "$(stat -c '%a' "$marker")" "foreground evidence mode"
+
+    printf 'unverified|previous-boot\n' > "$marker"
+    assert_equals unknown "$(home_foreground_evidence_state)" \
+        "stale boot foreground evidence"
+
+    printf 'corrupt\n' > "$marker"
+    if write_home_foreground_evidence verified; then
+        fail "malformed foreground evidence was overwritten"
+    fi
+    assert_equals corrupt "$(tr -d '\n' < "$marker")" \
+        "malformed foreground evidence is retained"
+
+    rm -f "$marker"
+    printf 'target\n' > "$TEST_ROOT/foreground-evidence-target"
+    ln -s "$TEST_ROOT/foreground-evidence-target" "$marker"
+    if write_home_foreground_evidence verified; then
+        fail "symlink foreground evidence was accepted"
+    fi
+    [[ -L "$marker" ]] || fail "symlink foreground evidence was replaced"
+    pass "HOME foreground evidence is boot-scoped and safe"
 }
 
 test_home_role_reconciles_other_holder() {
@@ -2397,7 +2558,87 @@ test_home_launch_is_fixed() {
     launch_home || fail "home launch should succeed with fake am"
     [[ -e "$TEST_ROOT/home_launched" ]] || fail "home activity was not launched"
     assert_contains "$CALLS" "com.yinxing.launcher/.feature.home.MainActivity"
+    assert_equals "verified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "fixed HOME launch writes verified foreground evidence"
     pass "home launch is fixed"
+}
+
+test_home_launch_requires_verified_foreground() {
+    local launch_status
+
+    reset_fixture
+    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
+        "$TEST_ROOT/activity_dump"
+    set +e
+    YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=2 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        launch_home
+    launch_status=$?
+    set -e
+    assert_equals "2" "$launch_status" "known-other foreground launch result"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "known-other foreground dispatch count"
+    assert_equals "2" "$(grep -c '^dumpsys activity activities$' "$CALLS" || true)" \
+        "known-other foreground probe count"
+    assert_equals "unverified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "known-other launch leaves unverified evidence"
+    pass "HOME launch requires verified foreground"
+}
+
+test_home_launch_confirms_after_bounded_foreground_probe() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/activity_dump_sequence"
+    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
+        "$TEST_ROOT/activity_dump_sequence/1"
+    cat > "$TEST_ROOT/activity_dump_sequence/2" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+EOF
+    YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=2 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        launch_home || fail "foreground confirmation did not accept a later target probe"
+    assert_equals "2" "$(grep -c '^dumpsys activity activities$' "$CALLS" || true)" \
+        "bounded foreground confirmation probe count"
+    assert_equals "verified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "later target probe writes verified evidence"
+    pass "HOME launch confirms after bounded foreground probe"
+}
+
+test_home_launch_stops_on_unknown_foreground_evidence() {
+    local launch_status
+
+    reset_fixture
+    printf 'Task{untrusted mention com.yinxing.launcher/.feature.home.MainActivity}\n' > \
+        "$TEST_ROOT/activity_dump"
+    set +e
+    YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=3 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        launch_home
+    launch_status=$?
+    set -e
+    assert_equals "3" "$launch_status" "unknown foreground launch result"
+    assert_equals "1" "$(grep -c '^dumpsys activity activities$' "$CALLS" || true)" \
+        "unknown foreground evidence must not be polled again"
+    assert_equals "unverified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "unknown foreground leaves unverified evidence"
+    pass "HOME launch stops on unknown foreground evidence"
+}
+
+test_home_launch_rejects_unsafe_foreground_marker() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'target\n' > "$TEST_ROOT/foreground-evidence-target"
+    ln -s "$TEST_ROOT/foreground-evidence-target" \
+        "$TEST_ROOT/state/home_foreground_evidence"
+    if launch_home; then
+        fail "HOME launch accepted a symlink foreground evidence marker"
+    fi
+    assert_not_contains "$CALLS" "am start"
+    pass "HOME launch rejects unsafe foreground marker"
 }
 
 test_kiosk_home_command_requires_active_module() {
@@ -2507,6 +2748,43 @@ test_guard_retries_transient_startup_failures() {
     assert_equals "2" "$(grep -c '^am start ' "$CALLS" || true)" "guard retries one failed HOME launch"
     [[ -e "$TEST_ROOT/home_launched" ]] || fail "HOME retry never succeeded"
     pass "guard retries transient startup failures"
+}
+
+test_guard_retries_known_other_foreground_once_and_records_failure() {
+    reset_fixture
+    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
+        "$TEST_ROOT/activity_dump"
+    YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=2 \
+        YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=1 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh" || true
+    assert_equals "2" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "Guard only retries a known-other foreground once"
+    assert_equals failed "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "Guard records failed foreground confirmation"
+    assert_equals "unverified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "Guard retains unverified foreground evidence"
+    pass "Guard retries known-other foreground once and records failure"
+}
+
+test_guard_stops_after_unknown_foreground_evidence() {
+    reset_fixture
+    printf 'Task{untrusted mention com.yinxing.launcher/.feature.home.MainActivity}\n' > \
+        "$TEST_ROOT/activity_dump"
+    YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
+        YINXING_GUARD_INTERVAL_SECONDS=0 \
+        YINXING_GUARD_MAX_CYCLES=2 \
+        YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=3 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/bin/guard.sh" || true
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "Guard must not retry unknown foreground evidence"
+    assert_equals failed "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "Guard records unknown foreground confirmation failure"
+    pass "Guard stops after unknown foreground evidence"
 }
 
 test_guard_ignores_pid_from_previous_boot() {
@@ -3488,6 +3766,22 @@ test_action_reuses_repair_and_launch() {
     pass "action reuses repair and launch"
 }
 
+test_action_marks_failed_when_home_foreground_is_unverified() {
+    reset_fixture
+    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
+        "$TEST_ROOT/activity_dump"
+    if YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=1 \
+        YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
+        run_module_script "$MODULE_ROOT/action.sh"; then
+        fail "action reported success without verified HOME foreground"
+    fi
+    assert_equals failed "$(tr -d '\n' < "$TEST_ROOT/state/last_repair")" \
+        "action records failed unverified HOME foreground"
+    assert_equals "1" "$(grep -c '^am start ' "$CALLS" || true)" \
+        "action dispatches the fixed HOME component once"
+    pass "action marks failed when HOME foreground is unverified"
+}
+
 test_action_bounds_stalled_package_query() {
     local started_at elapsed
 
@@ -3628,6 +3922,20 @@ test_uninstall_retains_malformed_marker() {
     [[ -x "$CLEANUP_TARGET" ]] || fail "malformed marker cleanup helper was deleted"
     [[ -e "$TEST_ROOT/doze_whitelisted" ]] || fail "malformed marker cleanup changed Doze state"
     pass "uninstall retains malformed marker"
+}
+
+test_uninstall_removes_home_foreground_evidence_only() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'verified|fixture-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ ! -e "$TEST_ROOT/state/home_foreground_evidence" ]] || \
+        fail "uninstall retained HOME foreground evidence"
+    assert_equals com.oplus.launcher "$(tr -d '\n' < "$HOME_HOLDER")" \
+        "foreground evidence cleanup preserves current HOME holder"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist"
+    pass "uninstall removes HOME foreground evidence only"
 }
 
 test_uninstall_reports_cleanup_schedule_failure() {
@@ -4606,11 +4914,11 @@ test_module_package() {
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
-    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=16'
+    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=17'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
-    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.16'
-    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=16'
+    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.17'
+    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=17'
     for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"
@@ -4634,6 +4942,7 @@ case "$MODE" in
         ;;
     --status-only)
         test_status_reports_healthy_state
+        test_status_reads_boot_scoped_home_foreground_evidence
         test_status_reports_stale_cleanup_helper_as_invalid
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
@@ -4697,6 +5006,23 @@ case "$MODE" in
         test_binding_stall_sync_failure_blocks_rebind
         test_status_reports_persistent_binding_stall
         test_uninstall_removes_binding_stall_marker_only
+        ;;
+    --preview17-foreground-only)
+        test_status_reports_healthy_state
+        test_status_reads_boot_scoped_home_foreground_evidence
+        test_home_foreground_parser_accepts_fixed_target_components
+        test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence
+        test_home_foreground_parser_bounds_failed_or_stalled_probe
+        test_home_foreground_evidence_is_boot_scoped_and_safe
+        test_home_launch_is_fixed
+        test_home_launch_requires_verified_foreground
+        test_home_launch_confirms_after_bounded_foreground_probe
+        test_home_launch_stops_on_unknown_foreground_evidence
+        test_home_launch_rejects_unsafe_foreground_marker
+        test_guard_retries_known_other_foreground_once_and_records_failure
+        test_guard_stops_after_unknown_foreground_evidence
+        test_action_marks_failed_when_home_foreground_is_unverified
+        test_uninstall_removes_home_foreground_evidence_only
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
@@ -4899,6 +5225,7 @@ case "$MODE" in
     all)
         test_merge_cases
         test_status_reports_healthy_state
+        test_status_reads_boot_scoped_home_foreground_evidence
         test_status_reports_stale_cleanup_helper_as_invalid
         test_status_reports_other_home_holder
         test_status_reports_no_home_holder
@@ -4943,6 +5270,10 @@ case "$MODE" in
         test_home_resolver_rejects_invalid_package
         test_home_resolver_rejects_multiple_lines_and_trailing_blank
         test_home_resolver_bounds_stalled_query
+        test_home_foreground_parser_accepts_fixed_target_components
+        test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence
+        test_home_foreground_parser_bounds_failed_or_stalled_probe
+        test_home_foreground_evidence_is_boot_scoped_and_safe
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
@@ -5003,11 +5334,17 @@ case "$MODE" in
         test_doze_cross_boot_pending_absence_retries_once
         test_doze_transaction_blocks_cleanup_while_add_is_in_flight
         test_home_launch_is_fixed
+        test_home_launch_requires_verified_foreground
+        test_home_launch_confirms_after_bounded_foreground_probe
+        test_home_launch_stops_on_unknown_foreground_evidence
+        test_home_launch_rejects_unsafe_foreground_marker
         test_kiosk_home_command_requires_active_module
         test_kiosk_home_bounds_stalled_launch
         test_kiosk_home_cleans_stalled_descendant_after_caller_exit
         test_guard_runs_initial_repair_and_one_health_cycle
         test_guard_retries_transient_startup_failures
+        test_guard_retries_known_other_foreground_once_and_records_failure
+        test_guard_stops_after_unknown_foreground_evidence
         test_guard_ignores_pid_from_previous_boot
         test_guard_respects_live_guard_same_boot
         test_guard_reclaims_dead_same_boot_lock
@@ -5048,6 +5385,7 @@ case "$MODE" in
         test_action_stops_after_module_deactivates_during_accessibility_read
         test_guard_prevents_concurrent_processes
         test_action_reuses_repair_and_launch
+        test_action_marks_failed_when_home_foreground_is_unverified
         test_action_bounds_stalled_package_query
         test_cleanup_helper_waits_for_module_removal
         test_cleanup_helper_stays_for_first_boot
@@ -5070,6 +5408,7 @@ case "$MODE" in
         test_uninstall_retains_malformed_accessibility_transaction
         test_uninstall_retains_nonregular_accessibility_transactions
         test_uninstall_retains_malformed_marker
+        test_uninstall_removes_home_foreground_evidence_only
         test_uninstall_restores_previous_home_holder
         test_uninstall_retains_home_marker_when_resolver_restore_mismatches
         test_uninstall_retains_home_marker_when_resolver_unknown

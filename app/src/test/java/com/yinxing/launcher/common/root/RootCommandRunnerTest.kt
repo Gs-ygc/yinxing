@@ -64,11 +64,11 @@ class RootCommandRunnerTest {
     }
 
     @Test
-    fun defaultKioskTimeoutRemainsShort() {
+    fun defaultKioskTimeoutCoversBoundedForegroundConfirmation() {
         withFakeSu(
             """
             case "${'$'}2" in
-                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) /bin/sleep 2 ;;
+                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) /bin/sleep 4 ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
@@ -80,8 +80,8 @@ class RootCommandRunnerTest {
 
             val result = runner.run(RootCommand.KIOSK_HOME)
 
-            assertTrue(result.timedOut)
-            assertFalse(result.isSuccessful)
+            assertFalse("bounded foreground confirmation hit the old kiosk timeout", result.timedOut)
+            assertTrue(result.isSuccessful)
         }
     }
 

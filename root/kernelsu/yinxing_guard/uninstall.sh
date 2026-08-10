@@ -9,6 +9,7 @@ doze_marker="$STATE_DIR/doze_added_by_module"
 accessibility_marker="$STATE_DIR/accessibility_transaction"
 home_marker="$STATE_DIR/home_previous_holder"
 home_takeover_state_marker="$STATE_DIR/home_takeover_state"
+home_foreground_evidence_marker="$HOME_FOREGROUND_EVIDENCE_MARKER"
 cleanup_source="$MODDIR/bin/uninstall-cleanup.sh"
 cleanup_target="$CLEANUP_TARGET"
 
@@ -30,6 +31,8 @@ rm -f \
     "$STATE_DIR/accessibility_transaction.tmp."* \
     "$STATE_DIR/accessibility_binding_stall" \
     "$STATE_DIR/accessibility_binding_stall.tmp."* \
+    "$home_foreground_evidence_marker" \
+    "$home_foreground_evidence_marker.tmp."* \
     "$STATE_DIR/doze_added_by_module.tmp."* \
     "$STATE_DIR/home_previous_holder.tmp."* \
     "$STATE_DIR/home_takeover_state.tmp."* || uninstall_status=1
