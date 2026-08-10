@@ -168,6 +168,35 @@ class ElderContactActionUiTest {
     }
 
     @Test
+    fun videoContactNormalModeBindsWithoutEntryAnimation() {
+        val owner = TestOwner()
+        val adapter = VideoCallContactAdapter(
+            scope = owner.lifecycleScope,
+            lowPerformanceMode = false,
+            onContactClick = {},
+            onWechatVideoClick = {}
+        )
+        val parent = FrameLayout(themedContext)
+        val holder = adapter.onCreateViewHolder(parent, 0)
+        adapter.submitList(
+            listOf(
+                Contact(
+                    id = "video-no-entry-animation",
+                    name = "女儿",
+                    wechatId = "女儿",
+                    preferredAction = Contact.PreferredAction.WECHAT_VIDEO
+                )
+            )
+        )
+        shadowOf(Looper.getMainLooper()).idle()
+
+        adapter.onBindViewHolder(holder, 0)
+
+        assertEquals(1f, holder.itemView.alpha, 0f)
+        assertEquals(0f, holder.itemView.translationY, 0f)
+    }
+
+    @Test
     fun videoContactDefaultsToOneButtonActionAndOneAccessibilityTarget() {
         val owner = TestOwner()
         var callCount = 0

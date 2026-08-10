@@ -15,7 +15,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
-import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
@@ -239,7 +238,7 @@ class VideoCallActivity : AppCompatActivity() {
     private fun applyPerformanceMode() {
         val lowPerformanceMode = launcherPreferences.isLowPerformanceModeEnabled()
         recyclerView.setItemViewCacheSize(if (lowPerformanceMode) 3 else 8)
-        recyclerView.itemAnimator = if (lowPerformanceMode) null else DefaultItemAnimator()
+        recyclerView.itemAnimator = null
         adapter.setLowPerformanceMode(lowPerformanceMode)
         manageAdapter.setLowPerformanceMode(lowPerformanceMode)
     }

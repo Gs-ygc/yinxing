@@ -5,10 +5,12 @@ import android.os.Looper
 import android.view.View
 import android.widget.TextView
 import androidx.cardview.widget.CardView
+import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.contact.ContactSqliteStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -71,6 +73,14 @@ class VideoCallActivitySmokeTest {
         assertEquals(View.VISIBLE, modeActionButton.visibility)
         assertEquals(activity.getString(R.string.state_video_manage_empty_message), messageView.text.toString())
         assertEquals(activity.getString(R.string.state_video_empty_action_add), actionView.text.toString())
+    }
+
+    @Test
+    fun videoListHasNoItemAnimator() {
+        val activity = Robolectric.buildActivity(VideoCallActivity::class.java).setup().get()
+        val recycler = activity.findViewById<RecyclerView>(R.id.recycler_video_contacts)
+
+        assertNull(recycler.itemAnimator)
     }
 
     private fun resetContactManagerSingleton() {

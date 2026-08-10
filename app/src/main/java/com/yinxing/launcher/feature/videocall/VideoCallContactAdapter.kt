@@ -5,7 +5,6 @@ import android.net.Uri
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.cardview.widget.CardView
@@ -31,16 +30,8 @@ class VideoCallContactAdapter(
 ) : ListAdapter<Contact, VideoCallContactAdapter.ViewHolder>(DiffCallback) {
 
     private var fullCardTapEnabled = false
-    private var animationsEnabled = true
-    private val animatedIds = HashSet<Long>()
-
-    fun setAnimationsEnabled(enabled: Boolean) {
-        animationsEnabled = enabled
-    }
 
     companion object {
-        private const val ENTRY_ANIMATION_LIMIT = 8
-
         private val DiffCallback = object : DiffUtil.ItemCallback<Contact>() {
             override fun areItemsTheSame(oldItem: Contact, newItem: Contact): Boolean {
                 return oldItem.id == newItem.id
@@ -80,8 +71,10 @@ class VideoCallContactAdapter(
     }
 
     override fun onBindViewHolder(holder: ViewHolder, position: Int) {
+        holder.itemView.animate().cancel()
+        holder.itemView.alpha = 1f
+        holder.itemView.translationY = 0f
         bind(holder, getItem(position))
-        animateInIfFirstShow(holder, position)
     }
 
     override fun onViewRecycled(holder: ViewHolder) {
@@ -90,25 +83,6 @@ class VideoCallContactAdapter(
         holder.itemView.translationY = 0f
         holder.photoJob?.cancel()
         super.onViewRecycled(holder)
-    }
-
-    private fun animateInIfFirstShow(holder: ViewHolder, position: Int) {
-        val view = holder.itemView
-        val id = holder.itemId
-        if (!animationsEnabled || lowPerformanceMode || position >= ENTRY_ANIMATION_LIMIT || !animatedIds.add(id)) {
-            view.alpha = 1f
-            view.translationY = 0f
-            return
-        }
-        view.alpha = 0f
-        view.translationY = 24f
-        view.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setStartDelay(position * 35L)
-            .setDuration(220)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
     }
 
     fun setLowPerformanceMode(enabled: Boolean) {
