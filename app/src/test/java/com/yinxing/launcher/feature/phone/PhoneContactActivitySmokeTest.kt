@@ -1,6 +1,7 @@
 package com.yinxing.launcher.feature.phone
 
 import android.content.Context
+import android.os.Bundle
 import android.os.Looper
 import android.view.View
 import android.widget.TextView
@@ -8,6 +9,7 @@ import androidx.test.core.app.ApplicationProvider
 import androidx.recyclerview.widget.RecyclerView
 import com.google.android.material.card.MaterialCardView
 import com.yinxing.launcher.R
+import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.data.contact.ContactSqliteStore
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -68,6 +70,33 @@ class PhoneContactActivitySmokeTest {
             activity.getString(R.string.action_add),
             activity.findViewById<TextView>(R.id.tv_mode_action).text.toString()
         )
+        controller.close()
+    }
+
+    @Test
+    fun pendingPermissionContactKeepsExistingSavedStateContract() {
+        val controller = Robolectric.buildActivity(
+            PhoneContactActivity::class.java,
+            PhoneContactActivity.createIntent(context)
+        ).setup()
+        val activity = controller.get()
+        val launcherField = PhoneContactActivity::class.java.getDeclaredField("phoneCallLauncher")
+        launcherField.isAccessible = true
+        val launcher = launcherField.get(activity) as PhoneCallLauncher
+        launcher.restorePendingContact(
+            Contact(
+                id = "trusted-1",
+                name = "妈妈",
+                phoneNumber = "13800138000"
+            )
+        )
+        val savedState = Bundle()
+
+        controller.saveInstanceState(savedState)
+
+        assertEquals("trusted-1", savedState.getString("state_pending_call_id"))
+        assertEquals("妈妈", savedState.getString("state_pending_call_name"))
+        assertEquals("13800138000", savedState.getString("state_pending_call_number"))
         controller.close()
     }
 

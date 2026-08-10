@@ -161,9 +161,8 @@ class PhoneContactActivity : AppCompatActivity() {
     private var dialogPhotoPreview: ImageView? = null
     private var dialogPhotoJob: Job? = null
     private var selectedAvatarUri: String? = null
-    private var pendingCallContact: Contact? = null
     private var searchInputUpdating = false
-    private val callLaunchGate = PhoneCallLaunchGate()
+    private lateinit var phoneCallLauncher: PhoneCallLauncher
     private var callFallbackDialog: AlertDialog? = null
 
 
@@ -178,15 +177,7 @@ class PhoneContactActivity : AppCompatActivity() {
 
     private val callPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val contact = pendingCallContact
-        pendingCallContact = null
-        if (granted && contact != null) {
-            launchDirectCall(contact)
-        } else {
-            contact?.let { showCallFallbackDialog(it) }
-        }
-    }
+    ) { granted -> phoneCallLauncher.onPermissionResult(granted) }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -194,7 +185,19 @@ class PhoneContactActivity : AppCompatActivity() {
 
         launcherPreferences = LauncherPreferences.getInstance(this)
         viewModel = ViewModelProvider(this, PhoneContactViewModel.Factory(this))[PhoneContactViewModel::class.java]
-        pendingCallContact = savedInstanceState
+        phoneCallLauncher = PhoneCallLauncher(
+            hasCallPermission = {
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
+                    PackageManager.PERMISSION_GRANTED
+            },
+            requestPermission = {
+                callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+            },
+            launchIntent = ::startActivity,
+            showFallback = ::showCallFallbackDialog,
+            onCallLaunched = { contact -> viewModel.incrementCallCountAsync(contact.id) }
+        )
+        savedInstanceState
             ?.getString(STATE_PENDING_CALL_NUMBER)
             ?.takeIf { it.isNotBlank() }
             ?.let { number ->
@@ -206,6 +209,7 @@ class PhoneContactActivity : AppCompatActivity() {
                     phoneNumber = number
                 )
             }
+            ?.let(phoneCallLauncher::restorePendingContact)
 
         recyclerView = findViewById(R.id.recycler_phone_contacts)
         recyclerView.layoutManager = LinearLayoutManager(this)
@@ -334,7 +338,7 @@ class PhoneContactActivity : AppCompatActivity() {
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
-        pendingCallContact?.let { contact ->
+        phoneCallLauncher.pendingContactOrNull?.let { contact ->
             outState.putString(STATE_PENDING_CALL_ID, contact.id)
             outState.putString(STATE_PENDING_CALL_NAME, contact.displayName)
             outState.putString(STATE_PENDING_CALL_NUMBER, contact.phoneNumber)
@@ -387,73 +391,29 @@ class PhoneContactActivity : AppCompatActivity() {
     }
 
     private fun makeCall(contact: Contact) {
-        if (contact.phoneNumber.isNullOrBlank()) return
-        if (callFallbackDialog?.isShowing == true || pendingCallContact != null) return
-        if (
-            ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
-            != PackageManager.PERMISSION_GRANTED
-        ) {
-            pendingCallContact = contact
-            callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
-            return
-        }
-        launchDirectCall(contact)
-    }
-
-    private fun launchDirectCall(contact: Contact) {
-        val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return
-        if (!callLaunchGate.tryAcquire(number)) return
-        val intent = PhoneCallIntentFactory.direct(number)
-        runCatching { startActivity(intent) }.onFailure {
-            showCallFallbackDialog(contact, directCallFailed = true)
-        }.onSuccess {
-            viewModel.incrementCallCountAsync(contact.id)
-        }
+        if (callFallbackDialog?.isShowing == true) return
+        phoneCallLauncher.makeCall(contact)
     }
 
     private fun showCallFallbackDialog(contact: Contact, directCallFailed: Boolean = false) {
         if (isFinishing || isDestroyed) return
         callFallbackDialog?.dismiss()
-        val dialogView = layoutInflater.inflate(R.layout.dialog_call_permission_fallback, null)
-        dialogView.findViewById<TextView>(R.id.tv_call_permission_title).text = getString(
-            R.string.phone_call_permission_fallback_title,
-            contact.displayName
-        )
-        dialogView.findViewById<TextView>(R.id.tv_call_permission_message).text = getString(
-            if (!directCallFailed) {
-                R.string.phone_call_permission_fallback_message
-            } else {
-                R.string.phone_call_fallback_failed_message
-            },
-            contact.displayName
-        )
-        val dialog = AlertDialog.Builder(this).setView(dialogView).create()
-        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
-        dialogView.findViewById<MaterialCardView>(R.id.btn_open_dialer).setOnClickListener {
-            dialog.dismiss()
-            val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return@setOnClickListener
-            runCatching { startActivity(PhoneCallIntentFactory.dialer(number)) }
-                .onFailure { showToast(getString(R.string.dial_failed, it.message ?: "")) }
-        }
-        dialogView.findViewById<MaterialCardView>(R.id.btn_cancel_call).setOnClickListener {
-            dialog.dismiss()
+        val dialog = showPhoneCallFallbackDialog(
+            contact = contact,
+            directCallFailed = directCallFailed
+        ) { error ->
+            showToast(getString(R.string.dial_failed, error.message.orEmpty()))
         }
         dialog.setOnDismissListener {
             if (callFallbackDialog === dialog) callFallbackDialog = null
         }
         callFallbackDialog = dialog
-        dialog.show()
-        dialog.window?.setLayout(
-            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
-            android.view.WindowManager.LayoutParams.WRAP_CONTENT
-        )
     }
 
     override fun onDestroy() {
         callFallbackDialog?.setOnDismissListener(null)
         callFallbackDialog?.dismiss()
         callFallbackDialog = null
-        pendingCallContact = null
         super.onDestroy()
     }
 
