@@ -7,7 +7,6 @@ MODE="${1:-all}"
 TEST_ROOT="$(mktemp -d)"
 FAKE_BIN="$TEST_ROOT/bin"
 CALLS="$TEST_ROOT/calls.log"
-HEAD_CALLS="$TEST_ROOT/head_calls.log"
 SERVICES="$TEST_ROOT/accessibility_services"
 ACCESSIBILITY_ENABLED="$TEST_ROOT/accessibility_enabled"
 HOME_HOLDER="$TEST_ROOT/home_holder"
@@ -47,11 +46,10 @@ trap cleanup EXIT
 
 mkdir -p "$FAKE_BIN"
 : > "$CALLS"
-: > "$HEAD_CALLS"
 : > "$SERVICES"
 printf '0\n' > "$ACCESSIBILITY_ENABLED"
 printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
-export TEST_ROOT FAKE_BIN CALLS HEAD_CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER HOME_RESOLVED_COMPONENT
+export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER HOME_RESOLVED_COMPONENT
 export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
@@ -253,11 +251,6 @@ write_fake awk \
     'if [[ "${!#}" == "/proc/stat" && -n "${YINXING_GUARD_BOOT_STAT_FILE:-}" ]]; then exec /usr/bin/awk "${@:1:$#-1}" "$YINXING_GUARD_BOOT_STAT_FILE"; fi' \
     'exec /usr/bin/awk "$@"'
 
-write_fake head \
-    '#!/usr/bin/env bash' \
-    'printf "head %s\\n" "$*" >> "$HEAD_CALLS"' \
-    'exec /usr/bin/head "$@"'
-
 write_fake log \
     '#!/usr/bin/env bash' \
     'printf "log %s\\n" "$*" >> "$CALLS"' \
@@ -340,7 +333,6 @@ export ACCESSIBILITY_COMPONENT
 
 reset_fixture() {
     : > "$CALLS"
-    : > "$HEAD_CALLS"
     : > "$SERVICES"
     printf '0\n' > "$ACCESSIBILITY_ENABLED"
     rm -f \
@@ -452,9 +444,7 @@ reset_fixture() {
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
         "$TEST_ROOT/component_disabled" \
-        "$TEST_ROOT/log_noise" \
-        "$HEAD_CALLS"
-    : > "$HEAD_CALLS"
+        "$TEST_ROOT/log_noise"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
         "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one" \
         "$TEST_ROOT/activity_dump_sequence"
@@ -1101,15 +1091,13 @@ test_home_foreground_capture_is_bounded_before_parsing() {
     reset_fixture
     write_target_activity_dump_at_size "$TEST_ROOT/activity_dump_over_cap" 65537
     started_at=$SECONDS
-    assert_equals unknown "$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+    assert_equals unknown "$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=5 \
         run_module_script -c '. "$1"; read_home_foreground_activity_state' \
         yinxing-test "$MODULE_ROOT/bin/common.sh")" \
         "foreground capture rejects 65537 bytes"
     elapsed=$((SECONDS - started_at))
     [ "$elapsed" -lt 2 ] || \
-        fail "over-cap foreground producer exceeded one-second command budget (${elapsed}s)"
-    assert_equals "head -c 65537" "$(tr -d '\n' < "$HEAD_CALLS")" \
-        "foreground capture head bound"
+        fail "over-cap foreground producer was not cut off before timeout (${elapsed}s)"
     pass "HOME foreground capture is bounded before parsing"
 }
 
