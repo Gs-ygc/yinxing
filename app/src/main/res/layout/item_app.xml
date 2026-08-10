@@ -60,6 +60,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@null"
                 android:scaleType="center"
                 android:src="@android:drawable/arrow_up_float" />
 
@@ -68,6 +69,7 @@
                 android:layout_width="48dp"
                 android:layout_height="48dp"
                 android:background="?android:attr/selectableItemBackgroundBorderless"
+                android:contentDescription="@null"
                 android:scaleType="center"
                 android:src="@android:drawable/arrow_down_float" />
         </LinearLayout>
