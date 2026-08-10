@@ -5512,6 +5512,9 @@ case "$MODE" in
         test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence
         test_home_foreground_parser_bounds_failed_or_stalled_probe
         test_home_foreground_evidence_is_boot_scoped_and_safe
+        test_evidence_rejects_unavailable_boot_identity
+        test_uninstall_retains_pending_evidence_when_boot_identity_is_unavailable
+        test_home_foreground_capture_is_bounded_before_parsing
         test_home_marker_concurrent_publish_does_not_clobber
         test_home_marker_sync_failure_blocks_takeover
         test_home_role_preserves_choice_after_takeover_state_publish
