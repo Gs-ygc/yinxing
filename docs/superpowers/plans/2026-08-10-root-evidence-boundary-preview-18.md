@@ -1,5 +1,7 @@
 # Root Evidence Boundary Preview 18 Implementation Plan
 
+> **Priority note (2026-08-10):** The user has reprioritized the active Goal toward elderly-first UI, daily operation simplicity, latency, boot/autostart, low-power behavior, and reversible core-app takeover. Preview 18's two reliability fixes remain valid source work, but this plan's standalone release steps are paused; do not publish a reliability-only build until it is paired with a user-visible experience slice or the user explicitly reopens that release scope.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task with verification checkpoints.
 
 **Goal:** Make boot-scoped Root evidence fail closed when boot identity is unavailable and cap the HOME foreground dump before shell capture, then publish a verified Preview 18.
