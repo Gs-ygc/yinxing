@@ -236,7 +236,8 @@ write_fake am \
     'if [[ -e "$TEST_ROOT/hang_am_descendant" ]]; then /bin/sleep 5 & child_pid=$!; printf "%s\\n" "$child_pid" > "$TEST_ROOT/hang_am_descendant_pid"; wait "$child_pid"; fi' \
     'if [[ -e "$TEST_ROOT/fail_home_once" ]]; then rm -f "$TEST_ROOT/fail_home_once"; exit 1; fi' \
     'printf target > "$TEST_ROOT/home_foreground_target"' \
-    'printf launched > "$TEST_ROOT/home_launched"'
+    'printf launched > "$TEST_ROOT/home_launched"' \
+    'if [[ -e "$TEST_ROOT/pause_home_launch_after_start" ]]; then touch "$TEST_ROOT/home_launch_after_start_entered"; for _ in $(seq 1 400); do [[ -e "$TEST_ROOT/allow_home_launch_after_start" ]] && break; /bin/sleep 0.01; done; [[ -e "$TEST_ROOT/allow_home_launch_after_start" ]] || exit 89; fi'
 
 write_fake getprop \
     '#!/usr/bin/env bash' \
@@ -422,6 +423,9 @@ reset_fixture() {
         "$TEST_ROOT/fail_accessibility_binding_stall_sync" \
         "$TEST_ROOT/fail_accessibility_binding_stall_clear_sync_once" \
         "$TEST_ROOT/fail_home_foreground_evidence_sync" \
+        "$TEST_ROOT/pause_home_launch_after_start" \
+        "$TEST_ROOT/home_launch_after_start_entered" \
+        "$TEST_ROOT/allow_home_launch_after_start" \
         "$TEST_ROOT/corrupt_binding_stall_after_rebind_restore" \
         "$TEST_ROOT/accessibility_binding_stall_marker_symlink" \
         "$TEST_ROOT/home_foreground_target" \
@@ -903,21 +907,13 @@ test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence() {
     local activity_output
 
     for activity_output in \
+        $'mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\n' \
         $'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' \
         $'mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}\nmFocusedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' \
         $'Task{untrusted mention com.yinxing.launcher/.feature.home.MainActivity}\n' \
         $'mResumedActivity: ActivityRecord{fixture not-a-component}\n'; do
         reset_fixture
         printf '%s' "$activity_output" > "$TEST_ROOT/activity_dump"
-        case "$activity_output" in
-            *'com.oplus.launcher/.Launcher'* )
-                if [[ "$activity_output" == mResumedActivity:* && "$activity_output" != *mFocusedActivity:* ]]; then
-                    assert_equals other "$(read_home_foreground_activity_state)" \
-                        "known other foreground activity"
-                    continue
-                fi
-                ;;
-        esac
         assert_equals unknown "$(read_home_foreground_activity_state)" \
             "ambiguous or untrusted foreground evidence"
     done
@@ -2568,8 +2564,10 @@ test_home_launch_requires_verified_foreground() {
     local launch_status
 
     reset_fixture
-    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
-        "$TEST_ROOT/activity_dump"
+    cat > "$TEST_ROOT/activity_dump" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+mFocusedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+EOF
     set +e
     YINXING_GUARD_HOME_CONFIRM_ATTEMPTS=2 \
         YINXING_GUARD_HOME_CONFIRM_SECONDS=0 \
@@ -2590,8 +2588,10 @@ test_home_launch_requires_verified_foreground() {
 test_home_launch_confirms_after_bounded_foreground_probe() {
     reset_fixture
     mkdir -p "$TEST_ROOT/activity_dump_sequence"
-    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
-        "$TEST_ROOT/activity_dump_sequence/1"
+    cat > "$TEST_ROOT/activity_dump_sequence/1" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+mFocusedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+EOF
     cat > "$TEST_ROOT/activity_dump_sequence/2" <<'EOF'
 mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
 mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
@@ -2639,6 +2639,50 @@ test_home_launch_rejects_unsafe_foreground_marker() {
     fi
     assert_not_contains "$CALLS" "am start"
     pass "HOME launch rejects unsafe foreground marker"
+}
+
+test_home_launch_serializes_uninstall_evidence_transition() {
+    local uninstall_status launch_status
+
+    reset_fixture
+    touch "$TEST_ROOT/pause_home_launch_after_start"
+    set +e
+    (run_module_script -c '. "$1"; launch_home' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh") &
+    LAUNCH_PID=$!
+    set -e
+    for _ in $(seq 1 200); do
+        [[ -e "$TEST_ROOT/home_launch_after_start_entered" ]] && break
+        /bin/sleep 0.01
+    done
+    [[ -e "$TEST_ROOT/home_launch_after_start_entered" ]] || \
+        fail "launch did not reach the serialized post-start boundary"
+
+    set +e
+    YINXING_GUARD_HOME_LOCK_ATTEMPTS=1 run_module_script "$MODULE_ROOT/uninstall.sh"
+    uninstall_status=$?
+    set -e
+    [[ "$uninstall_status" -ne 0 ]] || \
+        fail "uninstall entered a live HOME launch transaction"
+    assert_equals "unverified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "blocked uninstall preserves in-flight foreground evidence"
+
+    touch "$TEST_ROOT/allow_home_launch_after_start"
+    set +e
+    wait "$LAUNCH_PID"
+    launch_status=$?
+    set -e
+    LAUNCH_PID=""
+    [[ "$launch_status" -eq 0 ]] || fail "serialized HOME launch did not complete"
+    assert_equals "verified|fixture-boot" \
+        "$(tr -d '\n' < "$TEST_ROOT/state/home_foreground_evidence")" \
+        "completed HOME launch publishes verified evidence"
+
+    run_module_script "$MODULE_ROOT/uninstall.sh"
+    [[ ! -e "$TEST_ROOT/state/home_foreground_evidence" ]] || \
+        fail "post-launch uninstall retained foreground evidence"
+    pass "HOME launch serializes uninstall evidence transition"
 }
 
 test_kiosk_home_command_requires_active_module() {
@@ -2752,8 +2796,10 @@ test_guard_retries_transient_startup_failures() {
 
 test_guard_retries_known_other_foreground_once_and_records_failure() {
     reset_fixture
-    printf 'mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}\n' > \
-        "$TEST_ROOT/activity_dump"
+    cat > "$TEST_ROOT/activity_dump" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+mFocusedActivity: ActivityRecord{fixture com.oplus.launcher/.Launcher}
+EOF
     YINXING_GUARD_BOOT_WAIT_SECONDS=0 \
         YINXING_GUARD_INTERVAL_SECONDS=0 \
         YINXING_GUARD_MAX_CYCLES=2 \
@@ -3996,6 +4042,26 @@ test_uninstall_retains_marker_when_doze_remove_fails() {
     pass "boot-completed cleanup retains retry state after failure"
 }
 
+test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    printf 'verified|fixture-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
+    printf 'stale\n' > "$TEST_ROOT/state/home_foreground_evidence.tmp.123"
+    printf 'partial\n' > "$TEST_ROOT/state/doze_added_by_module"
+    touch "$TEST_ROOT/doze_whitelisted"
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "cleanup unexpectedly succeeded with malformed Doze evidence"
+    fi
+    [[ ! -e "$TEST_ROOT/state/home_foreground_evidence" ]] || \
+        fail "deferred cleanup retained HOME foreground evidence after transaction failure"
+    [[ ! -e "$TEST_ROOT/state/home_foreground_evidence.tmp.123" ]] || \
+        fail "deferred cleanup retained HOME foreground temporary evidence"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "deferred cleanup lost retryable Doze evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || fail "deferred cleanup removed its retry helper"
+    pass "deferred cleanup removes foreground evidence before transaction retry"
+}
+
 test_uninstall_cleanup_bounds_stalled_doze_remove() {
     local started_at elapsed
 
@@ -5023,6 +5089,8 @@ case "$MODE" in
         test_guard_stops_after_unknown_foreground_evidence
         test_action_marks_failed_when_home_foreground_is_unverified
         test_uninstall_removes_home_foreground_evidence_only
+        test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
+        test_home_launch_serializes_uninstall_evidence_transition
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
@@ -5181,6 +5249,7 @@ case "$MODE" in
         test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
         test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_resolves_pending_doze_state
         test_uninstall_retains_same_boot_pending_doze_absence
@@ -5338,6 +5407,7 @@ case "$MODE" in
         test_home_launch_confirms_after_bounded_foreground_probe
         test_home_launch_stops_on_unknown_foreground_evidence
         test_home_launch_rejects_unsafe_foreground_marker
+        test_home_launch_serializes_uninstall_evidence_transition
         test_kiosk_home_command_requires_active_module
         test_kiosk_home_bounds_stalled_launch
         test_kiosk_home_cleans_stalled_descendant_after_caller_exit
@@ -5394,6 +5464,7 @@ case "$MODE" in
         test_uninstall_reports_cleanup_schedule_failure
         test_uninstall_defers_cleanup_until_boot_completed
         test_uninstall_retains_marker_when_doze_remove_fails
+        test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
         test_uninstall_cleanup_bounds_stalled_doze_remove
         test_uninstall_resolves_pending_doze_state
         test_uninstall_retains_same_boot_pending_doze_absence

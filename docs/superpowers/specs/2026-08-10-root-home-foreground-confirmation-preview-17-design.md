@@ -54,6 +54,10 @@ component becomes `other`.
 `launch_home()` writes `unverified|<boot-id>` before the fixed `am start`,
 then confirms the activity up to three times with a one-second default delay.
 It writes `verified|<boot-id>` only after the target postcondition succeeds.
+The complete launch, probe, and evidence publication transition holds the
+existing HOME transaction lock. Uninstall, Kiosk launch, Guard retries, and
+manual repair therefore cannot interleave a newer failure or cleanup between
+the unverified and verified writes.
 The marker is a regular non-symlink file, exact single-line canonical data,
 mode 0600, atomically published, read back, and fsynced through the existing
 Root command wrapper. Existing malformed or nonregular evidence is never
@@ -77,16 +81,18 @@ bounds, not background execution grants.
 ## Lifecycle
 
 The foreground evidence has no rollback meaning. Both direct uninstall and
-the deferred standalone cleanup remove its file and temporary publications
-without changing the HOME role, resolver, Doze ownership, or accessibility
-settings. Existing HOME rollback evidence remains independent.
+the deferred standalone cleanup remove its file and temporary publications,
+even when another rollback transaction must remain pending, without changing
+the HOME role, resolver, Doze ownership, or accessibility settings. Existing
+HOME rollback evidence remains independent.
 
 ## Verification matrix
 
 The host and standalone BusyBox suite covers strict activity parsing,
 bounded dumpsys timeout, atomic and boot-scoped evidence, verified and
 unverified launch results, Guard retry limits, action status correctness,
-status non-probing behavior, and evidence cleanup. JVM tests cover schema 3,
+status non-probing behavior, evidence cleanup, and launch/uninstall
+serialization. JVM tests cover schema 3,
 legacy parsing, healthy-state derivation, Settings summaries, and the new
 Kiosk timeout budget. Release verification additionally runs full shell,
 JVM, Debug build, deterministic module packaging, APK signature checks, and

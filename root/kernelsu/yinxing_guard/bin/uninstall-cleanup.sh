@@ -93,13 +93,21 @@ cleanup_runtime_state() {
         "$STATE_DIR/accessibility_transaction.tmp."* \
         "$STATE_DIR/accessibility_binding_stall" \
         "$STATE_DIR/accessibility_binding_stall.tmp."* \
-        "$STATE_DIR/home_foreground_evidence" \
-        "$STATE_DIR/home_foreground_evidence.tmp."* \
         "$STATE_DIR/doze_added_by_module.tmp."* \
         "$STATE_DIR/home_previous_holder.tmp."* \
         "$STATE_DIR/home_takeover_state.tmp."* || runtime_cleanup_status=1
     rm -rf "$STATE_DIR/guard.lock" || runtime_cleanup_status=1
     return "$runtime_cleanup_status"
+}
+
+cleanup_home_foreground_evidence() {
+    if ! rm -f \
+        "$STATE_DIR/home_foreground_evidence" \
+        "$STATE_DIR/home_foreground_evidence.tmp."*; then
+        log_event "uninstall_home_foreground_evidence_cleanup_failed"
+        return 1
+    fi
+    return 0
 }
 
 valid_android_package_name() {
@@ -1055,6 +1063,7 @@ cleanup_transaction() {
     fi
 
     cleanup_failed=0
+    cleanup_home_foreground_evidence || cleanup_failed=1
     cleanup_accessibility_transaction || cleanup_failed=1
     cleanup_home_role_locked || cleanup_failed=1
     cleanup_doze || cleanup_failed=1

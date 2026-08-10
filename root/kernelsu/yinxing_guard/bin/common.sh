@@ -2614,7 +2614,7 @@ read_home_foreground_activity_state() {
             next
         }
         END {
-            if (invalid || (!resumed_seen && !focused_seen)) {
+            if (invalid || (!resumed_seen || !focused_seen)) {
                 print "unknown"
             } else if (resumed_seen && focused_seen && resumed_component != focused_component) {
                 print "unknown"
@@ -2889,7 +2889,7 @@ repair_state() {
     return "$repair_state_status"
 }
 
-launch_home() {
+launch_home_locked() {
     if ! module_is_active; then
         log_event "home_launch_skipped_module_inactive"
         return 1
@@ -2929,4 +2929,22 @@ launch_home() {
             return 1
             ;;
     esac
+}
+
+launch_home() {
+    if ! module_is_active; then
+        log_event "home_launch_skipped_module_inactive"
+        return 1
+    fi
+    if ! acquire_home_transaction_lock; then
+        log_event "home_launch_transaction_lock_failed"
+        return 1
+    fi
+    launch_home_locked
+    home_launch_status=$?
+    if ! release_home_transaction_lock; then
+        log_event "home_launch_transaction_unlock_failed"
+        home_launch_status=1
+    fi
+    return "$home_launch_status"
 }

@@ -3,11 +3,11 @@
 **Goal:** Confirm a Root-dispatched HOME activity after launch without
 mistaking a user who has opened Settings or another app for a launcher fault.
 
-**Architecture:** `launch_home()` samples the fixed activity dump only after
-the fixed launch command and persists a strict boot-scoped result. `status.sh`
-emits schema 3 and reads that result rather than sampling the current UI.
-Guard, action, cleanup, Kotlin parsing, Settings UI, and Root command budgets
-consume the same contract.
+**Architecture:** `launch_home()` acquires the HOME transaction lock, samples
+the fixed activity dump only after the fixed launch command, and persists a
+strict boot-scoped result. `status.sh` emits schema 3 and reads that result
+rather than sampling the current UI. Guard, action, cleanup, Kotlin parsing,
+Settings UI, and Root command budgets consume the same contract.
 
 ## Constraints
 
@@ -34,6 +34,8 @@ consume the same contract.
   command budgets.
 - [x] Add focused JVM regressions for schema 3, legacy schema degradation, UI
   labels, and Kiosk confirmation budget.
+- [x] Serialize launch/evidence publication with uninstall and add the
+  deferred-cleanup failure regression.
 - [ ] Run complete shell and Android verification, package reproducible assets,
   publish the prerelease, then record remote asset verification.
 
