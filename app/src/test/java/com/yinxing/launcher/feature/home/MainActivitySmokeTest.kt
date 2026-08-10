@@ -2,6 +2,7 @@ package com.yinxing.launcher.feature.home
 
 import android.Manifest
 import android.app.Application
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
@@ -11,8 +12,10 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Looper
 import android.view.View
+import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
+import androidx.core.widget.NestedScrollView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
@@ -27,6 +30,7 @@ import com.yinxing.launcher.feature.phone.PhoneCallLauncher
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -168,10 +172,51 @@ class MainActivitySmokeTest {
         val savedState = Bundle()
 
         controller.saveInstanceState(savedState)
+        controller.pause().stop().destroy()
+
+        val recreatedController = Robolectric.buildActivity(MainActivity::class.java)
+            .create(savedState)
+            .start()
+            .resume()
+            .visible()
+        val recreatedLauncher = launcherField.get(recreatedController.get()) as PhoneCallLauncher
 
         assertEquals("mother", savedState.getString("state_home_pending_call_id"))
         assertEquals("妈妈", savedState.getString("state_home_pending_call_name"))
         assertEquals("13800138000", savedState.getString("state_home_pending_call_number"))
+        assertEquals("mother", recreatedLauncher.pendingContactOrNull?.id)
+        assertEquals("13800138000", recreatedLauncher.pendingContactOrNull?.phoneNumber)
+        recreatedController.destroy()
+    }
+
+    @Test
+    @Suppress("DEPRECATION")
+    fun manifestAllowsHomeCallStateToBeSaved() {
+        val activityInfo = context.packageManager.getActivityInfo(
+            ComponentName(context, MainActivity::class.java),
+            0
+        )
+
+        assertFalse(activityInfo.flags and ActivityInfo.FLAG_STATE_NOT_NEEDED != 0)
+    }
+
+    @Test
+    fun homeUsesOneScrollableSurfaceOnCompactScreens() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val homeContent = activity.findViewById<View>(R.id.layout_home_root)
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
+
+        assertTrue(homeContent.parent is NestedScrollView)
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, recyclerView.layoutParams.height)
+        assertFalse(recyclerView.isNestedScrollingEnabled)
+    }
+
+    @Test
+    fun homeStartsWithoutEntryAnimationDelay() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+
+        assertEquals(1f, activity.findViewById<View>(R.id.layout_home_root).alpha)
+        assertEquals(0f, activity.findViewById<View>(R.id.layout_home_root).translationY)
     }
 
     @Test

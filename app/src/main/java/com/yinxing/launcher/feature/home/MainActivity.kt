@@ -8,7 +8,6 @@ import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
-import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -93,7 +92,6 @@ class MainActivity : AppCompatActivity() {
         setupActions()
         observeViewModel()
         registerPackageReceiver()
-        playEntryAnimation()
         binding.recyclerHome.post { viewModel.refreshApps() }
     }
 
@@ -241,22 +239,6 @@ class MainActivity : AppCompatActivity() {
         fullyDrawnReported = true
         binding.recyclerHome.post {
             reportFullyDrawn()
-        }
-    }
-
-    private fun playEntryAnimation() {
-        if (viewModel.settings.value.lowPerformanceMode) {
-            return
-        }
-        binding.layoutHomeRoot.alpha = 0f
-        binding.layoutHomeRoot.translationY = 18f
-        binding.layoutHomeRoot.post {
-            binding.layoutHomeRoot.animate()
-                .alpha(1f)
-                .translationY(0f)
-                .setDuration(240)
-                .setInterpolator(DecelerateInterpolator())
-                .start()
         }
     }
 

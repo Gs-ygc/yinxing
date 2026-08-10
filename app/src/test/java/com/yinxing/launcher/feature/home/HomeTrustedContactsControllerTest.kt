@@ -4,8 +4,10 @@ import android.content.Context
 import android.view.LayoutInflater
 import android.view.ContextThemeWrapper
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.contact.Contact
@@ -47,6 +49,8 @@ class HomeTrustedContactsControllerTest {
         val item = items(root).getChildAt(0)
         assertEquals(root.resources.getString(R.string.contact_call_description, "妈妈"), item.contentDescription)
         assertTrue(item.isClickable)
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, item.layoutParams.height)
+        assertTrue(item.minimumHeight >= (112 * root.resources.displayMetrics.density).toInt())
         item.performClick()
         assertEquals(contact, clicked)
         assertEquals(View.VISIBLE, root.findViewById<View>(R.id.btn_trusted_calls_all).visibility)
@@ -69,6 +73,24 @@ class HomeTrustedContactsControllerTest {
         assertEquals(1, items(root).childCount)
         root.findViewById<View>(R.id.btn_trusted_calls_all).performClick()
         assertEquals(1, openAllCount)
+    }
+
+    @Test
+    fun blankContactNameUsesAccessiblePlaceholder() {
+        val (root, controller) = createController()
+
+        controller.render(listOf(Contact("legacy", "   ", phoneNumber = "13800138000")))
+
+        val item = items(root).getChildAt(0)
+        val placeholder = root.resources.getString(R.string.contact_name_placeholder)
+        assertEquals(
+            root.resources.getString(R.string.contact_call_description, placeholder),
+            item.contentDescription
+        )
+        assertEquals(
+            placeholder,
+            item.findViewById<TextView>(R.id.tv_trusted_call_name).text.toString()
+        )
     }
 
     private fun createController(): Pair<View, HomeTrustedContactsController> {

@@ -2,6 +2,7 @@ package com.yinxing.launcher.data.home
 
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
+import com.yinxing.launcher.R
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import com.yinxing.launcher.feature.home.HomeAppItem
 import kotlinx.coroutines.test.runTest
@@ -74,6 +75,7 @@ class LauncherAppRepositoryTest {
         val items = LauncherAppRepository(context, FakeLauncherAppSource()).getStaticHomeItems()
 
         assertEquals(HomeAppItem.Type.PHONE, items[0].type)
+        assertEquals(context.getString(R.string.home_trusted_calls_all), items[0].appName)
         assertEquals(android.R.drawable.ic_menu_call, items[0].iconResId)
         assertEquals(HomeAppItem.Type.WECHAT_VIDEO, items[1].type)
         assertEquals(android.R.drawable.ic_menu_camera, items[1].iconResId)

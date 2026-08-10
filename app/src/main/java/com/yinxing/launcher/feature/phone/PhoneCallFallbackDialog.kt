@@ -12,10 +12,13 @@ internal fun AppCompatActivity.showPhoneCallFallbackDialog(
     directCallFailed: Boolean,
     onDialerFailure: (Throwable) -> Unit
 ): AlertDialog {
+    val displayName = contact.displayName.trim().ifEmpty {
+        getString(R.string.contact_name_placeholder)
+    }
     val dialogView = layoutInflater.inflate(R.layout.dialog_call_permission_fallback, null)
     dialogView.findViewById<TextView>(R.id.tv_call_permission_title).text = getString(
         R.string.phone_call_permission_fallback_title,
-        contact.displayName
+        displayName
     )
     dialogView.findViewById<TextView>(R.id.tv_call_permission_message).text = getString(
         if (directCallFailed) {
@@ -23,7 +26,7 @@ internal fun AppCompatActivity.showPhoneCallFallbackDialog(
         } else {
             R.string.phone_call_permission_fallback_message
         },
-        contact.displayName
+        displayName
     )
 
     val dialog = AlertDialog.Builder(this).setView(dialogView).create()

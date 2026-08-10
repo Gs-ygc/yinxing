@@ -58,7 +58,10 @@ class HomeTrustedContactsController(
     }
 
     private fun bindItem(item: View, contact: Contact) {
-        val description = item.context.getString(R.string.contact_call_description, contact.displayName)
+        val displayName = contact.displayName.trim().ifEmpty {
+            item.context.getString(R.string.contact_name_placeholder)
+        }
+        val description = item.context.getString(R.string.contact_call_description, displayName)
         item.contentDescription = description
         item.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
         item.isFocusable = true
@@ -66,7 +69,7 @@ class HomeTrustedContactsController(
         item.findViewById<ImageView>(R.id.iv_trusted_call_icon)
             .importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         item.findViewById<TextView>(R.id.tv_trusted_call_name).apply {
-            text = contact.displayName
+            text = displayName
             importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
         }
         item.findViewById<TextView>(R.id.tv_trusted_call_number).apply {
