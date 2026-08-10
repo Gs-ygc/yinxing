@@ -169,6 +169,13 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
+    <include
+        android:id="@+id/layout_trusted_calls"
+        layout="@layout/item_home_trusted_calls"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp" />
+
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/recycler_home"
         android:layout_width="match_parent"

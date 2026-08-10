@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/card_trusted_call"
+    style="@style/Widget.OldLauncher.ListItemCard"
+    android:layout_width="match_parent"
+    android:layout_height="112dp"
+    android:minHeight="96dp"
+    android:clickable="true"
+    android:focusable="true"
+    android:foreground="?android:attr/selectableItemBackground"
+    app:cardBackgroundColor="@color/launcher_surface"
+    app:cardCornerRadius="20dp"
+    app:cardElevation="2dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingEnd="14dp">
+
+        <ImageView
+            android:id="@+id/iv_trusted_call_icon"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/icon_background_phone"
+            android:contentDescription="@null"
+            android:padding="12dp"
+            android:src="@android:drawable/ic_menu_call" />
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:id="@+id/tv_trusted_call_name"
+                style="@style/TextAppearance.OldLauncher.CardTitle"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:ellipsize="end"
+                android:maxLines="2"
+                android:textSize="22sp" />
+
+            <TextView
+                android:id="@+id/tv_trusted_call_number"
+                style="@style/TextAppearance.OldLauncher.Meta"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:ellipsize="end"
+                android:fontFamily="monospace"
+                android:maxLines="1"
+                android:textSize="16sp"
+                android:textStyle="bold" />
+        </LinearLayout>
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>
