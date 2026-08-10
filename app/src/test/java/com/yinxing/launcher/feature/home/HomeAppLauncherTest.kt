@@ -3,7 +3,9 @@ package com.yinxing.launcher.feature.home
 import android.content.Intent
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -93,6 +95,36 @@ class HomeAppLauncherTest {
         assertEquals(listOf(item), fixture.unavailableItems)
     }
 
+    @Test
+    fun resolverErrorPropagatesWithoutUnavailableFallback() {
+        val fatalError = FatalLaunchError()
+        val fixture = Fixture(resolveIntent = { throw fatalError })
+
+        try {
+            fixture.launcher.open(appItem("com.example.camera", "相机"))
+            fail("Expected resolver Error to propagate")
+        } catch (caught: FatalLaunchError) {
+            assertSame(fatalError, caught)
+        }
+
+        assertTrue(fixture.unavailableItems.isEmpty())
+    }
+
+    @Test
+    fun launcherErrorPropagatesWithoutUnavailableFallback() {
+        val fatalError = FatalLaunchError()
+        val fixture = Fixture(launchIntent = { throw fatalError })
+
+        try {
+            fixture.launcher.open(appItem("com.example.camera", "相机"))
+            fail("Expected launcher Error to propagate")
+        } catch (caught: FatalLaunchError) {
+            assertSame(fatalError, caught)
+        }
+
+        assertTrue(fixture.unavailableItems.isEmpty())
+    }
+
     private class Fixture(
         resolveIntent: (String) -> Intent? = { packageName ->
             Intent(Intent.ACTION_MAIN).setPackage(packageName)
@@ -117,4 +149,6 @@ class HomeAppLauncherTest {
         appName = appName,
         type = HomeAppItem.Type.APP
     )
+
+    private class FatalLaunchError : Error()
 }

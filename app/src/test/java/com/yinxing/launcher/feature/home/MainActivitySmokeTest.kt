@@ -42,6 +42,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -287,6 +288,27 @@ class MainActivitySmokeTest {
     }
 
     @Test
+    fun deniedHomeCallPermissionHandsNumberToDialerWithoutRecordingCall() {
+        val contact = Contact(id = "mother", name = "妈妈", phoneNumber = "13800138000")
+        runBlocking {
+            PhoneContactManager.getInstance(context).addContact(contact)
+        }
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val launcherField = MainActivity::class.java.getDeclaredField("phoneCallLauncher").apply {
+            isAccessible = true
+        }
+        val launcher = launcherField.get(activity) as PhoneCallLauncher
+
+        launcher.restorePendingContact(contact)
+        launcher.onPermissionResult(granted = false)
+
+        val startedIntent = shadowOf(activity).nextStartedActivity
+        assertEquals(Intent.ACTION_DIAL, startedIntent.action)
+        assertEquals("tel:13800138000", startedIntent.dataString)
+        assertEquals(0, PhoneContactManager.getInstance(context).getContacts().single().callCount)
+    }
+
+    @Test
     fun sameExternalAppTouchBurstStartsOnlyOneActivity() {
         registerLauncherApp(packageName = "pkg.camera", appLabel = "相机")
         LauncherPreferences(context).setPackageSelected("pkg.camera", true)
@@ -308,6 +330,24 @@ class MainActivitySmokeTest {
         val duplicateIntent = shadowOf(activity).nextStartedActivity
         assertEquals("pkg.camera", firstIntent.component?.packageName)
         assertNull(duplicateIntent)
+    }
+
+    @Test
+    fun unavailableExternalAppShowsFailureWithoutStartingActivity() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val item = HomeAppItem(
+            packageName = "com.example.missing",
+            appName = "相机",
+            type = HomeAppItem.Type.APP
+        )
+
+        HomeNavigator(activity).openHomeItem(item)
+
+        assertNull(shadowOf(activity).nextStartedActivity)
+        assertEquals(
+            activity.getString(R.string.open_app_failed, "相机"),
+            ShadowToast.getTextOfLatestToast()
+        )
     }
 
 

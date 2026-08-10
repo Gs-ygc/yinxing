@@ -6,6 +6,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -169,6 +170,68 @@ class PhoneCallLauncherTest {
         assertTrue(fixture.fallbacks.isEmpty())
     }
 
+    @Test
+    fun permissionRequestErrorPropagatesWithoutOpeningDialer() {
+        val fatalError = FatalLaunchError()
+        val fixture = Fixture(
+            hasPermission = false,
+            permissionRequestFailure = fatalError
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        try {
+            fixture.launcher.makeCall(contact)
+            fail("Expected permission request Error to propagate")
+        } catch (caught: FatalLaunchError) {
+            assertSame(fatalError, caught)
+        }
+
+        assertTrue(fixture.attemptedActions.isEmpty())
+        assertTrue(fixture.fallbacks.isEmpty())
+    }
+
+    @Test
+    fun directCallErrorPropagatesWithoutOpeningDialer() {
+        val fatalError = FatalLaunchError()
+        val fixture = Fixture(
+            hasPermission = true,
+            directLaunchFailure = fatalError
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        try {
+            fixture.launcher.makeCall(contact)
+            fail("Expected direct call Error to propagate")
+        } catch (caught: FatalLaunchError) {
+            assertSame(fatalError, caught)
+        }
+
+        assertEquals(listOf(Intent.ACTION_CALL), fixture.attemptedActions)
+        assertTrue(fixture.fallbacks.isEmpty())
+        assertTrue(fixture.recordedContacts.isEmpty())
+    }
+
+    @Test
+    fun dialerErrorPropagatesWithoutShowingFallback() {
+        val fatalError = FatalLaunchError()
+        val fixture = Fixture(
+            hasPermission = false,
+            dialerLaunchFailure = fatalError
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        fixture.launcher.makeCall(contact)
+        try {
+            fixture.launcher.onPermissionResult(granted = false)
+            fail("Expected dialer Error to propagate")
+        } catch (caught: FatalLaunchError) {
+            assertSame(fatalError, caught)
+        }
+
+        assertEquals(listOf(Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertTrue(fixture.fallbacks.isEmpty())
+    }
+
     private data class Fallback(
         val contact: Contact,
         val directCallFailed: Boolean
@@ -213,4 +276,6 @@ class PhoneCallLauncherTest {
         name = name,
         phoneNumber = phone
     )
+
+    private class FatalLaunchError : Error()
 }

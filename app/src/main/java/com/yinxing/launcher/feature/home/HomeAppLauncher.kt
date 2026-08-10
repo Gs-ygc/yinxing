@@ -18,17 +18,21 @@ internal class HomeAppLauncher(
             return false
         }
 
-        val intent = runCatching { resolveLaunchIntent(packageName) }.getOrNull()
+        val intent = try {
+            resolveLaunchIntent(packageName)
+        } catch (_: Exception) {
+            null
+        }
         if (intent == null) {
             gate.release(packageName)
             onUnavailable(item)
             return false
         }
 
-        return runCatching {
+        return try {
             launchIntent(intent)
             true
-        }.getOrElse {
+        } catch (_: Exception) {
             gate.release(packageName)
             onUnavailable(item)
             false

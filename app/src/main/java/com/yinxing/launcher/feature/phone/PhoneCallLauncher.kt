@@ -22,11 +22,12 @@ internal class PhoneCallLauncher(
 
         if (!hasCallPermission()) {
             pendingContact = contact
-            runCatching { requestPermission(contact) }
-                .onFailure {
-                    pendingContact = null
-                    openDialerOrFallback(contact, number, directCallFailed = false)
-                }
+            try {
+                requestPermission(contact)
+            } catch (_: Exception) {
+                pendingContact = null
+                openDialerOrFallback(contact, number, directCallFailed = false)
+            }
             return
         }
 
@@ -52,9 +53,13 @@ internal class PhoneCallLauncher(
 
     private fun launchDirectCall(contact: Contact, number: String) {
         if (!gate.tryAcquire(number)) return
-        runCatching { launchIntent(PhoneCallIntentFactory.direct(number)) }
-            .onSuccess { onCallLaunched(contact) }
-            .onFailure { openDialerOrFallback(contact, number, directCallFailed = true) }
+        try {
+            launchIntent(PhoneCallIntentFactory.direct(number))
+        } catch (_: Exception) {
+            openDialerOrFallback(contact, number, directCallFailed = true)
+            return
+        }
+        onCallLaunched(contact)
     }
 
     private fun openDialerOrFallback(
@@ -62,7 +67,10 @@ internal class PhoneCallLauncher(
         number: String,
         directCallFailed: Boolean
     ) {
-        runCatching { launchIntent(PhoneCallIntentFactory.dialer(number)) }
-            .onFailure { showFallback(contact, directCallFailed) }
+        try {
+            launchIntent(PhoneCallIntentFactory.dialer(number))
+        } catch (_: Exception) {
+            showFallback(contact, directCallFailed)
+        }
     }
 }
