@@ -15,6 +15,7 @@ import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import com.yinxing.launcher.R
+import com.yinxing.launcher.data.home.HomeAppOrderPolicy
 import com.yinxing.launcher.data.home.LauncherAppRepository
 import com.yinxing.launcher.data.home.LauncherPreferences
 import kotlinx.coroutines.CoroutineScope
@@ -32,6 +33,7 @@ class AppManageActivity : AppCompatActivity() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private var packageReceiverRegistered = false
     private var loadAppsJob: kotlinx.coroutines.Job? = null
+    private var currentSelectedOrder: List<String> = emptyList()
 
     private val packageChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -58,7 +60,9 @@ class AppManageActivity : AppCompatActivity() {
             lowPerformanceMode = launcherPreferences.isLowPerformanceModeEnabled(),
             onCheckChanged = { appInfo, isChecked ->
                 saveAppSelection(appInfo.packageName, isChecked)
-            }
+            },
+            onMoveUp = { appInfo -> moveSelectedApp(appInfo.packageName, -1) },
+            onMoveDown = { appInfo -> moveSelectedApp(appInfo.packageName, 1) }
         )
         recyclerView.adapter = adapter
 
@@ -108,6 +112,7 @@ class AppManageActivity : AppCompatActivity() {
         loadAppsJob?.cancel()
         loadAppsJob = scope.launch {
             val apps = appRepository.getInstalledApps(launcherPreferences)
+            currentSelectedOrder = apps.filter { it.isSelected }.map { it.packageName }
             adapter.submitList(apps)
             recyclerView.isVisible = apps.isNotEmpty()
             emptyView.isVisible = apps.isEmpty()
@@ -116,7 +121,26 @@ class AppManageActivity : AppCompatActivity() {
 
     private fun saveAppSelection(packageName: String, isSelected: Boolean) {
         launcherPreferences.setPackageSelected(packageName, isSelected)
+        val baseOrder = currentSelectedOrder.ifEmpty { launcherPreferences.getAppOrder() }
+        currentSelectedOrder = HomeAppOrderPolicy.updateOrderForSelection(
+            baseOrder,
+            packageName,
+            isSelected
+        )
         appRepository.invalidateSelections()
-        adapter.updateSelection(packageName, isSelected)
+        loadInstalledApps()
+    }
+
+    private fun moveSelectedApp(packageName: String, offset: Int) {
+        val movedOrder = HomeAppOrderPolicy.moveSelectedPackage(
+            currentOrder = currentSelectedOrder,
+            packageName = packageName,
+            offset = offset
+        ) ?: return
+        if (movedOrder == currentSelectedOrder) return
+        currentSelectedOrder = movedOrder
+        launcherPreferences.saveAppOrder(movedOrder)
+        appRepository.invalidateSelections()
+        loadInstalledApps()
     }
 }
