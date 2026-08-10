@@ -4,7 +4,7 @@
 
 **Goal:** Reduce elderly handoff taps and duplicate external launches without changing Root authority or automatically placing calls.
 
-**Architecture:** Keep `PhoneCallLauncher` as the shared phone state machine and inject a separate dialer-launch callback for its safe fallback. Extract Home app launch resolution/gating into `HomeAppLauncher`, leaving `HomeNavigator` responsible only for navigation wiring and user-facing unavailable feedback. Both gates are small elapsed-time state holders with deterministic tests.
+**Architecture:** Keep `PhoneCallLauncher` as the shared phone state machine and reuse its existing generic Intent-launch boundary for the safe dialer fallback. Extract Home app launch resolution/gating into `HomeAppLauncher`, leaving `HomeNavigator` responsible only for navigation wiring and user-facing unavailable feedback. Both gates are small elapsed-time state holders with deterministic tests.
 
 **Tech Stack:** Kotlin, Android Intent, RecyclerView click listeners, Robolectric/JUnit, Gradle Android plugin.
 
@@ -22,17 +22,15 @@
 
 **Files:**
 - Modify: `app/src/main/java/com/yinxing/launcher/feature/phone/PhoneCallLauncher.kt`
-- Modify: `app/src/main/java/com/yinxing/launcher/feature/home/MainActivity.kt`
-- Modify: `app/src/main/java/com/yinxing/launcher/feature/phone/PhoneContactActivity.kt`
 - Test: `app/src/test/java/com/yinxing/launcher/feature/phone/PhoneCallLauncherTest.kt`
 
 **Interfaces:**
-- `PhoneCallLauncher` consumes `launchDialer: (Intent) -> Unit` and produces the existing fallback callback only when that operation throws.
+- `PhoneCallLauncher` reuses `launchIntent: (Intent) -> Unit` for `ACTION_DIAL` and produces the existing fallback callback only when that operation also throws.
 
 - [ ] Write tests for permission denial and direct-call failure automatically attempting `ACTION_DIAL`, and for dialer failure retaining the fallback callback.
-- [ ] Run the focused launcher tests and confirm the new cases fail because no dialer callback exists.
-- [ ] Add the callback and one shared `openDialerOrFallback` path; keep `onCallLaunched` only on direct-call success.
-- [ ] Wire both Activity hosts to `startActivity` for dialer fallback and run the focused tests again.
+- [ ] Run the focused launcher tests and confirm the new cases fail because failure paths do not launch `ACTION_DIAL`.
+- [ ] Add one shared `openDialerOrFallback` path using `launchIntent`; keep `onCallLaunched` only on direct-call success.
+- [ ] Run the focused tests again; no Activity constructor wiring change is required.
 - [ ] Commit `feat: hand off failed calls to dialer`.
 
 ### Task 2: Same-target Home app launch gate

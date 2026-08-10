@@ -16,9 +16,9 @@ Preview 20 已解决首页长列表的虚拟化与拖拽一致性，但首页和
 
 ### 电话接管
 
-`PhoneCallLauncher` 增加独立的 `launchDialer` 回调。直接路径仍先通过现有 1.2 秒 `PhoneCallLaunchGate`；所有直接路径失败统一进入 `openDialerOrFallback`：先调用一次 `PhoneCallIntentFactory.dialer(number)`，成功即结束当前应用侧流程，失败才调用 `showFallback(contact, directCallFailed)`。权限被拒时传 `directCallFailed=false`，直接 intent 抛错时传 `true`。拨号盘启动不记录“已拨打”次数，因为此时尚未确认通话。
+`PhoneCallLauncher` 复用现有的 `launchIntent(Intent)` 边界。直接路径仍先通过现有 1.2 秒 `PhoneCallLaunchGate`；所有直接路径失败统一进入 `openDialerOrFallback`：先用同一回调启动一次 `PhoneCallIntentFactory.dialer(number)`，成功即结束当前应用侧流程，失败才调用 `showFallback(contact, directCallFailed)`。权限被拒时传 `directCallFailed=false`，直接 intent 抛错时传 `true`。拨号盘启动不记录“已拨打”次数，因为此时尚未确认通话。
 
-两个宿主 Activity 都提供同样的 dialer 回调。自动进入拨号盘不再弹模态框；只有系统没有可处理的拨号盘时才沿用弹窗，因此无 Root、无电话权限和 OEM 失败仍有可恢复出口。
+两个宿主 Activity 已经提供相同的 `startActivity` 回调，无需新增宿主接口。自动进入拨号盘不再弹模态框；只有系统没有可处理的拨号盘时才沿用弹窗，因此无 Root、无电话权限和 OEM 失败仍有可恢复出口。
 
 ### 首页应用接管
 
