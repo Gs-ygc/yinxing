@@ -1,5 +1,7 @@
 package com.yinxing.launcher.feature.home
 
+import android.content.Context
+import android.graphics.Bitmap
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
@@ -7,9 +9,11 @@ import android.widget.ImageView
 import android.widget.TextView
 import androidx.cardview.widget.CardView
 import androidx.lifecycle.LifecycleCoroutineScope
+import androidx.recyclerview.widget.AsyncDifferConfig
+import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
 import androidx.recyclerview.widget.ItemTouchHelper
-import androidx.recyclerview.widget.ListAdapter
+import androidx.recyclerview.widget.ListUpdateCallback
 import androidx.recyclerview.widget.RecyclerView
 import com.yinxing.launcher.R
 import com.yinxing.launcher.common.media.MediaThumbnailLoader
@@ -22,8 +26,10 @@ class HomeAppAdapter(
     private var lowPerformanceMode: Boolean,
     private var iconScale: Int = 100,
     private val onItemClick: (HomeAppItem) -> Unit,
-    private val onOrderChanged: (List<HomeAppItem>) -> Unit
-) : ListAdapter<HomeAppItem, RecyclerView.ViewHolder>(DiffCallback), ItemTouchHelperAdapter {
+    private val onOrderChanged: (List<HomeAppItem>) -> Unit,
+    private val loadAppIcon: suspend (Context, String, Int) -> Bitmap? =
+        MediaThumbnailLoader::loadAppIcon
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ItemTouchHelperAdapter {
     companion object {
         const val VIEW_TYPE_APP = 0
         private const val PAYLOAD_UI = "payload_ui"
@@ -37,9 +43,35 @@ class HomeAppAdapter(
         }
     }
 
+    private var suppressDifferUpdates = false
+    private val differ = AsyncListDiffer(
+        object : ListUpdateCallback {
+            override fun onInserted(position: Int, count: Int) {
+                if (!suppressDifferUpdates) notifyItemRangeInserted(position, count)
+            }
+
+            override fun onRemoved(position: Int, count: Int) {
+                if (!suppressDifferUpdates) notifyItemRangeRemoved(position, count)
+            }
+
+            override fun onMoved(fromPosition: Int, toPosition: Int) {
+                if (!suppressDifferUpdates) notifyItemMoved(fromPosition, toPosition)
+            }
+
+            override fun onChanged(position: Int, count: Int, payload: Any?) {
+                if (!suppressDifferUpdates) notifyItemRangeChanged(position, count, payload)
+            }
+        },
+        AsyncDifferConfig.Builder(DiffCallback).build()
+    )
     private var touchHelper: ItemTouchHelper? = null
     private var dragItems: MutableList<HomeAppItem>? = null
     private var dragChanged = false
+    private var dragCommitInFlight = false
+    private var pendingSubmission: PendingSubmission? = null
+
+    val currentList: List<HomeAppItem>
+        get() = differ.currentList
 
     init {
         setHasStableIds(true)
@@ -61,11 +93,23 @@ class HomeAppAdapter(
         notifyItemRangeChanged(0, itemCount, PAYLOAD_UI)
     }
 
+    fun submitList(items: List<HomeAppItem>, commitCallback: (() -> Unit)? = null) {
+        if (dragItems != null || dragCommitInFlight) {
+            pendingSubmission = PendingSubmission(items, commitCallback)
+            return
+        }
+        differ.submitList(items) {
+            commitCallback?.invoke()
+        }
+    }
+
     class AppViewHolder(view: View) : RecyclerView.ViewHolder(view) {
         val card: CardView = view.findViewById(R.id.card_item)
         val icon: ImageView = view.findViewById(R.id.icon)
         val name: TextView = view.findViewById(R.id.name)
         var iconJob: Job? = null
+        var boundItem: HomeAppItem? = null
+        var boundStableId: Long = RecyclerView.NO_ID
         var uiKey: Int = Int.MIN_VALUE
     }
 
@@ -99,6 +143,9 @@ class HomeAppAdapter(
     ) {
         if (holder is AppViewHolder && payloads.contains(PAYLOAD_UI)) {
             applyUi(holder)
+            holder.boundItem
+                ?.takeIf { it.type == HomeAppItem.Type.APP }
+                ?.let { item -> loadApplicationIcon(holder, item, showPlaceholder = false) }
             return
         }
         super.onBindViewHolder(holder, position, payloads)
@@ -108,16 +155,10 @@ class HomeAppAdapter(
         if (holder is AppViewHolder) {
             holder.iconJob?.cancel()
             holder.iconJob = null
+            holder.boundItem = null
+            holder.boundStableId = RecyclerView.NO_ID
         }
         super.onViewRecycled(holder)
-    }
-
-    override fun onViewDetachedFromWindow(holder: RecyclerView.ViewHolder) {
-        if (holder is AppViewHolder) {
-            holder.iconJob?.cancel()
-            holder.iconJob = null
-        }
-        super.onViewDetachedFromWindow(holder)
     }
 
     private fun displayedItems(): List<HomeAppItem> = dragItems ?: currentList
@@ -165,7 +206,8 @@ class HomeAppAdapter(
     }
 
     private fun bindApp(holder: AppViewHolder, item: HomeAppItem) {
-        val context = holder.itemView.context
+        holder.boundItem = item
+        holder.boundStableId = item.stableId
         holder.name.text = item.appName
         holder.card.contentDescription = item.appName
         holder.icon.setBackgroundResource(
@@ -177,19 +219,9 @@ class HomeAppAdapter(
         )
         holder.iconJob?.cancel()
         if (item.type == HomeAppItem.Type.APP) {
-            holder.icon.setImageResource(android.R.drawable.sym_def_app_icon)
-            val iconSize = holder.icon.layoutParams.width.coerceAtLeast(1)
-            holder.iconJob = scope.launch {
-                val bitmap = MediaThumbnailLoader.loadAppIcon(context, item.packageName, iconSize)
-                if (!holder.itemView.isAttachedToWindow) return@launch
-                val currentPosition = holder.bindingAdapterPosition
-                if (currentPosition == RecyclerView.NO_POSITION) return@launch
-                val currentItem = itemAtOrNull(currentPosition)
-                if (currentItem?.stableId == item.stableId && bitmap != null) {
-                    holder.icon.setImageBitmap(bitmap)
-                }
-            }
+            loadApplicationIcon(holder, item, showPlaceholder = true)
         } else {
+            holder.iconJob = null
             holder.icon.setImageResource(item.iconResId ?: android.R.drawable.sym_def_app_icon)
         }
         holder.icon.setOnLongClickListener(null)
@@ -203,6 +235,25 @@ class HomeAppAdapter(
             holder.icon.setOnLongClickListener {
                 touchHelper?.startDrag(holder)
                 true
+            }
+        }
+    }
+
+    private fun loadApplicationIcon(
+        holder: AppViewHolder,
+        item: HomeAppItem,
+        showPlaceholder: Boolean
+    ) {
+        if (showPlaceholder) {
+            holder.icon.setImageResource(android.R.drawable.sym_def_app_icon)
+        }
+        holder.iconJob?.cancel()
+        val context = holder.itemView.context
+        val iconSize = holder.icon.layoutParams.width.coerceAtLeast(1)
+        holder.iconJob = scope.launch {
+            val bitmap = loadAppIcon(context, item.packageName, iconSize)
+            if (holder.boundStableId == item.stableId && bitmap != null) {
+                holder.icon.setImageBitmap(bitmap)
             }
         }
     }
@@ -241,15 +292,35 @@ class HomeAppAdapter(
         val reordered = dragItems ?: return
         if (!dragChanged) {
             dragItems = null
+            applyPendingSubmission()
             return
         }
         val finalItems = reordered.toList()
         dragChanged = false
-        submitList(finalItems) {
+        dragCommitInFlight = true
+        suppressDifferUpdates = true
+        differ.submitList(finalItems) {
+            suppressDifferUpdates = false
             dragItems = null
-            onOrderChanged(finalItems)
+            try {
+                onOrderChanged(finalItems)
+            } finally {
+                dragCommitInFlight = false
+                applyPendingSubmission()
+            }
         }
     }
+
+    private fun applyPendingSubmission() {
+        val pending = pendingSubmission ?: return
+        pendingSubmission = null
+        submitList(pending.items, pending.commitCallback)
+    }
+
+    private data class PendingSubmission(
+        val items: List<HomeAppItem>,
+        val commitCallback: (() -> Unit)?
+    )
 
     private fun android.content.Context.dpToPx(dp: Int): Int =
         (dp * resources.displayMetrics.density).toInt()

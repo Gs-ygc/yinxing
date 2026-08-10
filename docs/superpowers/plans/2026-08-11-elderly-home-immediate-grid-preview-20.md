@@ -25,6 +25,8 @@
 - Replace the outer scroll layout with one RecyclerView, create `item_home_header.xml` and `HomeHeaderAdapter`, and route existing weather/status/trusted-contact rendering into that header.
 - Compose the header and app adapters with `ConcatAdapter`; assign header two spans and app items one span.
 - Guard `ItemMoveCallback` so drops into the header never change application order.
+- Keep detached-but-cached icon loads alive, cancel only recycled holders, and reload visible third-party icons when their requested size changes.
+- Commit drag order into an `AsyncListDiffer` without dispatching a second move; defer the latest list refresh until that internal snapshot is committed.
 - Change `item_home_app.xml` root and inner container to `wrap_content`, with a 200dp minimum baseline.
 - Change `HomeAppAdapter.applyUi` to update `minimumHeight` and icon dimensions without forcing `layoutParams.height`.
 - Replace `animateIn` with a deterministic reset to `alpha=1f` and `translationY=0f`; do not add a replacement animation.
