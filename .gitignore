@@ -30,4 +30,5 @@ app/google-services .json
 .windsurf
 .tmp_preview/
 .worktrees/
+.superpowers/
 update_release.py
