@@ -62,7 +62,8 @@
 
 - [x] Add a MainActivity smoke assertion that a selected external application is launched only once for a same-target touch burst.
 - [x] Bump version to `1.10.0-root-preview.21` / code 37.
-- [ ] Run forced unit tests, APK and androidTest compilation, lint classification, and unchanged Root matrix.
+- [x] Apply independent-review hardening for fatal errors, unavailable-app feedback, and host dialer handoff.
+- [x] Run forced unit tests, APK and androidTest compilation, lint classification, and unchanged Root matrix.
 - [ ] Package APK/checksum assets, verify metadata/signature/byte identity, and publish a prerelease with explicit device gaps.
 - [ ] Fresh-download Release assets and verify checksums and remote refs before merging to `main`.
 - [ ] Commit release evidence, fast-forward/push `main`, tag, and publish the GitHub Release.
