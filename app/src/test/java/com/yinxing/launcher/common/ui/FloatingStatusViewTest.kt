@@ -1,14 +1,17 @@
 package com.yinxing.launcher.common.ui
 
 import android.content.Context
+import android.content.res.Configuration
 import android.view.LayoutInflater
 import android.view.View
+import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -79,6 +82,38 @@ class FloatingStatusViewTest {
 
         statusView.bindText(root, "正在联系 女儿", null)
         assertEquals(View.GONE, root.findViewById<View>(R.id.tv_status_step).visibility)
+    }
+
+    @Test
+    fun largeTextAndLongCopyHaveNoClippingCapWithinPhoneWidth() {
+        val largeTextContext = context.createConfigurationContext(
+            Configuration(context.resources.configuration).apply { fontScale = 2f }
+        )
+        val root = LayoutInflater.from(largeTextContext)
+            .inflate(R.layout.floating_status, FrameLayout(largeTextContext), false)
+        val titleText = "正在联系 住在上海负责照护和联系的女儿小王以及紧急备用联系人小王家属"
+        val statusText = "消息列表未找到，正在打开搜索并查找联系人，请稍候"
+        FloatingStatusView(largeTextContext).bindText(root, titleText, statusText)
+
+        val phoneWidth = largeTextContext.dp(360)
+        root.measure(
+            View.MeasureSpec.makeMeasureSpec(phoneWidth, View.MeasureSpec.AT_MOST),
+            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+        )
+        root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+
+        val title = root.findViewById<TextView>(R.id.tv_status)
+        val status = root.findViewById<TextView>(R.id.tv_status_step)
+        assertEquals(2f, largeTextContext.resources.configuration.fontScale, 0f)
+        assertEquals(Int.MAX_VALUE, title.maxLines)
+        assertEquals(Int.MAX_VALUE, status.maxLines)
+        assertNull(title.ellipsize)
+        assertNull(status.ellipsize)
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, title.layoutParams.height)
+        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, status.layoutParams.height)
+        assertEquals(titleText.length, title.layout.getLineEnd(title.layout.lineCount - 1))
+        assertEquals(statusText.length, status.layout.getLineEnd(status.layout.lineCount - 1))
+        assertTrue(root.measuredWidth <= phoneWidth)
     }
 
     private fun Context.dp(value: Int): Int =
