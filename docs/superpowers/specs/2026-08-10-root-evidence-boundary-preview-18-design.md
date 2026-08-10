@@ -32,8 +32,10 @@ and stale marker evidence is not trusted.
 ## Boot identity contract
 
 `read_boot_id_from()` keeps its source order: the configured boot-id file,
-`/proc/stat` `btime`, then fixed `getprop ro.runtime.firstboot`. A source is
-usable only when it produces a non-empty value that is not the reserved
+`/proc/stat` `btime`, then fixed `getprop ro.runtime.firstboot`. The
+`/proc/stat` path has a host/BusyBox test-only environment override and
+defaults to the literal `/proc/stat` in production. A source is usable only
+when it produces a non-empty value that is not the reserved
 literal `unknown` after validation. If all sources fail, the sanitized
 directory fallback remains `unknown` for lock compatibility, but
 `current_guard_boot_id_is_known()` returns failure.
