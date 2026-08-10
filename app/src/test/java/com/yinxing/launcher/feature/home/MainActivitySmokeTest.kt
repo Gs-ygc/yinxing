@@ -33,6 +33,7 @@ import org.junit.Assert.assertEquals
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -285,6 +286,30 @@ class MainActivitySmokeTest {
         assertEquals("tel:13800138000", startedIntent.dataString)
     }
 
+    @Test
+    fun sameExternalAppTouchBurstStartsOnlyOneActivity() {
+        registerLauncherApp(packageName = "pkg.camera", appLabel = "相机")
+        LauncherPreferences(context).setPackageSelected("pkg.camera", true)
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
+        waitUntil { homeAppItemCount(recyclerView) == 4 }
+        val item = requireNotNull(homeAppAdapter(recyclerView))
+            .currentList
+            .single { it.packageName == "pkg.camera" }
+        val navigatorField = MainActivity::class.java.getDeclaredField("navigator").apply {
+            isAccessible = true
+        }
+        val navigator = navigatorField.get(activity) as HomeNavigator
+
+        navigator.openHomeItem(item)
+        navigator.openHomeItem(item)
+
+        val firstIntent = shadowOf(activity).nextStartedActivity
+        val duplicateIntent = shadowOf(activity).nextStartedActivity
+        assertEquals("pkg.camera", firstIntent.component?.packageName)
+        assertNull(duplicateIntent)
+    }
+
 
     @Suppress("DEPRECATION")
     private fun registerWeatherBrowser() {
@@ -319,7 +344,10 @@ class MainActivitySmokeTest {
         val resolveInfo = ResolveInfo().apply {
             this.activityInfo = activityInfo
         }
-        shadowOf(context.packageManager).addResolveInfoForIntent(launcherIntent, resolveInfo)
+        shadowOf(context.packageManager).apply {
+            addResolveInfoForIntent(launcherIntent, resolveInfo)
+            addResolveInfoForIntent(Intent(launcherIntent).setPackage(packageName), resolveInfo)
+        }
     }
 
 

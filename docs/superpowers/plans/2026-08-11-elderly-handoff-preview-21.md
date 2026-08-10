@@ -31,7 +31,7 @@
 - [x] Run the focused launcher tests and confirm the new cases fail because failure paths do not launch `ACTION_DIAL`.
 - [x] Add one shared `openDialerOrFallback` path using `launchIntent`; keep `onCallLaunched` only on direct-call success.
 - [x] Run the focused tests again; no Activity constructor wiring change is required.
-- [ ] Commit `feat: hand off failed calls to dialer`.
+- [x] Commit `feat: hand off failed calls to dialer`.
 
 ### Task 2: Same-target Home app launch gate
 
@@ -46,12 +46,12 @@
 - `HomeAppLaunchGate.tryAcquire(packageName: String): Boolean` accepts a destination when it has not succeeded inside the cooldown; `release(packageName: String)` removes a failed attempt.
 - `HomeAppLauncher.open(item: HomeAppItem): Boolean` resolves/launches one app and invokes `onUnavailable` for blank or unresolved packages.
 
-- [ ] Write gate tests for same-target suppression, independent different-target acceptance, expiry, and release after failure.
-- [ ] Run the focused gate tests and confirm RED.
-- [ ] Implement the minimal elapsed-realtime gate.
-- [ ] Write launcher tests for intent resolution, one successful launch, duplicate suppression, and unavailable feedback.
-- [ ] Run launcher tests RED, then implement the resolver/launch wrapper.
-- [ ] Wire `HomeNavigator` to the wrapper without changing phone/WeChat/add routing; commit `feat: guard duplicate home app launches`.
+- [x] Write gate tests for same-target suppression, independent different-target acceptance, expiry, and release after failure.
+- [x] Run the focused gate tests and confirm RED.
+- [x] Implement the minimal elapsed-realtime gate.
+- [x] Write launcher tests for intent resolution, one successful launch, duplicate suppression, and unavailable feedback.
+- [x] Run launcher tests RED, then implement the resolver/launch wrapper.
+- [x] Wire `HomeNavigator` to the wrapper without changing phone/WeChat/add routing; commit `feat: guard duplicate home app launches`.
 
 ### Task 3: Regression and release evidence
 
@@ -60,7 +60,7 @@
 - Modify: `docs/release/yinxing-root-preview-21.md`
 - Modify: `app/build.gradle.kts`
 
-- [ ] Add a MainActivity smoke assertion that a selected external application is launched only once for a same-target touch burst.
+- [x] Add a MainActivity smoke assertion that a selected external application is launched only once for a same-target touch burst.
 - [ ] Bump version to `1.10.0-root-preview.21` / code 37.
 - [ ] Run forced unit tests, APK and androidTest compilation, lint classification, and unchanged Root matrix.
 - [ ] Package APK/checksum assets, verify metadata/signature/byte identity, and publish a prerelease with explicit device gaps.

@@ -16,6 +16,18 @@ import com.yinxing.launcher.feature.videocall.VideoCallActivity
 class HomeNavigator(
     private val activity: AppCompatActivity
 ) {
+    private val appLauncher = HomeAppLauncher(
+        resolveLaunchIntent = activity.packageManager::getLaunchIntentForPackage,
+        launchIntent = activity::startActivity,
+        onUnavailable = { item ->
+            Toast.makeText(
+                activity,
+                activity.getString(R.string.open_app_failed, item.appName),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+    )
+
     fun openWeatherEntry() {
         val vendorIntent = listOf(
             "com.miui.weather2",
@@ -79,15 +91,6 @@ class HomeNavigator(
     }
 
     private fun openApp(item: HomeAppItem) {
-        val intent = activity.packageManager.getLaunchIntentForPackage(item.packageName)
-        if (intent != null) {
-            activity.startActivity(intent)
-        } else {
-            Toast.makeText(
-                activity,
-                activity.getString(R.string.open_app_failed, item.appName),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
+        appLauncher.open(item)
     }
 }
