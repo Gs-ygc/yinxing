@@ -54,12 +54,14 @@ class LauncherAppRepository(
     }
 
     suspend fun getInstalledApps(preferences: LauncherPreferences): List<AppInfo> = withContext(Dispatchers.IO) {
-        loadInstalledApps().map { app ->
-            AppInfo(
-                packageName = app.packageName,
-                appName = app.appName,
-                isSelected = preferences.isPackageSelected(app.packageName)
-            )
+        val selectedPackages = preferences.getSelectedPackages()
+        val orderedRecords = HomeAppOrderPolicy.orderManagementApps(
+            apps = loadInstalledApps().map { OrderedApp(it.packageName, it.appName) },
+            selectedPackages = selectedPackages,
+            savedOrder = preferences.getAppOrder()
+        )
+        orderedRecords.map { app ->
+            AppInfo(app.packageName, app.appName, app.packageName in selectedPackages)
         }
     }
 

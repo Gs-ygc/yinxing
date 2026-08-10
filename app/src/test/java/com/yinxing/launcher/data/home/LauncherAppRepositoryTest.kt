@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
+import com.yinxing.launcher.feature.appmanage.AppInfo
 import com.yinxing.launcher.feature.home.HomeAppItem
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
@@ -46,6 +47,30 @@ class LauncherAppRepositoryTest {
 
         assertEquals(listOf("pkg.beta", "pkg.zeta"), apps.map { it.packageName })
         assertTrue(apps.first { it.packageName == "pkg.beta" }.isSelected)
+    }
+
+    @Test
+    fun getInstalledAppsListsSelectedAppsInSavedOrderBeforeUnselectedApps() = runTest {
+        preferences.setPackageSelected("pkg.zebra", true)
+        preferences.setPackageSelected("pkg.alpha", true)
+        preferences.saveAppOrder(listOf("pkg.zebra", "pkg.alpha"))
+        val repository = LauncherAppRepository(
+            context,
+            FakeLauncherAppSource(
+                installed = listOf(
+                    LauncherAppRecord("pkg.zebra", "Zebra"),
+                    LauncherAppRecord("pkg.alpha", "Alpha"),
+                    LauncherAppRecord("pkg.beta", "Beta")
+                )
+            )
+        )
+
+        val apps = repository.getInstalledApps(preferences)
+
+        assertEquals(
+            listOf("pkg.zebra", "pkg.alpha", "pkg.beta"),
+            apps.map(AppInfo::packageName)
+        )
     }
 
     @Test

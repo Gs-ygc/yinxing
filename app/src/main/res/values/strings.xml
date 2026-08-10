@@ -48,6 +48,8 @@
     <string name="app_manage_title">选择应用</string>
     <string name="app_manage_subtitle">勾选需要显示在桌面的应用，回到主页就能直接使用</string>
     <string name="app_manage_empty_message">未读取到可显示应用，请确认系统允许读取桌面应用列表</string>
+    <string name="app_move_up_description">上移 %1$s</string>
+    <string name="app_move_down_description">下移 %1$s</string>
     <string name="phone_title">电话簿</string>
     <string name="phone_subtitle">点一下直接打开系统联系人页面</string>
 
