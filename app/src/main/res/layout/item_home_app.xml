@@ -3,8 +3,9 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/card_item"
     android:layout_width="match_parent"
-    android:layout_height="200dp"
+    android:layout_height="wrap_content"
     android:layout_margin="8dp"
+    android:minHeight="200dp"
     android:clickable="true"
     android:focusable="true"
     android:foreground="?android:attr/selectableItemBackground"
@@ -15,8 +16,10 @@
     app:strokeWidth="1dp">
 
     <LinearLayout
+        android:id="@+id/layout_app_content"
         android:layout_width="match_parent"
-        android:layout_height="match_parent"
+        android:layout_height="wrap_content"
+        android:minHeight="200dp"
         android:gravity="center_horizontal"
         android:orientation="vertical"
         android:paddingStart="20dp"

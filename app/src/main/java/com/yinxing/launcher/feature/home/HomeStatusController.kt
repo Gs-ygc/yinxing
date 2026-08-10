@@ -2,10 +2,10 @@ package com.yinxing.launcher.feature.home
 
 import android.view.View
 import com.yinxing.launcher.R
-import com.yinxing.launcher.databinding.ActivityMainBinding
+import com.yinxing.launcher.databinding.ItemHomeHeaderBinding
 
 class HomeStatusController(
-    private val binding: ActivityMainBinding,
+    private val binding: ItemHomeHeaderBinding,
     private val onRetry: () -> Unit,
     private val onOpenSettings: () -> Unit
 ) {

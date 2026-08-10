@@ -16,7 +16,7 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
-import androidx.recyclerview.widget.DefaultItemAnimator
+import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import com.yinxing.launcher.R
@@ -39,9 +39,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: HomeAppAdapter
     private lateinit var itemMoveCallback: ItemMoveCallback
-    private lateinit var headerController: WeatherHeaderController
-    private lateinit var statusController: HomeStatusController
-    private lateinit var trustedContactsController: HomeTrustedContactsController
+    private lateinit var homeHeaderAdapter: HomeHeaderAdapter
     private lateinit var navigator: HomeNavigator
     private lateinit var viewModel: HomeViewModel
     private lateinit var phoneCallLauncher: PhoneCallLauncher
@@ -80,16 +78,8 @@ class MainActivity : AppCompatActivity() {
             onCallLaunched = { contact -> recordCall(contact) }
         )
         restorePendingCall(savedInstanceState)
-        headerController = WeatherHeaderController(binding)
-        statusController = HomeStatusController(
-            binding = binding,
-            onRetry = viewModel::refreshApps,
-            onOpenSettings = navigator::showCaregiverEntryDialog
-        )
-        trustedContactsController = HomeTrustedContactsController(binding.layoutTrustedCalls.root)
         setupBackPress()
         setupRecycler()
-        setupActions()
         observeViewModel()
         registerPackageReceiver()
         binding.recyclerHome.post { viewModel.refreshApps() }
@@ -147,6 +137,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupRecycler() {
         val settings = viewModel.settings.value
+        homeHeaderAdapter = HomeHeaderAdapter(
+            onOpenWeather = navigator::openWeatherEntry,
+            onOpenCaregiver = navigator::showCaregiverEntryDialog,
+            onRetryApps = viewModel::refreshApps,
+            onCall = ::makeCall,
+            onOpenAllCalls = navigator::openPhoneContacts
+        )
         adapter = HomeAppAdapter(
             scope = lifecycleScope,
             lowPerformanceMode = settings.lowPerformanceMode,
@@ -154,23 +151,23 @@ class MainActivity : AppCompatActivity() {
             onItemClick = navigator::openHomeItem,
             onOrderChanged = viewModel::saveAppOrder
         )
-        binding.recyclerHome.layoutManager = GridLayoutManager(this, 2)
+        val layoutManager = GridLayoutManager(this, 2)
+        layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
+            override fun getSpanSize(position: Int): Int =
+                if (position < homeHeaderAdapter.itemCount) layoutManager.spanCount else 1
+        }
+        binding.recyclerHome.layoutManager = layoutManager
         binding.recyclerHome.setHasFixedSize(false)
-        binding.recyclerHome.adapter = adapter
+        binding.recyclerHome.isNestedScrollingEnabled = true
+        binding.recyclerHome.adapter = ConcatAdapter(homeHeaderAdapter, adapter)
         itemMoveCallback = ItemMoveCallback(adapter, !settings.lowPerformanceMode)
         ItemTouchHelper(itemMoveCallback).also {
             it.attachToRecyclerView(binding.recyclerHome)
             adapter.setTouchHelper(it)
         }
         adapter.submitList(viewModel.homeUiState.value.items)
+        homeHeaderAdapter.renderHomeState(viewModel.homeUiState.value)
         applySettings(settings)
-    }
-
-    private fun setupActions() {
-        binding.cardWeather.root.setOnClickListener { navigator.openWeatherEntry() }
-        binding.btnFamilySettings.setOnClickListener { navigator.showCaregiverEntryDialog() }
-        trustedContactsController.setOnCallClick(::makeCall)
-        trustedContactsController.setOnOpenAllClick(navigator::openPhoneContacts)
     }
 
     private fun observeViewModel() {
@@ -182,11 +179,11 @@ class MainActivity : AppCompatActivity() {
         }
         lifecycleScope.launch {
             viewModel.weatherState.collect { state ->
-                state?.let(headerController::renderWeather)
+                state?.let(homeHeaderAdapter::renderWeather)
             }
         }
         lifecycleScope.launch {
-            viewModel.trustedContacts.collect(trustedContactsController::render)
+            viewModel.trustedContacts.collect(homeHeaderAdapter::renderTrustedContacts)
         }
     }
 
@@ -194,23 +191,24 @@ class MainActivity : AppCompatActivity() {
         adapter.submitList(state.items) {
             maybeReportFullyDrawn(state)
         }
-        statusController.render(state)
+        homeHeaderAdapter.renderHomeState(state)
     }
 
     private fun applySettings(settings: HomeSettingsState) {
         binding.recyclerHome.setItemViewCacheSize(if (settings.lowPerformanceMode) 4 else 10)
-        binding.recyclerHome.itemAnimator = if (settings.lowPerformanceMode) null else DefaultItemAnimator()
+        // The launcher is a repeated daily action surface; list insertion must never delay the first tap.
+        binding.recyclerHome.itemAnimator = null
         adapter.setLowPerformanceMode(settings.lowPerformanceMode)
         adapter.setIconScale(settings.iconScale)
         itemMoveCallback.setAnimateDrag(!settings.lowPerformanceMode)
-        headerController.applyScale(settings.iconScale)
+        homeHeaderAdapter.applySettings(settings)
     }
 
     private fun startTimeTicker() {
         tickerJob?.cancel()
         tickerJob = lifecycleScope.launch {
             timeTicker.run { snapshot ->
-                headerController.renderTime(snapshot, viewModel.settings.value.lowPerformanceMode)
+                homeHeaderAdapter.renderTime(snapshot, viewModel.settings.value.lowPerformanceMode)
             }
         }
     }

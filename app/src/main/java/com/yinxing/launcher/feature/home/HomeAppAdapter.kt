@@ -3,7 +3,6 @@ package com.yinxing.launcher.feature.home
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
-import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
 import android.widget.TextView
 import androidx.cardview.widget.CardView
@@ -27,7 +26,6 @@ class HomeAppAdapter(
 ) : ListAdapter<HomeAppItem, RecyclerView.ViewHolder>(DiffCallback), ItemTouchHelperAdapter {
     companion object {
         const val VIEW_TYPE_APP = 0
-        private const val MAX_ANIMATED_ITEMS = 6
         private const val PAYLOAD_UI = "payload_ui"
 
         private val DiffCallback = object : DiffUtil.ItemCallback<HomeAppItem>() {
@@ -40,7 +38,6 @@ class HomeAppAdapter(
     }
 
     private var touchHelper: ItemTouchHelper? = null
-    private var maxAnimatedPosition = -1
     private var dragItems: MutableList<HomeAppItem>? = null
     private var dragChanged = false
 
@@ -87,9 +84,11 @@ class HomeAppAdapter(
     override fun onBindViewHolder(holder: RecyclerView.ViewHolder, position: Int) {
         val item = itemAt(position)
         if (holder is AppViewHolder) {
+            holder.itemView.animate().cancel()
+            holder.itemView.alpha = 1f
+            holder.itemView.translationY = 0f
             applyUi(holder)
             bindApp(holder, item)
-            animateIn(holder.itemView, position)
         }
     }
 
@@ -148,11 +147,19 @@ class HomeAppAdapter(
         if (holder.icon.paddingLeft != pad) {
             holder.icon.setPadding(pad, pad, pad, pad)
         }
-        val cardHeight = context.dpToPx((200 * iconScale / 100f).toInt().coerceAtLeast(120))
+        val cardMinHeight = context.dpToPx((200 * iconScale / 100f).toInt().coerceAtLeast(120))
         val cardLp = holder.card.layoutParams
-        if (cardLp.height != cardHeight) {
-            cardLp.height = cardHeight
+        if (cardLp.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
+            cardLp.height = ViewGroup.LayoutParams.WRAP_CONTENT
             holder.card.layoutParams = cardLp
+        }
+        holder.card.minimumHeight = cardMinHeight
+        val content = holder.card.findViewById<View>(R.id.layout_app_content)
+        content.minimumHeight = cardMinHeight
+        val contentLp = content.layoutParams
+        if (contentLp.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
+            contentLp.height = ViewGroup.LayoutParams.WRAP_CONTENT
+            content.layoutParams = contentLp
         }
         holder.name.textSize = (24f * iconScale / 100f).coerceAtLeast(16f)
     }
@@ -200,24 +207,6 @@ class HomeAppAdapter(
         }
     }
 
-    private fun animateIn(view: View, position: Int) {
-        if (lowPerformanceMode || position <= maxAnimatedPosition || position >= MAX_ANIMATED_ITEMS) {
-            view.alpha = 1f
-            view.translationY = 0f
-            return
-        }
-        maxAnimatedPosition = position
-        view.alpha = 0f
-        view.translationY = 40f
-        view.animate()
-            .alpha(1f)
-            .translationY(0f)
-            .setStartDelay(position * 30L)
-            .setDuration(200)
-            .setInterpolator(DecelerateInterpolator())
-            .start()
-    }
-
     override fun canMoveItem(position: Int): Boolean =
         itemAtOrNull(position)?.type == HomeAppItem.Type.APP
 
@@ -256,7 +245,6 @@ class HomeAppAdapter(
         }
         val finalItems = reordered.toList()
         dragChanged = false
-        maxAnimatedPosition = Int.MAX_VALUE
         submitList(finalItems) {
             dragItems = null
             onOrderChanged(finalItems)

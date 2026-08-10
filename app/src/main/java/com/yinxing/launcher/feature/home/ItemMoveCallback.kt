@@ -15,7 +15,7 @@ class ItemMoveCallback(
         recyclerView: RecyclerView,
         viewHolder: RecyclerView.ViewHolder
     ): Int {
-        if (!adapter.canMoveItem(viewHolder.bindingAdapterPosition)) {
+        if (!belongsToMovableAdapter(viewHolder) || !adapter.canMoveItem(viewHolder.bindingAdapterPosition)) {
             return makeMovementFlags(0, 0)
         }
 
@@ -29,6 +29,9 @@ class ItemMoveCallback(
         viewHolder: RecyclerView.ViewHolder,
         target: RecyclerView.ViewHolder
     ): Boolean {
+        if (!belongsToMovableAdapter(viewHolder) || !belongsToMovableAdapter(target)) {
+            return false
+        }
         return adapter.onItemMove(
             viewHolder.bindingAdapterPosition,
             target.bindingAdapterPosition
@@ -41,7 +44,9 @@ class ItemMoveCallback(
     override fun onSelectedChanged(viewHolder: RecyclerView.ViewHolder?, actionState: Int) {
         super.onSelectedChanged(viewHolder, actionState)
         if (actionState == ItemTouchHelper.ACTION_STATE_DRAG) {
-            viewHolder?.bindingAdapterPosition
+            viewHolder
+                ?.takeIf(::belongsToMovableAdapter)
+                ?.bindingAdapterPosition
                 ?.takeIf { it != RecyclerView.NO_POSITION }
                 ?.let(adapter::onDragStarted)
         }
@@ -57,12 +62,17 @@ class ItemMoveCallback(
         viewHolder.itemView.alpha = 1.0f
         viewHolder.itemView.scaleX = 1.0f
         viewHolder.itemView.scaleY = 1.0f
-        adapter.onDragFinished()
+        if (belongsToMovableAdapter(viewHolder)) {
+            adapter.onDragFinished()
+        }
     }
 
     fun setAnimateDrag(enabled: Boolean) {
         animateDrag = enabled
     }
+
+    private fun belongsToMovableAdapter(viewHolder: RecyclerView.ViewHolder): Boolean =
+        viewHolder.bindingAdapter === adapter
 }
 
 interface ItemTouchHelperAdapter {

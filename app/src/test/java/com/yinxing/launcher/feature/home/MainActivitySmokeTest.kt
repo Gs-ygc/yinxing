@@ -15,7 +15,8 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
 import android.widget.TextView
-import androidx.core.widget.NestedScrollView
+import androidx.recyclerview.widget.ConcatAdapter
+import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
@@ -64,13 +65,14 @@ class MainActivitySmokeTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
 
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        val statusCard = activity.findViewById<View>(R.id.card_home_status)
-        val timeView = activity.findViewById<TextView>(R.id.tv_time)
         waitUntil {
-            recyclerView.adapter?.itemCount == 3 && statusCard.visibility == View.GONE
+            homeAppItemCount(recyclerView) == 3 &&
+                activity.findViewById<View>(R.id.card_home_status)?.visibility == View.GONE
         }
+        val statusCard = requireNotNull(activity.findViewById<View>(R.id.card_home_status))
+        val timeView = requireNotNull(activity.findViewById<TextView>(R.id.tv_time))
 
-        assertEquals(3, recyclerView.adapter?.itemCount)
+        assertEquals(3, homeAppItemCount(recyclerView))
         assertEquals(View.GONE, statusCard.visibility)
         assertTrue(timeView.text.isNotBlank())
     }
@@ -87,12 +89,13 @@ class MainActivitySmokeTest {
 
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        val statusCard = activity.findViewById<View>(R.id.card_home_status)
         waitUntil {
-            recyclerView.adapter?.itemCount == 5 && statusCard.visibility == View.GONE
+            homeAppItemCount(recyclerView) == 5 &&
+                activity.findViewById<View>(R.id.card_home_status)?.visibility == View.GONE
         }
 
-        val adapter = recyclerView.adapter as HomeAppAdapter
+        val adapter = requireNotNull(homeAppAdapter(recyclerView))
+        val statusCard = requireNotNull(activity.findViewById<View>(R.id.card_home_status))
         assertEquals(
             listOf("phone", "wechat_video", "pkg.browser", "pkg.camera", "add"),
             adapter.currentList.map { it.packageName }
@@ -105,7 +108,8 @@ class MainActivitySmokeTest {
         registerWeatherBrowser()
 
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        activity.findViewById<View>(R.id.card_weather).performClick()
+        waitUntil { activity.findViewById<View>(R.id.card_weather) != null }
+        requireNotNull(activity.findViewById<View>(R.id.card_weather)).performClick()
 
         val startedIntent = shadowOf(activity).nextStartedActivity
         assertNotNull(startedIntent)
@@ -117,9 +121,12 @@ class MainActivitySmokeTest {
     fun noPhoneContactsKeepTrustedCallsSectionHidden() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        waitUntil { recyclerView.adapter?.itemCount == 3 }
+        waitUntil { homeAppItemCount(recyclerView) == 3 }
 
-        assertEquals(View.GONE, activity.findViewById<View>(R.id.layout_trusted_calls).visibility)
+        assertEquals(
+            View.GONE,
+            requireNotNull(activity.findViewById<View>(R.id.layout_trusted_calls)).visibility
+        )
     }
 
     @Test
@@ -140,15 +147,15 @@ class MainActivitySmokeTest {
 
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        val section = activity.findViewById<View>(R.id.layout_trusted_calls)
-        val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
         waitUntil {
-            recyclerView.adapter?.itemCount == 3 &&
-                section.visibility == View.VISIBLE &&
-                items.childCount == 2
+            homeAppItemCount(recyclerView) == 3 &&
+                activity.findViewById<View>(R.id.layout_trusted_calls)?.visibility == View.VISIBLE &&
+                activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)?.childCount == 2
         }
+        val section = requireNotNull(activity.findViewById<View>(R.id.layout_trusted_calls))
+        val items = requireNotNull(activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items))
 
-        assertEquals(3, recyclerView.adapter?.itemCount)
+        assertEquals(3, homeAppItemCount(recyclerView))
         assertEquals(View.VISIBLE, section.visibility)
         assertEquals(2, items.childCount)
         assertEquals("拨打 妈妈", items.getChildAt(0).contentDescription.toString())
@@ -201,22 +208,60 @@ class MainActivitySmokeTest {
     }
 
     @Test
-    fun homeUsesOneScrollableSurfaceOnCompactScreens() {
+    fun homeUsesVirtualizedRecyclerWithFullSpanHeaderOnCompactScreens() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val homeContent = activity.findViewById<View>(R.id.layout_home_root)
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
 
-        assertTrue(homeContent.parent is NestedScrollView)
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, recyclerView.layoutParams.height)
-        assertFalse(recyclerView.isNestedScrollingEnabled)
+        assertEquals(ViewGroup.LayoutParams.MATCH_PARENT, recyclerView.layoutParams.height)
+        assertTrue(recyclerView.isNestedScrollingEnabled)
+        assertTrue(recyclerView.adapter is ConcatAdapter)
+        val layoutManager = recyclerView.layoutManager as GridLayoutManager
+        assertEquals(2, layoutManager.spanCount)
+        assertEquals(2, layoutManager.spanSizeLookup.getSpanSize(0))
+        assertEquals(1, layoutManager.spanSizeLookup.getSpanSize(1))
+    }
+
+    @Test
+    fun manySelectedAppsOnlyBindVisibleRowsAndLastAppRemainsReachable() {
+        val selectedPackages = (1..40).map { index -> "pkg.app$index" }
+        selectedPackages.forEachIndexed { index, packageName ->
+            registerLauncherApp(packageName, "应用 ${index + 1}")
+        }
+        LauncherPreferences(context).apply {
+            selectedPackages.forEach { packageName ->
+                setPackageSelected(packageName, true)
+            }
+            saveAppOrder(selectedPackages)
+        }
+
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
+        waitUntil { homeAppItemCount(recyclerView) == 43 }
+        val totalRows = requireNotNull(recyclerView.adapter).itemCount
+
+        assertEquals(44, totalRows)
+        assertTrue(recyclerView.childCount < totalRows)
+
+        recyclerView.scrollToPosition(totalRows - 1)
+        shadowOf(Looper.getMainLooper()).idle()
+        recyclerView.measure(
+            View.MeasureSpec.makeMeasureSpec(1080, View.MeasureSpec.EXACTLY),
+            View.MeasureSpec.makeMeasureSpec(1920, View.MeasureSpec.EXACTLY)
+        )
+        recyclerView.layout(0, 0, 1080, 1920)
+
+        assertNotNull(recyclerView.findViewHolderForAdapterPosition(totalRows - 1))
+        assertTrue(recyclerView.childCount < totalRows)
     }
 
     @Test
     fun homeStartsWithoutEntryAnimationDelay() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
 
-        assertEquals(1f, activity.findViewById<View>(R.id.layout_home_root).alpha)
-        assertEquals(0f, activity.findViewById<View>(R.id.layout_home_root).translationY)
+        assertEquals(1f, recyclerView.alpha)
+        assertEquals(0f, recyclerView.translationY)
+        assertEquals(null, recyclerView.itemAnimator)
     }
 
     @Test
@@ -228,8 +273,10 @@ class MainActivitySmokeTest {
             )
         }
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
-        val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
-        waitUntil { items.childCount == 1 }
+        waitUntil {
+            activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)?.childCount == 1
+        }
+        val items = requireNotNull(activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items))
 
         items.getChildAt(0).performClick()
 
@@ -294,6 +341,15 @@ class MainActivitySmokeTest {
         (field.get(null) as? PhoneContactManager)?.close()
         field.set(null, null)
     }
+
+    private fun homeAppItemCount(recyclerView: RecyclerView): Int? =
+        homeAppAdapter(recyclerView)?.itemCount
+
+    private fun homeAppAdapter(recyclerView: RecyclerView): HomeAppAdapter? =
+        (recyclerView.adapter as? ConcatAdapter)
+            ?.adapters
+            ?.filterIsInstance<HomeAppAdapter>()
+            ?.singleOrNull()
 
     private fun waitUntil(timeoutMs: Long = 5_000L, predicate: () -> Boolean) {
         val deadline = System.currentTimeMillis() + timeoutMs

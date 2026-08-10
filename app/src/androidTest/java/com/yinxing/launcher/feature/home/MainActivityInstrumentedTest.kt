@@ -5,6 +5,7 @@ import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.LinearLayout
+import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -35,14 +36,14 @@ class MainActivityInstrumentedTest {
     fun launchShowsBuiltInHomeItemsAndClock() {
         launchMainActivityScenario().use { scenario ->
             InstrumentationTestEnvironment.waitUntil(scenario, message = "主页未加载出内置入口") {
-                it.findViewById<RecyclerView>(R.id.recycler_home).adapter?.itemCount == 3
+                homeAppItemCount(it.findViewById(R.id.recycler_home)) == 3
             }
 
             scenario.onActivity { activity ->
                 val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
                 val timeText = activity.findViewById<android.widget.TextView>(R.id.tv_time).text
                 val dateText = activity.findViewById<android.widget.TextView>(R.id.tv_date).text
-                assertEquals(3, recyclerView.adapter?.itemCount)
+                assertEquals(3, homeAppItemCount(recyclerView))
                 assertTrue(timeText.isNotBlank())
                 assertTrue(dateText.isNotBlank())
             }
@@ -91,7 +92,10 @@ class MainActivityInstrumentedTest {
 
             scenario.onActivity { activity ->
                 val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
-                assertEquals(3, activity.findViewById<RecyclerView>(R.id.recycler_home).adapter?.itemCount)
+                assertEquals(
+                    3,
+                    homeAppItemCount(activity.findViewById(R.id.recycler_home))
+                )
                 assertEquals("拨打 妈妈", items.getChildAt(0).contentDescription.toString())
                 assertEquals("拨打 爸爸", items.getChildAt(1).contentDescription.toString())
                 activity.findViewById<View>(R.id.btn_trusted_calls_all).performClick()
@@ -110,10 +114,22 @@ class MainActivityInstrumentedTest {
     ) {
         launchMainActivityScenario().use { scenario ->
             InstrumentationTestEnvironment.waitUntil(scenario, message = "主页入口未准备完成") {
-                it.findViewById<RecyclerView>(R.id.recycler_home).adapter?.itemCount == 3
+                homeAppItemCount(it.findViewById(R.id.recycler_home)) == 3
             }
 
             val label = InstrumentationRegistry.getInstrumentation().targetContext.getString(labelResId)
+            scenario.onActivity { activity ->
+                activity.findViewById<RecyclerView>(R.id.recycler_home).scrollToPosition(1)
+            }
+            InstrumentationTestEnvironment.waitUntil(
+                scenario,
+                message = "首页入口未进入可见区域：$label"
+            ) { activity ->
+                findViewWithContentDescription(
+                    activity.findViewById(R.id.recycler_home),
+                    label
+                ) != null
+            }
             scenario.onActivity { activity ->
                 val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
                 val clickableView = findViewWithContentDescription(recyclerView, label)
@@ -150,4 +166,11 @@ class MainActivityInstrumentedTest {
         }
         return null
     }
+
+    private fun homeAppItemCount(recyclerView: RecyclerView): Int? =
+        (recyclerView.adapter as? ConcatAdapter)
+            ?.adapters
+            ?.filterIsInstance<HomeAppAdapter>()
+            ?.singleOrNull()
+            ?.itemCount
 }

@@ -3,10 +3,10 @@ package com.yinxing.launcher.feature.home
 import android.view.animation.DecelerateInterpolator
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.weather.WeatherState
-import com.yinxing.launcher.databinding.ActivityMainBinding
+import com.yinxing.launcher.databinding.ItemHomeHeaderBinding
 
 class WeatherHeaderController(
-    private val binding: ActivityMainBinding
+    private val binding: ItemHomeHeaderBinding
 ) {
     private val context = binding.root.context
     private val weatherBinding = binding.cardWeather
