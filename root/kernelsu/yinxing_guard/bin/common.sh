@@ -238,11 +238,7 @@ valid_accessibility_binding_stall_value() {
     case "$stall_rebind_attempts" in
         *'|'*) return 1 ;;
     esac
-    [ -n "$stall_boot_id" ] || return 1
-    [ "${#stall_boot_id}" -le 128 ] || return 1
-    case "$stall_boot_id" in
-        *[!A-Za-z0-9._-]*) return 1 ;;
-    esac
+    valid_boot_id_value "$stall_boot_id" || return 1
     case "$stall_observations" in
         ''|*[!0-9]*) return 1 ;;
     esac
@@ -946,8 +942,9 @@ ensure_state_dir() {
 read_boot_id_from() {
     boot_id_file="$1"
     boot_id="$(cat "$boot_id_file" 2>/dev/null || true)"
+    boot_stat_file="${YINXING_GUARD_BOOT_STAT_FILE:-/proc/stat}"
     if [ -z "$boot_id" ]; then
-        boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
+        boot_id="$(awk '/^btime / { print $2; exit }' "$boot_stat_file" 2>/dev/null || true)"
     fi
     if [ -z "$boot_id" ]; then
         boot_id="$(run_guard_command getprop ro.runtime.firstboot 2>/dev/null || true)"
@@ -960,6 +957,14 @@ sanitize_boot_id() {
     sanitized="$(printf '%s' "$1" | tr -c 'A-Za-z0-9._-' '_')"
     [ -n "$sanitized" ] || sanitized="unknown"
     printf '%s\n' "$sanitized"
+}
+
+valid_boot_id_value() {
+    boot_value="$1"
+    case "$boot_value" in
+        ''|unknown|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    [ "${#boot_value}" -le 128 ]
 }
 
 record_repair_result() {
@@ -1169,11 +1174,7 @@ valid_home_takeover_state() {
             pending_remainder=${1#pending|}
             pending_boot_id=${pending_remainder%%|*}
             pending_holder=${pending_remainder#*|}
-            [ -n "$pending_boot_id" ] || return 1
-            case "$pending_boot_id" in
-                *[!A-Za-z0-9._-]*) return 1 ;;
-            esac
-            [ "${#pending_boot_id}" -le 128 ] || return 1
+            valid_boot_id_value "$pending_boot_id" || return 1
             [ "$pending_holder" = none ] || valid_home_holder "$pending_holder"
             ;;
         *) return 1 ;;
@@ -1863,7 +1864,12 @@ repair_home_role_locked() {
     case "$saved_takeover_state" in
         pending\|*)
             pending_boot="$(home_pending_boot_id "$saved_takeover_state")"
-            if [ "$pending_boot" = "$(current_guard_boot_id)" ]; then
+            pending_current_boot="$(current_guard_boot_id)"
+            if ! valid_boot_id_value "$pending_current_boot"; then
+                log_event "home_role_boot_identity_unavailable"
+                return 1
+            fi
+            if [ "$pending_boot" = "$pending_current_boot" ]; then
                 log_event "home_role_pending_same_boot"
                 return 1
             fi
@@ -2351,11 +2357,7 @@ valid_doze_marker_value() {
         added) return 0 ;;
         pending\|*)
             pending_boot_id=${1#pending|}
-            [ -n "$pending_boot_id" ] || return 1
-            case "$pending_boot_id" in
-                *[!A-Za-z0-9._-]*) return 1 ;;
-            esac
-            [ "${#pending_boot_id}" -le 128 ]
+            valid_boot_id_value "$pending_boot_id"
             ;;
         *) return 1 ;;
     esac
@@ -2451,10 +2453,7 @@ valid_home_foreground_evidence() {
             return 1
             ;;
     esac
-    case "$home_foreground_boot_id" in
-        ''|*[!A-Za-z0-9._-]*) return 1 ;;
-    esac
-    [ "${#home_foreground_boot_id}" -le 128 ]
+    valid_boot_id_value "$home_foreground_boot_id"
 }
 
 read_home_foreground_evidence() {
@@ -2493,7 +2492,9 @@ home_foreground_evidence_state() {
         return 0
     fi
     home_foreground_boot_id=${home_foreground_evidence#*|}
-    if [ "$home_foreground_boot_id" != "$(current_guard_boot_id)" ]; then
+    home_current_boot_id="$(current_guard_boot_id)"
+    if ! valid_boot_id_value "$home_current_boot_id" || \
+        [ "$home_foreground_boot_id" != "$home_current_boot_id" ]; then
         printf 'unknown\n'
         return 0
     fi
@@ -2507,7 +2508,9 @@ write_home_foreground_evidence() {
         *) return 1 ;;
     esac
     ensure_state_dir || return 1
-    home_foreground_value="$home_foreground_state|$(current_guard_boot_id)"
+    home_current_boot_id="$(current_guard_boot_id)"
+    valid_boot_id_value "$home_current_boot_id" || return 1
+    home_foreground_value="$home_foreground_state|$home_current_boot_id"
     valid_home_foreground_evidence "$home_foreground_value" || return 1
     if [ -e "$HOME_FOREGROUND_EVIDENCE_MARKER" ] || \
         [ -L "$HOME_FOREGROUND_EVIDENCE_MARKER" ]; then
@@ -2741,7 +2744,12 @@ repair_keepalive_locked() {
                 case "$doze_marker_value" in
                     pending\|*)
                         doze_pending_boot=${doze_marker_value#pending|}
-                        if [ "$doze_pending_boot" = "$(current_guard_boot_id)" ]; then
+                        doze_current_boot="$(current_guard_boot_id)"
+                        if ! valid_boot_id_value "$doze_current_boot"; then
+                            log_event "doze_boot_identity_unavailable"
+                            return 1
+                        fi
+                        if [ "$doze_pending_boot" = "$doze_current_boot" ]; then
                             log_event "doze_pending_same_boot"
                             return 1
                         fi

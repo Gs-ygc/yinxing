@@ -340,16 +340,20 @@ cleanup_accessibility_transaction() {
     return 0
 }
 
+valid_boot_id_value() {
+    boot_value="$1"
+    case "$boot_value" in
+        ''|unknown|*[!A-Za-z0-9._-]*) return 1 ;;
+    esac
+    [ "${#boot_value}" -le 128 ]
+}
+
 valid_doze_marker_value() {
     case "$1" in
         added) return 0 ;;
         pending\|*)
             pending_boot_id=${1#pending|}
-            [ -n "$pending_boot_id" ] || return 1
-            case "$pending_boot_id" in
-                *[!A-Za-z0-9._-]*) return 1 ;;
-            esac
-            [ "${#pending_boot_id}" -le 128 ]
+            valid_boot_id_value "$pending_boot_id"
             ;;
         *) return 1 ;;
     esac
@@ -358,8 +362,9 @@ valid_doze_marker_value() {
 read_current_boot_id() {
     boot_id_file="${YINXING_GUARD_BOOT_ID_FILE:-/proc/sys/kernel/random/boot_id}"
     boot_id="$(cat "$boot_id_file" 2>/dev/null || true)"
+    boot_stat_file="${YINXING_GUARD_BOOT_STAT_FILE:-/proc/stat}"
     if [ -z "$boot_id" ]; then
-        boot_id="$(awk '/^btime / { print $2; exit }' /proc/stat 2>/dev/null || true)"
+        boot_id="$(awk '/^btime / { print $2; exit }' "$boot_stat_file" 2>/dev/null || true)"
     fi
     if [ -z "$boot_id" ]; then
         boot_id="$(run_guard_command getprop ro.runtime.firstboot 2>/dev/null || true)"
@@ -539,11 +544,7 @@ valid_home_takeover_state() {
             pending_remainder=${1#pending|}
             pending_boot_id=${pending_remainder%%|*}
             pending_holder=${pending_remainder#*|}
-            [ -n "$pending_boot_id" ] || return 1
-            case "$pending_boot_id" in
-                *[!A-Za-z0-9._-]*) return 1 ;;
-            esac
-            [ "${#pending_boot_id}" -le 128 ] || return 1
+            valid_boot_id_value "$pending_boot_id" || return 1
             [ "$pending_holder" = none ] || valid_home_holder "$pending_holder"
             ;;
         *) return 1 ;;
@@ -869,6 +870,14 @@ cleanup_home_role_locked() {
             ;;
         *) return 1 ;;
     esac
+    current_boot_id=""
+    if [ -n "$pending_boot" ]; then
+        current_boot_id="$(read_current_boot_id)"
+        if ! valid_boot_id_value "$current_boot_id"; then
+            log_event "uninstall_home_boot_identity_unavailable"
+            return 1
+        fi
+    fi
     if ! current_home="$(read_home_role_holder)"; then
         log_event "uninstall_home_query_failed"
         return 1
@@ -896,7 +905,7 @@ cleanup_home_role_locked() {
                 fi
             fi
             if [ -n "$pending_boot" ] && \
-                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                [ "$pending_boot" = "$current_boot_id" ]; then
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
@@ -917,7 +926,7 @@ cleanup_home_role_locked() {
         fi
         if [ "$current_before_remove" != "$PACKAGE_NAME" ]; then
             if [ -n "$pending_boot" ] && \
-                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                [ "$pending_boot" = "$current_boot_id" ]; then
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
@@ -952,7 +961,7 @@ cleanup_home_role_locked() {
         fi
         if [ "$current_before_restore" != "$PACKAGE_NAME" ]; then
             if [ -n "$pending_boot" ] && \
-                [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+                [ "$pending_boot" = "$current_boot_id" ]; then
                 log_event "uninstall_home_pending_same_boot"
                 return 1
             fi
@@ -978,7 +987,7 @@ cleanup_home_role_locked() {
     fi
 
     if [ -n "$pending_boot" ] && \
-        [ "$pending_boot" = "$(read_current_boot_id)" ]; then
+        [ "$pending_boot" = "$current_boot_id" ]; then
         log_event "uninstall_home_pending_compensated_same_boot"
         return 1
     fi
@@ -1019,6 +1028,14 @@ cleanup_doze() {
             marker_boot=${marker_value#pending|}
             ;;
     esac
+    current_boot_id=""
+    if [ "$marker_kind" = pending ]; then
+        current_boot_id="$(read_current_boot_id)"
+        if ! valid_boot_id_value "$current_boot_id"; then
+            log_event "uninstall_doze_boot_identity_unavailable"
+            return 1
+        fi
+    fi
     if ! doze_output="$(run_guard_command cmd deviceidle whitelist 2>/dev/null)"; then
         log_event "uninstall_doze_query_deferred"
         return 1
@@ -1041,7 +1058,7 @@ cleanup_doze() {
         [ "$doze_remove_status" -eq 0 ] || \
             log_event "uninstall_doze_removed_after_error"
     elif [ "$marker_kind" = pending ] && \
-        [ "$marker_boot" = "$(read_current_boot_id)" ]; then
+        [ "$marker_boot" = "$current_boot_id" ]; then
         log_event "uninstall_doze_pending_same_boot"
         return 1
     fi
