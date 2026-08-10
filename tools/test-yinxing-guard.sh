@@ -1031,6 +1031,16 @@ test_evidence_rejects_unavailable_boot_identity() {
     if write_home_foreground_evidence verified; then
         fail "unknown boot accepted foreground evidence"
     fi
+    if write_home_takeover_state "pending|unknown|com.oplus.launcher"; then
+        fail "unknown boot accepted HOME takeover evidence"
+    fi
+    [[ ! -e "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "unknown boot published HOME takeover evidence"
+    if write_doze_ownership_marker "pending|unknown"; then
+        fail "unknown boot accepted Doze ownership evidence"
+    fi
+    [[ ! -e "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "unknown boot published Doze ownership evidence"
     output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/empty_boot_stat" \
         YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/empty_boot_stat" \
         run_module_script "$MODULE_ROOT/bin/status.sh")"
@@ -1049,6 +1059,35 @@ test_evidence_rejects_unavailable_boot_identity() {
     accessibility_binding_stall_is_persistent || \
         fail "known boot did not trust stall evidence"
     pass "unavailable boot identity rejects evidence"
+}
+
+test_uninstall_retains_pending_evidence_when_boot_identity_is_unavailable() {
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state"
+    : > "$TEST_ROOT/empty_boot_stat"
+    export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/empty_boot_stat"
+    export YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/empty_boot_stat"
+    printf 'com.oplus.launcher\n' > "$TEST_ROOT/state/home_previous_holder"
+    printf 'pending|fixture-boot|com.example.caregiverlauncher\n' > \
+        "$TEST_ROOT/state/home_takeover_state"
+    printf 'com.example.caregiverlauncher\n' > "$HOME_HOLDER"
+    printf 'pending|fixture-boot\n' > "$TEST_ROOT/state/doze_added_by_module"
+
+    if run_module_script "$CLEANUP_TARGET"; then
+        fail "cleanup mutated pending evidence without a boot identity"
+    fi
+    [[ -f "$TEST_ROOT/state/home_previous_holder" ]] || \
+        fail "unavailable boot cleanup lost previous HOME evidence"
+    [[ -f "$TEST_ROOT/state/home_takeover_state" ]] || \
+        fail "unavailable boot cleanup lost pending HOME evidence"
+    [[ -f "$TEST_ROOT/state/doze_added_by_module" ]] || \
+        fail "unavailable boot cleanup lost pending Doze evidence"
+    [[ -x "$CLEANUP_TARGET" ]] || \
+        fail "unavailable boot cleanup lost retry helper"
+    assert_not_contains "$CALLS" "cmd package set-home-activity"
+    assert_not_contains "$CALLS" "cmd role remove-role-holder"
+    assert_not_contains "$CALLS" "cmd deviceidle whitelist -com.yinxing.launcher"
+    pass "unavailable boot cleanup retains pending evidence"
 }
 
 test_home_foreground_capture_is_bounded_before_parsing() {
@@ -5231,6 +5270,7 @@ case "$MODE" in
         test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
         test_home_launch_serializes_uninstall_evidence_transition
         test_evidence_rejects_unavailable_boot_identity
+        test_uninstall_retains_pending_evidence_when_boot_identity_is_unavailable
         test_home_foreground_capture_is_bounded_before_parsing
         ;;
     --review-regressions-only)
