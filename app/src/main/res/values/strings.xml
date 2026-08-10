@@ -169,6 +169,7 @@
     <string name="video_call_in_progress">已有进行中的微信视频任务，请稍候</string>
     <string name="accessibility_service_not_running">无障碍服务未运行，请重新开启</string>
     <string name="video_call_request_timeout">微信视频长时间没有响应，请重新开启无障碍服务后再试</string>
+    <string name="video_call_overlay_contact_title">正在联系 %1$s</string>
     <string name="video_call_overlay_cancel">取消</string>
     <string name="video_call_overlay_cancel_description">取消联系</string>
 

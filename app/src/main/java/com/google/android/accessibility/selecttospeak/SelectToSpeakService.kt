@@ -20,6 +20,7 @@ import com.yinxing.launcher.common.util.DebugLog
 import com.yinxing.launcher.common.ui.FloatingStatusView
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.feature.home.MainActivity
+import com.yinxing.launcher.feature.videocall.videoCallOverlayTitle
 
 
 import kotlinx.coroutines.CoroutineScope
@@ -375,7 +376,10 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
                 cancelSession(true)
             }
         }
-        floatingView?.show("正在打开微信", session.stepLabel())
+        floatingView?.show(
+            videoCallOverlayTitle(session.contactName),
+            "正在打开微信"
+        )
         updateProgress(session, "正在打开微信")
 
 
@@ -630,7 +634,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
             session.lastAnnouncedMessage = message
             notifyState(session, message, success = true, terminal = false, page = page)
         }
-        floatingView?.updateMessage(message, session.stepLabel())
+        floatingView?.updateMessage(videoCallOverlayTitle(session.contactName), message)
     }
 
 
@@ -1452,7 +1456,10 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         floatingHideJob?.cancel()
         floatingHideJob = null
         applyWeChatCallAudioStrategy(session)
-        floatingView?.updateMessage("视频通话已发起")
+        floatingView?.updateMessage(
+            videoCallOverlayTitle(session.contactName),
+            "视频通话已发起"
+        )
         notifyState(session, "视频通话已发起", success = true, terminal = true)
         currentSession = null
         stepClock.cancelAll()
@@ -1707,14 +1714,6 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
         Step.WAITING_CONTACT_RESULT  -> "选择搜索结果"
         Step.WAITING_CONTACT_DETAIL  -> "发起视频入口"
         Step.WAITING_VIDEO_OPTIONS   -> "选择视频通话"
-    }
-
-    private fun VideoCallSession.stepLabel(): String {
-        return when (stateOverride) {
-            AutomationState.LAUNCHING_WECHAT -> "第0步/共${TOTAL_STEPS}步  启动微信"
-            AutomationState.RECOVERING       -> "恢复中  ${step.stepName()}"
-            else -> "第${step.stepNumber()}步/共${TOTAL_STEPS}步  ${step.stepName()}"
-        }
     }
 
     private fun logStep(
