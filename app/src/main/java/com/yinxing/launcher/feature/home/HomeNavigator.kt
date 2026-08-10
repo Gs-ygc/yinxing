@@ -62,7 +62,7 @@ class HomeNavigator(
     fun openHomeItem(item: HomeAppItem) {
         when (item.type) {
             HomeAppItem.Type.APP -> openApp(item)
-            HomeAppItem.Type.PHONE -> activity.startActivity(Intent(activity, PhoneContactActivity::class.java))
+            HomeAppItem.Type.PHONE -> openPhoneContacts()
             HomeAppItem.Type.WECHAT_VIDEO -> {
                 LobsterClient.log("[首页] 点击微信视频卡片")
                 activity.startActivity(
@@ -72,6 +72,10 @@ class HomeNavigator(
             }
             HomeAppItem.Type.ADD -> activity.startActivity(Intent(activity, AppManageActivity::class.java))
         }
+    }
+
+    fun openPhoneContacts() {
+        activity.startActivity(PhoneContactActivity.createIntent(activity))
     }
 
     private fun openApp(item: HomeAppItem) {

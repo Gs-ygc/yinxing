@@ -1,20 +1,30 @@
 package com.yinxing.launcher.feature.home
 
+import android.Manifest
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.pm.ApplicationInfo
 import android.content.pm.ResolveInfo
 import android.net.Uri
+import android.os.Bundle
 import android.os.Looper
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
+import com.yinxing.launcher.data.contact.Contact
+import com.yinxing.launcher.data.contact.ContactSqliteStore
 import com.yinxing.launcher.data.home.LauncherAppRepository
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
+import com.yinxing.launcher.feature.phone.PhoneContactActivity
+import com.yinxing.launcher.feature.phone.PhoneContactManager
+import com.yinxing.launcher.feature.phone.PhoneCallLauncher
+import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 
 import org.junit.Assert.assertNotNull
@@ -39,6 +49,8 @@ class MainActivitySmokeTest {
         resetLauncherSettingsDataStoreSingleton()
         context.getSharedPreferences("launcher_prefs", Context.MODE_PRIVATE).edit().clear().commit()
         context.getSharedPreferences("home_app_config", Context.MODE_PRIVATE).edit().clear().commit()
+        resetPhoneContactManager()
+        ContactSqliteStore.deleteDatabase(context)
         LauncherAppRepository.getInstance(context).invalidateInstalledApps()
         LauncherAppRepository.getInstance(context).invalidateSelections()
     }
@@ -97,6 +109,90 @@ class MainActivitySmokeTest {
         assertEquals(activity.getString(R.string.weather_fallback_url), startedIntent.dataString)
     }
 
+    @Test
+    fun noPhoneContactsKeepTrustedCallsSectionHidden() {
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
+        waitUntil { recyclerView.adapter?.itemCount == 3 }
+
+        assertEquals(View.GONE, activity.findViewById<View>(R.id.layout_trusted_calls).visibility)
+    }
+
+    @Test
+    fun trustedContactsAppearWithoutChangingGridAndOpenFullList() {
+        runBlocking {
+            PhoneContactManager.getInstance(context).addContacts(
+                listOf(
+                    Contact(
+                        id = "mother",
+                        name = "妈妈",
+                        phoneNumber = "13800138000",
+                        isPinned = true
+                    ),
+                    Contact(id = "father", name = "爸爸", phoneNumber = "13900139000")
+                )
+            )
+        }
+
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
+        val section = activity.findViewById<View>(R.id.layout_trusted_calls)
+        val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
+        waitUntil {
+            recyclerView.adapter?.itemCount == 3 &&
+                section.visibility == View.VISIBLE &&
+                items.childCount == 2
+        }
+
+        assertEquals(3, recyclerView.adapter?.itemCount)
+        assertEquals(View.VISIBLE, section.visibility)
+        assertEquals(2, items.childCount)
+        assertEquals("拨打 妈妈", items.getChildAt(0).contentDescription.toString())
+        assertEquals("拨打 爸爸", items.getChildAt(1).contentDescription.toString())
+
+        activity.findViewById<View>(R.id.btn_trusted_calls_all).performClick()
+        val startedIntent = shadowOf(activity).nextStartedActivity
+        assertEquals(PhoneContactActivity::class.java.name, startedIntent.component?.className)
+    }
+
+    @Test
+    fun pendingHomeCallContactSurvivesActivityRecreation() {
+        val controller = Robolectric.buildActivity(MainActivity::class.java).setup()
+        val activity = controller.get()
+        val launcherField = MainActivity::class.java.getDeclaredField("phoneCallLauncher")
+        launcherField.isAccessible = true
+        val launcher = launcherField.get(activity) as PhoneCallLauncher
+        launcher.restorePendingContact(
+            Contact(id = "mother", name = "妈妈", phoneNumber = "13800138000")
+        )
+        val savedState = Bundle()
+
+        controller.saveInstanceState(savedState)
+
+        assertEquals("mother", savedState.getString("state_home_pending_call_id"))
+        assertEquals("妈妈", savedState.getString("state_home_pending_call_name"))
+        assertEquals("13800138000", savedState.getString("state_home_pending_call_number"))
+    }
+
+    @Test
+    fun trustedContactTapStartsDirectCallWhenPermissionGranted() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.CALL_PHONE)
+        runBlocking {
+            PhoneContactManager.getInstance(context).addContact(
+                Contact(id = "mother", name = "妈妈", phoneNumber = "13800138000")
+            )
+        }
+        val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
+        val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
+        waitUntil { items.childCount == 1 }
+
+        items.getChildAt(0).performClick()
+
+        val startedIntent = shadowOf(activity).nextStartedActivity
+        assertEquals(Intent.ACTION_CALL, startedIntent.action)
+        assertEquals("tel:13800138000", startedIntent.dataString)
+    }
+
 
     @Suppress("DEPRECATION")
     private fun registerWeatherBrowser() {
@@ -144,6 +240,13 @@ class MainActivitySmokeTest {
     private fun resetLauncherSettingsDataStoreSingleton() {
         val field = Class.forName("com.yinxing.launcher.data.settings.LauncherSettingsDataStore").getDeclaredField("instance")
         field.isAccessible = true
+        field.set(null, null)
+    }
+
+    private fun resetPhoneContactManager() {
+        val field = PhoneContactManager::class.java.getDeclaredField("instance")
+        field.isAccessible = true
+        (field.get(null) as? PhoneContactManager)?.close()
         field.set(null, null)
     }
 

@@ -1,37 +1,60 @@
 package com.yinxing.launcher.feature.home
 
+import android.Manifest
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.animation.DecelerateInterpolator
 import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.DefaultItemAnimator
 import androidx.recyclerview.widget.GridLayoutManager
 import androidx.recyclerview.widget.ItemTouchHelper
 import com.yinxing.launcher.R
+import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.databinding.ActivityMainBinding
+import com.yinxing.launcher.feature.phone.PhoneCallLauncher
+import com.yinxing.launcher.feature.phone.PhoneContactManager
+import com.yinxing.launcher.feature.phone.showPhoneCallFallbackDialog
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
 class MainActivity : AppCompatActivity() {
+    companion object {
+        private const val STATE_PENDING_CALL_ID = "state_home_pending_call_id"
+        private const val STATE_PENDING_CALL_NAME = "state_home_pending_call_name"
+        private const val STATE_PENDING_CALL_NUMBER = "state_home_pending_call_number"
+    }
+
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: HomeAppAdapter
     private lateinit var itemMoveCallback: ItemMoveCallback
     private lateinit var headerController: WeatherHeaderController
     private lateinit var statusController: HomeStatusController
+    private lateinit var trustedContactsController: HomeTrustedContactsController
     private lateinit var navigator: HomeNavigator
     private lateinit var viewModel: HomeViewModel
+    private lateinit var phoneCallLauncher: PhoneCallLauncher
     private val timeTicker = TimeTicker()
     private var packageReceiverRegistered = false
     private var tickerJob: Job? = null
     private var fullyDrawnReported = false
+    private var callFallbackDialog: AlertDialog? = null
+
+    private val callPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { granted -> phoneCallLauncher.onPermissionResult(granted) }
 
     private val packageChangeReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -45,12 +68,26 @@ class MainActivity : AppCompatActivity() {
         setContentView(binding.root)
         viewModel = ViewModelProvider(this, HomeViewModel.Factory(this))[HomeViewModel::class.java]
         navigator = HomeNavigator(this)
+        phoneCallLauncher = PhoneCallLauncher(
+            hasCallPermission = {
+                ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE) ==
+                    PackageManager.PERMISSION_GRANTED
+            },
+            requestPermission = {
+                callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
+            },
+            launchIntent = ::startActivity,
+            showFallback = ::showCallFallbackDialog,
+            onCallLaunched = { contact -> recordCall(contact) }
+        )
+        restorePendingCall(savedInstanceState)
         headerController = WeatherHeaderController(binding)
         statusController = HomeStatusController(
             binding = binding,
             onRetry = viewModel::refreshApps,
             onOpenSettings = navigator::showCaregiverEntryDialog
         )
+        trustedContactsController = HomeTrustedContactsController(binding.layoutTrustedCalls.root)
         setupBackPress()
         setupRecycler()
         setupActions()
@@ -69,6 +106,7 @@ class MainActivity : AppCompatActivity() {
         super.onResume()
         startTimeTicker()
         viewModel.maybeRefreshWeather()
+        viewModel.refreshTrustedContacts()
     }
 
     override fun onPause() {
@@ -79,10 +117,22 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        callFallbackDialog?.setOnDismissListener(null)
+        callFallbackDialog?.dismiss()
+        callFallbackDialog = null
         if (packageReceiverRegistered) {
             unregisterReceiver(packageChangeReceiver)
         }
         super.onDestroy()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        phoneCallLauncher.pendingContactOrNull?.let { contact ->
+            outState.putString(STATE_PENDING_CALL_ID, contact.id)
+            outState.putString(STATE_PENDING_CALL_NAME, contact.displayName)
+            outState.putString(STATE_PENDING_CALL_NUMBER, contact.phoneNumber)
+        }
+        super.onSaveInstanceState(outState)
     }
 
     private fun setupBackPress() {
@@ -121,6 +171,8 @@ class MainActivity : AppCompatActivity() {
     private fun setupActions() {
         binding.cardWeather.root.setOnClickListener { navigator.openWeatherEntry() }
         binding.btnFamilySettings.setOnClickListener { navigator.showCaregiverEntryDialog() }
+        trustedContactsController.setOnCallClick(::makeCall)
+        trustedContactsController.setOnOpenAllClick(navigator::openPhoneContacts)
     }
 
     private fun observeViewModel() {
@@ -134,6 +186,9 @@ class MainActivity : AppCompatActivity() {
             viewModel.weatherState.collect { state ->
                 state?.let(headerController::renderWeather)
             }
+        }
+        lifecycleScope.launch {
+            viewModel.trustedContacts.collect(trustedContactsController::render)
         }
     }
 
@@ -203,5 +258,53 @@ class MainActivity : AppCompatActivity() {
                 .setInterpolator(DecelerateInterpolator())
                 .start()
         }
+    }
+
+    private fun makeCall(contact: Contact) {
+        if (callFallbackDialog?.isShowing == true) return
+        phoneCallLauncher.makeCall(contact)
+    }
+
+    private fun recordCall(contact: Contact) {
+        lifecycleScope.launch(Dispatchers.IO) {
+            runCatching {
+                PhoneContactManager.getInstance(applicationContext).incrementCallCount(contact.id)
+            }
+        }
+    }
+
+    private fun showCallFallbackDialog(contact: Contact, directCallFailed: Boolean) {
+        if (isFinishing || isDestroyed) return
+        callFallbackDialog?.dismiss()
+        val dialog = showPhoneCallFallbackDialog(
+            contact = contact,
+            directCallFailed = directCallFailed
+        ) { error ->
+            Toast.makeText(
+                this,
+                getString(R.string.dial_failed, error.message.orEmpty()),
+                Toast.LENGTH_SHORT
+            ).show()
+        }
+        dialog.setOnDismissListener {
+            if (callFallbackDialog === dialog) callFallbackDialog = null
+        }
+        callFallbackDialog = dialog
+    }
+
+    private fun restorePendingCall(savedInstanceState: Bundle?) {
+        savedInstanceState
+            ?.getString(STATE_PENDING_CALL_NUMBER)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { number ->
+                Contact(
+                    id = savedInstanceState.getString(STATE_PENDING_CALL_ID).orEmpty(),
+                    name = savedInstanceState.getString(STATE_PENDING_CALL_NAME)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: getString(R.string.contact_name_placeholder),
+                    phoneNumber = number
+                )
+            }
+            ?.let(phoneCallLauncher::restorePendingContact)
     }
 }

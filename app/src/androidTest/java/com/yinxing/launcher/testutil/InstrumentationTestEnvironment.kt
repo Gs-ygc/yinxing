@@ -41,6 +41,13 @@ object InstrumentationTestEnvironment {
         runBlocking { contacts.forEach { manager.addContact(it) } }
     }
 
+    fun seedPhoneContacts(vararg contacts: Contact) {
+        resetContactDatabases()
+        resetSingleton("com.yinxing.launcher.feature.phone.PhoneContactManager", "instance")
+        val manager = PhoneContactManager.getInstance(appContext)
+        runBlocking { manager.addContacts(contacts.asList()) }
+    }
+
     fun primeLauncherRepositoryWithBuiltInOnlyHome() {
         val repository = LauncherAppRepository.getInstance(appContext)
         setField(repository, "installedAppsCache", emptyList<Any>())
@@ -145,4 +152,3 @@ object InstrumentationTestEnvironment {
         field.set(target, value)
     }
 }
-

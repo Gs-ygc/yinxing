@@ -4,12 +4,14 @@ import android.app.Activity
 import android.content.Intent
 import android.view.View
 import android.view.ViewGroup
+import android.widget.LinearLayout
 import androidx.recyclerview.widget.RecyclerView
 import androidx.test.core.app.ActivityScenario
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 
 import com.yinxing.launcher.R
+import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.feature.phone.PhoneContactActivity
 
 import com.yinxing.launcher.feature.videocall.VideoCallActivity
@@ -65,6 +67,40 @@ class MainActivityInstrumentedTest {
             expectedActivity = VideoCallActivity::class.java,
             failureMessage = "点击微信视频入口后未进入统一联系人页"
         )
+    }
+
+    @Test
+    fun trustedContactsShowTwoShortcutsAndKeepFullListRoute() {
+        InstrumentationTestEnvironment.seedPhoneContacts(
+            Contact(
+                id = "mother",
+                name = "妈妈",
+                phoneNumber = "13800138000",
+                isPinned = true
+            ),
+            Contact(id = "father", name = "爸爸", phoneNumber = "13900139000")
+        )
+
+        launchMainActivityScenario().use { scenario ->
+            InstrumentationTestEnvironment.waitUntil(
+                scenario,
+                message = "首页未显示两个常用电话快捷入口"
+            ) { activity ->
+                activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items).childCount == 2
+            }
+
+            scenario.onActivity { activity ->
+                val items = activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)
+                assertEquals(3, activity.findViewById<RecyclerView>(R.id.recycler_home).adapter?.itemCount)
+                assertEquals("拨打 妈妈", items.getChildAt(0).contentDescription.toString())
+                assertEquals("拨打 爸爸", items.getChildAt(1).contentDescription.toString())
+                activity.findViewById<View>(R.id.btn_trusted_calls_all).performClick()
+            }
+            InstrumentationTestEnvironment.waitForActivityInAnyStage(
+                expectedActivity = PhoneContactActivity::class.java,
+                message = "常用电话区域的全部电话按钮未进入联系人页"
+            )
+        }
     }
 
     private fun launchAndOpenHomeEntry(
