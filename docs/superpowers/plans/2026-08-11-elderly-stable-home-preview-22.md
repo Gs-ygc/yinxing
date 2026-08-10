@@ -31,7 +31,7 @@
 - Produces: `HomeAppOrderPolicy.orderManagementApps(apps: Collection<OrderedApp>, selectedPackages: Collection<String>, savedOrder: Collection<String>): List<OrderedApp>`
 - Produces: `HomeAppOrderPolicy.moveSelectedPackage(currentOrder: Collection<String>, packageName: String, offset: Int): List<String>?`
 
-- [ ] **Step 1: Write failing management-order tests**
+- [x] **Step 1: Write failing management-order tests**
 
 Add tests proving selected packages follow saved order, selected packages omitted from saved order append by name, unselected packages follow by name, and stale/duplicate saved packages disappear:
 
@@ -48,7 +48,7 @@ val result = HomeAppOrderPolicy.orderManagementApps(
 assertEquals(listOf("pkg.gamma", "pkg.alpha", "pkg.beta"), result.map { it.packageName })
 ```
 
-- [ ] **Step 2: Write failing adjacent-move tests**
+- [x] **Step 2: Write failing adjacent-move tests**
 
 Cover up/down swaps and exact no-op cases. Compare complete lists so a no-op cannot silently discard another package:
 
@@ -65,7 +65,7 @@ assertEquals(
 
 No-op cases return `null`: first package with `-1`, last with `1`, offset `0`, offset `2`, blank package, and a package absent from `currentOrder`.
 
-- [ ] **Step 3: Run Task 1 tests and confirm RED**
+- [x] **Step 3: Run Task 1 tests and confirm RED**
 
 Run:
 
@@ -78,7 +78,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: compilation fails because both policy methods are missing.
 
-- [ ] **Step 4: Implement the two pure functions**
+- [x] **Step 4: Implement the two pure functions**
 
 Use existing normalization and ordering rather than a second sort contract:
 
@@ -110,7 +110,7 @@ fun moveSelectedPackage(
 
 The nullable result is the write gate: invalid or boundary actions cannot accidentally normalize or truncate persisted order. The caller supplies the selected package order currently displayed by the management list, so selected apps omitted from stale preferences are retained when a valid move is made.
 
-- [ ] **Step 5: Run Task 1 tests GREEN and commit**
+- [x] **Step 5: Run Task 1 tests GREEN and commit**
 
 Run the Step 3 command, then:
 
@@ -137,7 +137,7 @@ git commit -m "feat: order caregiver home applications"
 - Produces: required adapter callbacks `onMoveUp: (AppInfo) -> Unit` and `onMoveDown: (AppInfo) -> Unit`.
 - Produces row IDs: `btn_app_move_up` and `btn_app_move_down`.
 
-- [ ] **Step 1: Write failing repository order tests**
+- [x] **Step 1: Write failing repository order tests**
 
 Use app names whose alphabetical order differs from saved order:
 
@@ -154,7 +154,7 @@ assertEquals(
 
 Expected before implementation: alphabetical installed order.
 
-- [ ] **Step 2: Write failing adapter accessibility/boundary tests**
+- [x] **Step 2: Write failing adapter accessibility/boundary tests**
 
 Create a Robolectric adapter with three selected rows and one unselected row. Bind all four and assert:
 
@@ -169,7 +169,7 @@ assertEquals(View.GONE, unselectedDown.visibility)
 
 Click enabled up/down buttons and assert exactly the corresponding `AppInfo` reaches the callback. Click the disabled first-up/last-down buttons and assert no callback.
 
-- [ ] **Step 3: Run Task 2 tests and confirm RED**
+- [x] **Step 3: Run Task 2 tests and confirm RED**
 
 Run:
 
@@ -183,7 +183,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: missing arrow IDs/callbacks and repository order mismatch.
 
-- [ ] **Step 4: Order repository results through the Task 1 policy**
+- [x] **Step 4: Order repository results through the Task 1 policy**
 
 Map by package after ordering records:
 
@@ -199,7 +199,7 @@ return@withContext orderedRecords.map { app ->
 }
 ```
 
-- [ ] **Step 5: Add stable arrow controls and bind their state**
+- [x] **Step 5: Add stable arrow controls and bind their state**
 
 Add two 48dp `ImageButton`s using platform up/down arrow drawables between app name and checkbox. In `AppListAdapter.bind`, derive `selectedCount` and the holder's current position from `currentList`, then set `VISIBLE` only for selected rows and enable exact bounds:
 
@@ -218,7 +218,7 @@ holder.moveDown.setOnClickListener { if (holder.moveDown.isEnabled) onMoveDown(a
 
 Clear both listeners in `onViewRecycled`. Add exact strings `上移 %1$s` and `下移 %1$s`.
 
-- [ ] **Step 6: Run Task 2 tests GREEN and commit**
+- [x] **Step 6: Run Task 2 tests GREEN and commit**
 
 Run the Step 3 command, then:
 
@@ -244,7 +244,7 @@ git commit -m "feat: arrange home apps in caregiver settings"
 - Consumes: Task 1 `moveSelectedPackage` and Task 2 adapter callbacks/row IDs.
 - Produces: one activity path that persists both application selection and order.
 
-- [ ] **Step 1: Write a failing activity move test**
+- [x] **Step 1: Write a failing activity move test**
 
 Register three fake launcher applications with Robolectric, select two, save reverse-alphabetical order, reset the repository singleton, launch `AppManageActivity`, and wait for rows. Click the first selected row's down button, then assert:
 
@@ -258,11 +258,11 @@ assertEquals(
 
 Add a rapid-action case with three selected rows: invoke the first row's down action twice before allowing the repository refresh to complete, then require the persisted order to be `[second, third, first]`. This proves the second action is based on the first persisted move rather than a stale adapter snapshot.
 
-- [ ] **Step 2: Write a failing selection-regroup test**
+- [x] **Step 2: Write a failing selection-regroup test**
 
 Click an unselected application's row. Assert it becomes selected, appears at the end of the selected group, and the persisted order includes it once. Click again and assert it returns to the unselected group and disappears from order.
 
-- [ ] **Step 3: Run the activity smoke tests and confirm RED**
+- [x] **Step 3: Run the activity smoke tests and confirm RED**
 
 Run:
 
@@ -275,7 +275,7 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: adapter has no activity move callbacks and selection remains in its previous list position.
 
-- [ ] **Step 4: Persist selection and move callbacks through one reload path**
+- [x] **Step 4: Persist selection and move callbacks through one reload path**
 
 Construct the adapter with:
 
@@ -305,11 +305,11 @@ private fun moveSelectedApp(packageName: String, offset: Int) {
 
 Set `currentSelectedOrder` from every successfully loaded management list before submitting it to the adapter. Update it synchronously to `movedOrder` before saving and starting the refresh, so a second arrow tap cannot use stale RecyclerView state. Change `saveAppSelection` to copy the synchronous preference order into this field, invalidate selections, and reload instead of only patching the old alphabetical adapter list. Cancellation of the previous load remains the single stale-result guard.
 
-- [ ] **Step 5: Update exact caregiver copy**
+- [x] **Step 5: Update exact caregiver copy**
 
 Use `首页应用` for the page title and a result-oriented subtitle: `已选应用排在前面，顺序与首页一致`. Replace the settings drag tip with `在「首页应用」里，用上下箭头调整显示顺序。`
 
-- [ ] **Step 6: Run Task 3 and related preference tests GREEN, then commit**
+- [x] **Step 6: Run Task 3 and related preference tests GREEN, then commit**
 
 Run:
 
@@ -352,7 +352,7 @@ git commit -m "feat: persist caregiver home arrangement"
 - Removes: `HomeAppItem.Type.ADD`, Home `onOrderChanged`, `setTouchHelper`, and all `ItemTouchHelperAdapter` drag methods.
 - Preserves: Home click navigation, icon loading, differ submission, adaptive card sizing, and app launch gate.
 
-- [ ] **Step 1: Write failing Home stability tests**
+- [x] **Step 1: Write failing Home stability tests**
 
 Update repository/MainActivity expectations from three built-ins to two and add exact assertions:
 
@@ -366,7 +366,7 @@ assertTrue(homeItems.none { it.packageName == "add" })
 
 Bind a third-party Home card and assert `performLongClick()` is false and `onOrderChanged` is not available as a Home interaction.
 
-- [ ] **Step 2: Run Home-focused tests and confirm RED**
+- [x] **Step 2: Run Home-focused tests and confirm RED**
 
 Run:
 
@@ -382,11 +382,11 @@ GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home bash gradlew \
 
 Expected: existing repository still appends `ADD`, MainActivity counts include it, and the application icon consumes long press.
 
-- [ ] **Step 3: Remove the `ADD` model/navigation/repository path**
+- [x] **Step 3: Remove the `ADD` model/navigation/repository path**
 
 Delete `HomeAppItem.Type.ADD`, `addSecondaryBuiltInItems`, its calls, the `HomeNavigator` branch/import, and the unused `home_item_add` string. Keep fixed phone/video insertion unchanged.
 
-- [ ] **Step 4: Simplify Home adapter and Activity wiring**
+- [x] **Step 4: Simplify Home adapter and Activity wiring**
 
 Remove `ItemTouchHelperAdapter`, `ItemTouchHelper`, `onOrderChanged`, `touchHelper`, drag snapshots, pending submissions, drag listeners, and drag methods. Submission becomes the existing direct differ call:
 
@@ -398,11 +398,11 @@ fun submitList(items: List<HomeAppItem>, commitCallback: (() -> Unit)? = null) {
 
 Delete `ItemMoveCallback.kt`. In `MainActivity`, remove the callback field, helper attachment, order callback, and drag-animation update. Keep `itemAnimator = null`.
 
-- [ ] **Step 5: Adjust existing tests without weakening coverage**
+- [x] **Step 5: Adjust existing tests without weakening coverage**
 
 Use `PHONE` or `WECHAT_VIDEO` in `HomeViewModelTest` when proving non-application items are excluded. Remove drag-concurrency tests that exercise deleted behavior, retain icon lifecycle/size tests, and add the long-press no-op assertion. Update all exact Home item counts by one.
 
-- [ ] **Step 6: Run Home and management regression tests GREEN and commit**
+- [x] **Step 6: Run Home and management regression tests GREEN and commit**
 
 Run the Step 2 command plus Task 3 tests, then:
 
@@ -424,7 +424,7 @@ git commit -m "feat: keep elderly home layout stable"
 - Produces: versionCode `38`, versionName `1.10.0-root-preview.22`, one Debug APK, and `SHA256SUMS.txt`.
 - Reuses: unchanged Preview 18 KernelSU module link; no new module ZIP.
 
-- [ ] **Step 1: Bump version metadata**
+- [x] **Step 1: Bump version metadata**
 
 Set:
 
@@ -433,7 +433,7 @@ versionCode = 38
 versionName = "1.10.0-root-preview.22"
 ```
 
-- [ ] **Step 2: Run forced Android verification in isolation**
+- [x] **Step 2: Run forced Android verification in isolation**
 
 Run:
 
@@ -446,7 +446,7 @@ Run:
 
 Require exit 0, all unit XML suites with zero failures/errors/skips, and both APKs present.
 
-- [ ] **Step 3: Run lint and proportional Root proof**
+- [x] **Step 3: Run lint and proportional Root proof**
 
 Run `:app:lintDebug`, classify existing `RootCommandRunner.kt:72/:150` findings, and prove no Root surface changed:
 
@@ -459,11 +459,11 @@ fi
 
 Do not rerun the four-minute BusyBox matrix when the exact Root surface is unchanged.
 
-- [ ] **Step 4: Obtain independent code review**
+- [x] **Step 4: Obtain independent code review**
 
 Review the complete Preview 21-to-Preview 22 range for accidental loss of selection/order, adapter recycling, accessibility, Home navigation, and test weakness. Resolve all Critical/Important findings and rerun affected tests.
 
-- [ ] **Step 5: Record and commit release evidence**
+- [x] **Step 5: Record and commit release evidence**
 
 Document exact test count/time, lint classification, independent review, APK metadata/signature/hash, unchanged Root boundary, no-device gap, install checks, and Preview 21 rollback. Commit:
 
