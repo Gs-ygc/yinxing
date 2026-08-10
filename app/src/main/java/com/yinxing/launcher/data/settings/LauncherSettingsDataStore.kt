@@ -19,11 +19,15 @@ import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 
+private const val DEFAULT_PHONE_FULL_CARD_TAP_ENABLED = true
+private const val DEFAULT_FULL_CARD_TAP_ENABLED = false
+
 data class LauncherSettings(
     val lowPerformanceModeEnabled: Boolean = false,
     val autoAnswerEnabled: Boolean = true,
     val autoAnswerDelaySeconds: Int = LauncherSettingsDataStore.DEFAULT_AUTO_ANSWER_DELAY_SECONDS,
-    val fullCardTapEnabled: Boolean = false,
+    val phoneFullCardTapEnabled: Boolean = DEFAULT_PHONE_FULL_CARD_TAP_ENABLED,
+    val fullCardTapEnabled: Boolean = DEFAULT_FULL_CARD_TAP_ENABLED,
     val darkMode: String = LauncherSettingsDataStore.DARK_MODE_SYSTEM,
     val kioskModeEnabled: Boolean = false,
     val autoStartConfirmed: Boolean = false,
@@ -35,6 +39,7 @@ data class LauncherSettingsMigration(
     val lowPerformanceModeEnabled: Boolean? = null,
     val autoAnswerEnabled: Boolean? = null,
     val autoAnswerDelaySeconds: Int? = null,
+    val phoneFullCardTapEnabled: Boolean? = null,
     val fullCardTapEnabled: Boolean? = null,
     val darkMode: String? = null,
     val kioskModeEnabled: Boolean? = null,
@@ -47,6 +52,7 @@ data class LauncherSettingsMigration(
             lowPerformanceModeEnabled,
             autoAnswerEnabled,
             autoAnswerDelaySeconds,
+            phoneFullCardTapEnabled,
             fullCardTapEnabled,
             darkMode,
             kioskModeEnabled,
@@ -77,6 +83,7 @@ class LauncherSettingsDataStore private constructor(context: Context) {
         private val KEY_LOW_PERFORMANCE_MODE = booleanPreferencesKey("low_performance_mode")
         private val KEY_AUTO_ANSWER_ENABLED = booleanPreferencesKey("auto_answer_enabled")
         private val KEY_AUTO_ANSWER_DELAY_SECONDS = intPreferencesKey("auto_answer_delay_seconds")
+        private val KEY_PHONE_FULL_CARD_TAP_ENABLED = booleanPreferencesKey("phone_full_card_tap_enabled")
         private val KEY_FULL_CARD_TAP_ENABLED = booleanPreferencesKey("full_card_tap_enabled")
         private val KEY_DARK_MODE = stringPreferencesKey("dark_mode")
         private val KEY_KIOSK_MODE_ENABLED = booleanPreferencesKey("kiosk_mode_enabled")
@@ -122,6 +129,13 @@ class LauncherSettingsDataStore private constructor(context: Context) {
         mutate(
             update = { it.copy(fullCardTapEnabled = enabled) },
             persist = { it[KEY_FULL_CARD_TAP_ENABLED] = enabled }
+        )
+    }
+
+    fun setPhoneFullCardTapEnabled(enabled: Boolean) {
+        mutate(
+            update = { it.copy(phoneFullCardTapEnabled = enabled) },
+            persist = { it[KEY_PHONE_FULL_CARD_TAP_ENABLED] = enabled }
         )
     }
 
@@ -174,6 +188,8 @@ class LauncherSettingsDataStore private constructor(context: Context) {
                     autoAnswerEnabled = migration.autoAnswerEnabled ?: current.autoAnswerEnabled,
                     autoAnswerDelaySeconds = (migration.autoAnswerDelaySeconds
                         ?: current.autoAnswerDelaySeconds).coerceIn(1, 30),
+                    phoneFullCardTapEnabled = migration.phoneFullCardTapEnabled
+                        ?: current.phoneFullCardTapEnabled,
                     fullCardTapEnabled = migration.fullCardTapEnabled ?: current.fullCardTapEnabled,
                     darkMode = migration.darkMode?.let(::normalizeDarkMode) ?: current.darkMode,
                     kioskModeEnabled = migration.kioskModeEnabled ?: current.kioskModeEnabled,
@@ -189,6 +205,9 @@ class LauncherSettingsDataStore private constructor(context: Context) {
                 migration.autoAnswerEnabled?.let { preferences[KEY_AUTO_ANSWER_ENABLED] = it }
                 migration.autoAnswerDelaySeconds?.let {
                     preferences[KEY_AUTO_ANSWER_DELAY_SECONDS] = it.coerceIn(1, 30)
+                }
+                migration.phoneFullCardTapEnabled?.let {
+                    preferences[KEY_PHONE_FULL_CARD_TAP_ENABLED] = it
                 }
                 migration.fullCardTapEnabled?.let { preferences[KEY_FULL_CARD_TAP_ENABLED] = it }
                 migration.darkMode?.let { preferences[KEY_DARK_MODE] = normalizeDarkMode(it) }
@@ -229,10 +248,17 @@ class LauncherSettingsDataStore private constructor(context: Context) {
      */
     private fun readSettings(): LauncherSettings {
         return runBlocking(Dispatchers.IO) {
-            dataStore.data
+            val preferences = dataStore.data
                 .catch { emit(emptyPreferences()) }
                 .first()
-                .toLauncherSettings()
+            val settings = preferences.toLauncherSettings()
+            // Materialize the phone-specific default once. This preserves an old
+            // explicit video-card choice during upgrade without coupling future
+            // video edits back to the phone setting.
+            if (preferences[KEY_PHONE_FULL_CARD_TAP_ENABLED] == null) {
+                dataStore.edit { it[KEY_PHONE_FULL_CARD_TAP_ENABLED] = settings.phoneFullCardTapEnabled }
+            }
+            settings
         }
     }
 
@@ -242,7 +268,10 @@ class LauncherSettingsDataStore private constructor(context: Context) {
             autoAnswerEnabled = this[KEY_AUTO_ANSWER_ENABLED] ?: true,
             autoAnswerDelaySeconds = (this[KEY_AUTO_ANSWER_DELAY_SECONDS] ?: DEFAULT_AUTO_ANSWER_DELAY_SECONDS)
                 .coerceIn(1, 30),
-            fullCardTapEnabled = this[KEY_FULL_CARD_TAP_ENABLED] ?: false,
+            phoneFullCardTapEnabled = this[KEY_PHONE_FULL_CARD_TAP_ENABLED]
+                ?: this[KEY_FULL_CARD_TAP_ENABLED]
+                ?: DEFAULT_PHONE_FULL_CARD_TAP_ENABLED,
+            fullCardTapEnabled = this[KEY_FULL_CARD_TAP_ENABLED] ?: DEFAULT_FULL_CARD_TAP_ENABLED,
             darkMode = normalizeDarkMode(this[KEY_DARK_MODE]),
             kioskModeEnabled = this[KEY_KIOSK_MODE_ENABLED] ?: false,
             autoStartConfirmed = this[KEY_AUTOSTART_CONFIRMED] ?: false,

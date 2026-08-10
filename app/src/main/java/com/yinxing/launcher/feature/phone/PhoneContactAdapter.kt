@@ -2,6 +2,7 @@
 
 import android.net.Uri
 import android.view.LayoutInflater
+import android.view.View
 import android.view.ViewGroup
 import android.view.animation.DecelerateInterpolator
 import android.widget.ImageView
@@ -25,8 +26,8 @@ class PhoneContactAdapter(
 ) : ListAdapter<Contact, PhoneContactAdapter.ViewHolder>(DIFF) {
 
     private var isManageMode = false
-    private var fullCardTapEnabled = false
-    private var animationsEnabled = true
+    private var fullCardTapEnabled = true
+    private var animationsEnabled = false
     private val animatedIds = HashSet<Long>()
 
     init {
@@ -76,25 +77,54 @@ class PhoneContactAdapter(
 
         if (isManageMode) {
             holder.btnCall.isVisible = false
+            holder.btnCall.setOnClickListener(null)
+            holder.btnCall.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            setChildAccessibility(holder, View.IMPORTANT_FOR_ACCESSIBILITY_NO)
             holder.manageHint.isVisible = true
+            holder.itemView.contentDescription = holder.itemView.context.getString(
+                R.string.contact_edit_description,
+                contact.displayName
+            )
+            holder.itemView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            holder.itemView.isFocusable = true
             holder.itemView.setOnClickListener { onEditClick(contact) }
         } else {
             holder.btnCall.isVisible = true
             holder.manageHint.isVisible = false
-            holder.btnCall.contentDescription = holder.itemView.context.getString(
+            val callDescription = holder.itemView.context.getString(
                 R.string.contact_call_description,
                 contact.displayName
             )
+            holder.btnCall.contentDescription = callDescription
             holder.btnCall.setOnClickListener { onCallClick(contact) }
             if (fullCardTapEnabled) {
+                setChildAccessibility(holder, View.IMPORTANT_FOR_ACCESSIBILITY_NO)
+                holder.itemView.contentDescription = callDescription
+                holder.itemView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+                holder.itemView.isFocusable = true
+                holder.btnCall.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
                 holder.itemView.setOnClickListener { onCallClick(contact) }
+                holder.itemView.isClickable = true
             } else {
+                setChildAccessibility(holder, View.IMPORTANT_FOR_ACCESSIBILITY_AUTO)
+                holder.itemView.contentDescription = null
+                holder.itemView.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+                holder.itemView.isFocusable = false
+                holder.btnCall.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
                 holder.itemView.setOnClickListener(null)
                 holder.itemView.isClickable = false
             }
         }
 
         animateInIfFirstShow(holder, position)
+    }
+
+    private fun setChildAccessibility(holder: ViewHolder, mode: Int) {
+        holder.avatar.importantForAccessibility = mode
+        holder.name.importantForAccessibility = mode
+        holder.phone.importantForAccessibility = mode
+        holder.autoAnswerBadge.importantForAccessibility = mode
+        holder.manageHint.importantForAccessibility = mode
     }
 
     private fun animateInIfFirstShow(holder: ViewHolder, position: Int) {

@@ -144,7 +144,6 @@ class VideoCallContactAdapter(
             contact.displayName
         )
         holder.photo.contentDescription = context.getString(R.string.contact_photo_description, contact.displayName)
-        holder.card.contentDescription = context.getString(R.string.video_contact_action_description, contact.displayName)
 
         holder.photo.setDefaultAvatar(context, contact.preferredAction)
         holder.photoJob?.cancel()
@@ -173,10 +172,25 @@ class VideoCallContactAdapter(
         }
         holder.btnVideoCall.setOnClickListener(primaryAction)
         if (fullCardTapEnabled) {
+            holder.card.contentDescription = context.getString(
+                R.string.video_contact_action_description,
+                contact.displayName
+            )
+            holder.card.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
+            holder.card.isFocusable = true
+            holder.photo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            holder.name.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            holder.btnVideoCall.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
             holder.card.setOnClickListener(primaryAction)
             holder.photo.setOnClickListener(primaryAction)
             holder.name.setOnClickListener(primaryAction)
         } else {
+            holder.card.contentDescription = null
+            holder.card.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            holder.card.isFocusable = false
+            holder.photo.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            holder.name.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_NO
+            holder.btnVideoCall.importantForAccessibility = View.IMPORTANT_FOR_ACCESSIBILITY_YES
             holder.card.setOnClickListener(null)
             holder.card.isClickable = false
             holder.photo.setOnClickListener(null)

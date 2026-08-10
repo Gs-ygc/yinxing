@@ -79,4 +79,28 @@ class SettingsActivityInstrumentedTest {
             org.junit.Assert.assertFalse(preferences.isAutoAnswerEnabled())
         }
     }
+
+    @Test
+    fun phoneAndVideoCardActionsHaveSeparateSafeDefaults() {
+        ActivityScenario.launch(SettingsActivity::class.java).use {
+            val preferences = LauncherPreferences.getInstance(appContext)
+
+            onView(withId(R.id.btn_card_auto_answer)).perform(scrollTo(), click())
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            onView(withId(R.id.switch_phone_full_card_tap_sheet)).check(matches(isChecked()))
+            onView(withId(R.id.switch_full_card_tap_sheet)).check(matches(isNotChecked()))
+            org.junit.Assert.assertTrue(preferences.isPhoneFullCardTapEnabled())
+            org.junit.Assert.assertFalse(preferences.isFullCardTapEnabled())
+
+            onView(withId(R.id.switch_phone_full_card_tap_sheet)).perform(click())
+            onView(withId(R.id.switch_full_card_tap_sheet)).perform(click())
+            InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+
+            onView(withId(R.id.switch_phone_full_card_tap_sheet)).check(matches(isNotChecked()))
+            onView(withId(R.id.switch_full_card_tap_sheet)).check(matches(isChecked()))
+            org.junit.Assert.assertFalse(preferences.isPhoneFullCardTapEnabled())
+            org.junit.Assert.assertTrue(preferences.isFullCardTapEnabled())
+        }
+    }
 }

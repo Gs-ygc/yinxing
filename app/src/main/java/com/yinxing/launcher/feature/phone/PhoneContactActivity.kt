@@ -134,6 +134,9 @@ private class ImportCandidateAdapter(
 class PhoneContactActivity : AppCompatActivity() {
     companion object {
         private const val EXTRA_START_IN_MANAGE_MODE = "extra_start_in_manage_mode"
+        private const val STATE_PENDING_CALL_ID = "state_pending_call_id"
+        private const val STATE_PENDING_CALL_NAME = "state_pending_call_name"
+        private const val STATE_PENDING_CALL_NUMBER = "state_pending_call_number"
 
         fun createIntent(context: Context, startInManageMode: Boolean = false): Intent {
             return Intent(context, PhoneContactActivity::class.java)
@@ -160,6 +163,8 @@ class PhoneContactActivity : AppCompatActivity() {
     private var selectedAvatarUri: String? = null
     private var pendingCallContact: Contact? = null
     private var searchInputUpdating = false
+    private val callLaunchGate = PhoneCallLaunchGate()
+    private var callFallbackDialog: AlertDialog? = null
 
 
     private val pickImageLauncher = registerForActivityResult(
@@ -177,9 +182,9 @@ class PhoneContactActivity : AppCompatActivity() {
         val contact = pendingCallContact
         pendingCallContact = null
         if (granted && contact != null) {
-            makeCall(contact)
+            launchDirectCall(contact)
         } else {
-            showToast(getString(R.string.phone_call_permission_required))
+            contact?.let { showCallFallbackDialog(it) }
         }
     }
 
@@ -189,9 +194,22 @@ class PhoneContactActivity : AppCompatActivity() {
 
         launcherPreferences = LauncherPreferences.getInstance(this)
         viewModel = ViewModelProvider(this, PhoneContactViewModel.Factory(this))[PhoneContactViewModel::class.java]
+        pendingCallContact = savedInstanceState
+            ?.getString(STATE_PENDING_CALL_NUMBER)
+            ?.takeIf { it.isNotBlank() }
+            ?.let { number ->
+                Contact(
+                    id = savedInstanceState.getString(STATE_PENDING_CALL_ID).orEmpty(),
+                    name = savedInstanceState.getString(STATE_PENDING_CALL_NAME)
+                        ?.takeIf { it.isNotBlank() }
+                        ?: getString(R.string.contact_name_placeholder),
+                    phoneNumber = number
+                )
+            }
 
         recyclerView = findViewById(R.id.recycler_phone_contacts)
         recyclerView.layoutManager = LinearLayoutManager(this)
+        recyclerView.itemAnimator = null
         stateView = findViewById(R.id.view_page_state)
         stateView.attachContent(recyclerView)
 
@@ -308,9 +326,20 @@ class PhoneContactActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        adapter.setFullCardTapEnabled(launcherPreferences.isFullCardTapEnabled())
-        adapter.setAnimationsEnabled(!launcherPreferences.isLowPerformanceModeEnabled())
+        adapter.setFullCardTapEnabled(launcherPreferences.isPhoneFullCardTapEnabled())
+        // The call page must be actionable as soon as rows are bound; avoid a fade-in
+        // that can look like a missing contact or delay the first tap.
+        adapter.setAnimationsEnabled(false)
         viewModel.refresh()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        pendingCallContact?.let { contact ->
+            outState.putString(STATE_PENDING_CALL_ID, contact.id)
+            outState.putString(STATE_PENDING_CALL_NAME, contact.displayName)
+            outState.putString(STATE_PENDING_CALL_NUMBER, contact.phoneNumber)
+        }
+        super.onSaveInstanceState(outState)
     }
 
     private fun updateModeUi(isManageMode: Boolean) {
@@ -320,7 +349,7 @@ class PhoneContactActivity : AppCompatActivity() {
         val actionText = getString(if (isManageMode) R.string.action_add else R.string.action_manage)
         modeActionText.text = actionText
         modeActionButton.contentDescription = actionText
-        modeActionButton.isVisible = true
+        modeActionButton.isVisible = launchedFromManageEntry || isManageMode
         modeSummaryText.text = getString(
             if (isManageMode) R.string.phone_contact_manage_summary else R.string.phone_contact_call_summary
         )
@@ -358,7 +387,8 @@ class PhoneContactActivity : AppCompatActivity() {
     }
 
     private fun makeCall(contact: Contact) {
-        val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return
+        if (contact.phoneNumber.isNullOrBlank()) return
+        if (callFallbackDialog?.isShowing == true || pendingCallContact != null) return
         if (
             ActivityCompat.checkSelfPermission(this, Manifest.permission.CALL_PHONE)
             != PackageManager.PERMISSION_GRANTED
@@ -367,12 +397,64 @@ class PhoneContactActivity : AppCompatActivity() {
             callPermissionLauncher.launch(Manifest.permission.CALL_PHONE)
             return
         }
-        val intent = Intent(Intent.ACTION_CALL, Uri.fromParts("tel", number, null))
+        launchDirectCall(contact)
+    }
+
+    private fun launchDirectCall(contact: Contact) {
+        val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return
+        if (!callLaunchGate.tryAcquire(number)) return
+        val intent = PhoneCallIntentFactory.direct(number)
         runCatching { startActivity(intent) }.onFailure {
-            showToast(getString(R.string.dial_failed, it.message ?: ""))
+            showCallFallbackDialog(contact, directCallFailed = true)
         }.onSuccess {
             viewModel.incrementCallCountAsync(contact.id)
         }
+    }
+
+    private fun showCallFallbackDialog(contact: Contact, directCallFailed: Boolean = false) {
+        if (isFinishing || isDestroyed) return
+        callFallbackDialog?.dismiss()
+        val dialogView = layoutInflater.inflate(R.layout.dialog_call_permission_fallback, null)
+        dialogView.findViewById<TextView>(R.id.tv_call_permission_title).text = getString(
+            R.string.phone_call_permission_fallback_title,
+            contact.displayName
+        )
+        dialogView.findViewById<TextView>(R.id.tv_call_permission_message).text = getString(
+            if (!directCallFailed) {
+                R.string.phone_call_permission_fallback_message
+            } else {
+                R.string.phone_call_fallback_failed_message
+            },
+            contact.displayName
+        )
+        val dialog = AlertDialog.Builder(this).setView(dialogView).create()
+        dialog.window?.setBackgroundDrawableResource(android.R.color.transparent)
+        dialogView.findViewById<MaterialCardView>(R.id.btn_open_dialer).setOnClickListener {
+            dialog.dismiss()
+            val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return@setOnClickListener
+            runCatching { startActivity(PhoneCallIntentFactory.dialer(number)) }
+                .onFailure { showToast(getString(R.string.dial_failed, it.message ?: "")) }
+        }
+        dialogView.findViewById<MaterialCardView>(R.id.btn_cancel_call).setOnClickListener {
+            dialog.dismiss()
+        }
+        dialog.setOnDismissListener {
+            if (callFallbackDialog === dialog) callFallbackDialog = null
+        }
+        callFallbackDialog = dialog
+        dialog.show()
+        dialog.window?.setLayout(
+            (resources.displayMetrics.widthPixels * 0.92f).toInt(),
+            android.view.WindowManager.LayoutParams.WRAP_CONTENT
+        )
+    }
+
+    override fun onDestroy() {
+        callFallbackDialog?.setOnDismissListener(null)
+        callFallbackDialog?.dismiss()
+        callFallbackDialog = null
+        pendingCallContact = null
+        super.onDestroy()
     }
 
     private fun showImportFromContacts() {

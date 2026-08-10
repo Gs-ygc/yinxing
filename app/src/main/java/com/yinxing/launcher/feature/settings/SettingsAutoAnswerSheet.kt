@@ -18,6 +18,8 @@ internal fun SettingsActivity.showAutoAnswerSheet() {
     val autoAnswerDelaySummary = view.findViewById<TextView>(R.id.tv_auto_answer_delay_sheet_summary)
     val autoAnswerDelayMinus = view.findViewById<View>(R.id.btn_auto_answer_delay_sheet_minus)
     val autoAnswerDelayPlus = view.findViewById<View>(R.id.btn_auto_answer_delay_sheet_plus)
+    val phoneFullCardTapSwitch = view.findViewById<SwitchCompat>(R.id.switch_phone_full_card_tap_sheet)
+    val phoneFullCardTapSummary = view.findViewById<TextView>(R.id.tv_phone_full_card_tap_sheet_summary)
     val fullCardTapSwitch = view.findViewById<SwitchCompat>(R.id.switch_full_card_tap_sheet)
     val fullCardTapSummary = view.findViewById<TextView>(R.id.tv_full_card_tap_sheet_summary)
     val incomingTraceSummary = view.findViewById<TextView>(R.id.tv_incoming_trace_sheet_summary)
@@ -40,6 +42,12 @@ internal fun SettingsActivity.showAutoAnswerSheet() {
         autoAnswerDelaySummary.text = getString(
             R.string.settings_auto_answer_delay_summary,
             launcherPreferences.getAutoAnswerDelaySeconds()
+        )
+        val phoneFullCardTap = launcherPreferences.isPhoneFullCardTapEnabled()
+        phoneFullCardTapSwitch.isChecked = phoneFullCardTap
+        phoneFullCardTapSummary.text = getString(
+            if (phoneFullCardTap) R.string.settings_phone_full_card_tap_summary_on
+            else R.string.settings_phone_full_card_tap_summary_off
         )
         val fullCardTap = launcherPreferences.isFullCardTapEnabled()
         fullCardTapSwitch.isChecked = fullCardTap
@@ -71,6 +79,10 @@ internal fun SettingsActivity.showAutoAnswerSheet() {
         launcherPreferences.setAutoAnswerDelaySeconds(updated)
         updateSheetSummary()
         overviewController.updateAutoAnswerHubCard()
+    }
+    phoneFullCardTapSwitch.setOnCheckedChangeListener { _, isChecked ->
+        launcherPreferences.setPhoneFullCardTapEnabled(isChecked)
+        updateSheetSummary()
     }
     fullCardTapSwitch.setOnCheckedChangeListener { _, isChecked ->
         launcherPreferences.setFullCardTapEnabled(isChecked)

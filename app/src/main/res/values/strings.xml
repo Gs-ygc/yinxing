@@ -129,6 +129,11 @@
     <string name="contact_load_failed">联系人加载失败：%1$s</string>
     <string name="dial_failed">拨号失败：%1$s</string>
     <string name="phone_call_permission_required">需要先授权电话权限，才能直接拨打</string>
+    <string name="phone_call_permission_fallback_title">无法直接拨打%1$s</string>
+    <string name="phone_call_permission_fallback_message">给%1$s的电话暂时不能直接拨打。可以打开拨号盘，号码已经填好，再点绿色拨号键。家属可在设置里开启电话权限。</string>
+    <string name="phone_call_fallback_failed_message">暂时无法直接拨打%1$s，可以打开拨号盘手动拨打。</string>
+    <string name="phone_call_open_dialer">打开拨号盘</string>
+    <string name="phone_call_cancel">先不拨打</string>
     <string name="open_contacts_failed">未找到可打开的联系人应用</string>
     <string name="state_phone_permission_title">无法读取联系人</string>
 
@@ -143,9 +148,10 @@
     <string name="state_phone_error_action">重新加载</string>
     <string name="contact_name_placeholder">联系人</string>
     <string name="contact_phone_placeholder">电话号码</string>
-    <string name="contact_action_hint">轻点卡片下方区域即可拨号</string>
+    <string name="contact_action_hint">轻点联系人卡片或绿色按钮即可拨号</string>
     <string name="contact_photo_description">%1$s 的照片</string>
     <string name="contact_call_description">拨打 %1$s</string>
+    <string name="contact_edit_description">编辑 %1$s</string>
     <string name="input_contact_name">请输入联系人姓名</string>
     <string name="contact_added_named">已保存联系人：%1$s</string>
     <string name="delete_contact_title">删除联系人</string>
@@ -237,7 +243,7 @@
     <string name="settings_incoming_guard_action_open">查看详情</string>
     <string name="settings_sheet_contacts_message">先把电话联系人、视频联系人和首页应用准备好。</string>
     <string name="settings_sheet_auto_answer_title">来电与接听</string>
-    <string name="settings_sheet_auto_answer_message">这里调整自动接听、倒计时、整卡拨打方式和最近来电状态。</string>
+    <string name="settings_sheet_auto_answer_message">这里调整自动接听、倒计时、电话与视频的整卡操作和最近来电状态。</string>
     <string name="settings_sheet_permissions_message">按来电、后台和视频三类权限来检查。</string>
     <string name="settings_sheet_device_message">这里处理默认桌面、后台表现和性能模式。</string>
     <string name="settings_sheet_system_message">这里可以修改天气城市，或打开系统设置。</string>
@@ -306,9 +312,12 @@
     <string name="settings_dark_mode_system">跟随系统</string>
     <string name="settings_dark_mode_light">浅色</string>
     <string name="settings_dark_mode_dark">深色</string>
-    <string name="settings_full_card_tap_title">整卡可点击拨打</string>
-    <string name="settings_full_card_tap_summary_on">已开启。点联系人卡片任意位置都拨号</string>
-    <string name="settings_full_card_tap_summary_off">已关闭。仅点拨打按钮拨号，避免误碰</string>
+    <string name="settings_phone_full_card_tap_title">电话整卡一键拨号</string>
+    <string name="settings_phone_full_card_tap_summary_on">已开启，点电话联系人卡片任意位置即可拨号</string>
+    <string name="settings_phone_full_card_tap_summary_off">已关闭，仅点绿色拨打按钮</string>
+    <string name="settings_full_card_tap_title">视频整卡一键联系</string>
+    <string name="settings_full_card_tap_summary_on">已开启，点视频联系人卡片任意位置即可联系</string>
+    <string name="settings_full_card_tap_summary_off">已关闭，仅点蓝色视频按钮，减少误碰</string>
     <string name="settings_incoming_trace_title">最近来电状态</string>
     <string name="settings_incoming_trace_empty">还没有来电链路记录，来过一次电话后会显示广播、提醒、来电页和接听结果</string>
     <string name="settings_system_title">系统设置</string>
@@ -440,7 +449,7 @@
     <string name="phone_contact_title">打电话</string>
     <string name="phone_contact_manage_title">管理电话联系人</string>
 
-    <string name="phone_contact_call_summary">轻点联系人，就能直接打电话</string>
+    <string name="phone_contact_call_summary">轻点联系人卡片，就能直接打电话</string>
     <string name="phone_contact_manage_summary">新增、修改和删除常用电话联系人</string>
 
     <string name="state_phone_manage_empty_message">先添加一个联系人，设置好手机号后就能直接拨打</string>

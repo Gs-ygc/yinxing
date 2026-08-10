@@ -161,7 +161,7 @@ class LauncherAppRepository(
                 packageName = "phone",
                 appName = appContext.getString(R.string.home_item_phone),
                 type = HomeAppItem.Type.PHONE,
-                iconResId = android.R.drawable.ic_menu_myplaces
+                iconResId = android.R.drawable.ic_menu_call
             )
         )
         add(
@@ -169,7 +169,7 @@ class LauncherAppRepository(
                 packageName = "wechat_video",
                 appName = appContext.getString(R.string.home_item_wechat_video),
                 type = HomeAppItem.Type.WECHAT_VIDEO,
-                iconResId = android.R.drawable.ic_menu_call
+                iconResId = android.R.drawable.ic_menu_camera
             )
         )
     }

@@ -69,6 +69,16 @@ class LauncherAppRepositoryTest {
         assertEquals(listOf("pkg.beta", "pkg.alpha"), appPackages)
     }
 
+    @Test
+    fun staticHomeKeepsPhoneFirstWithFamiliarCallAndVideoIcons() {
+        val items = LauncherAppRepository(context, FakeLauncherAppSource()).getStaticHomeItems()
+
+        assertEquals(HomeAppItem.Type.PHONE, items[0].type)
+        assertEquals(android.R.drawable.ic_menu_call, items[0].iconResId)
+        assertEquals(HomeAppItem.Type.WECHAT_VIDEO, items[1].type)
+        assertEquals(android.R.drawable.ic_menu_camera, items[1].iconResId)
+    }
+
     private class FakeLauncherAppSource(
         private val installed: List<LauncherAppRecord> = emptyList(),
         private val selected: List<LauncherAppRecord> = installed

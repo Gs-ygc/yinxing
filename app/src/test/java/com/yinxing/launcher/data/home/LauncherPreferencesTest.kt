@@ -86,6 +86,33 @@ class LauncherPreferencesTest {
     }
 
     @Test
+    fun phoneFullCardTapDefaultsToEnabledWhileVideoRemainsButtonOnly() {
+        assertTrue(preferences.isPhoneFullCardTapEnabled())
+        assertFalse(preferences.isFullCardTapEnabled())
+    }
+
+    @Test
+    fun phoneAndVideoFullCardTapCanBeConfiguredIndependently() {
+        preferences.setPhoneFullCardTapEnabled(false)
+        preferences.setFullCardTapEnabled(true)
+
+        assertFalse(preferences.isPhoneFullCardTapEnabled())
+        assertTrue(preferences.isFullCardTapEnabled())
+    }
+
+    @Test
+    fun legacyFullCardChoiceSeedsPhoneChoiceWhenDedicatedKeyIsMissing() {
+        context.getSharedPreferences("launcher_prefs", Context.MODE_PRIVATE).edit()
+            .putBoolean("full_card_tap_enabled", false)
+            .commit()
+
+        val migrated = LauncherPreferences(context)
+
+        assertFalse(migrated.isPhoneFullCardTapEnabled())
+        assertFalse(migrated.isFullCardTapEnabled())
+    }
+
+    @Test
     fun autoStartConfirmationDefaultsToFalse() {
         assertFalse(preferences.isAutoStartConfirmed())
     }
@@ -111,6 +138,7 @@ class LauncherPreferencesTest {
         preferences.setLowPerformanceModeEnabled(true)
         preferences.setAutoAnswerEnabled(false)
         preferences.setAutoAnswerDelaySeconds(12)
+        preferences.setPhoneFullCardTapEnabled(false)
         preferences.setFullCardTapEnabled(true)
         preferences.setDarkMode(LauncherPreferences.DARK_MODE_DARK)
         preferences.setKioskModeEnabled(true)
@@ -132,6 +160,7 @@ class LauncherPreferencesTest {
             .putBoolean("low_performance_mode", true)
             .putBoolean("auto_answer_enabled", false)
             .putInt("auto_answer_delay_seconds", 9)
+            .putBoolean("phone_full_card_tap_enabled", false)
             .putBoolean("full_card_tap_enabled", true)
             .putString("dark_mode", LauncherPreferences.DARK_MODE_DARK)
             .putBoolean("kiosk_mode_enabled", true)
@@ -148,6 +177,7 @@ class LauncherPreferencesTest {
         assertTrue(migrated.isLowPerformanceModeEnabled())
         assertFalse(migrated.isAutoAnswerEnabled())
         assertEquals(9, migrated.getAutoAnswerDelaySeconds())
+        assertFalse(migrated.isPhoneFullCardTapEnabled())
         assertTrue(migrated.isFullCardTapEnabled())
         assertEquals(LauncherPreferences.DARK_MODE_DARK, migrated.getDarkMode())
         assertTrue(migrated.isKioskModeEnabled())

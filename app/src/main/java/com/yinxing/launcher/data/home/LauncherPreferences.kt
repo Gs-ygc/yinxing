@@ -25,6 +25,7 @@ class LauncherPreferences(context: Context) {
         private const val KEY_AUTO_ANSWER_ENABLED = "auto_answer_enabled"
         private const val KEY_AUTO_ANSWER_DELAY_SECONDS = "auto_answer_delay_seconds"
         const val DEFAULT_AUTO_ANSWER_DELAY_SECONDS = 5
+        private const val KEY_PHONE_FULL_CARD_TAP_ENABLED = "phone_full_card_tap_enabled"
         private const val KEY_FULL_CARD_TAP_ENABLED = "full_card_tap_enabled"
         private const val KEY_DARK_MODE = "dark_mode"
         const val DARK_MODE_SYSTEM = "system"
@@ -42,6 +43,7 @@ class LauncherPreferences(context: Context) {
             KEY_LOW_PERFORMANCE_MODE,
             KEY_AUTO_ANSWER_ENABLED,
             KEY_AUTO_ANSWER_DELAY_SECONDS,
+            KEY_PHONE_FULL_CARD_TAP_ENABLED,
             KEY_FULL_CARD_TAP_ENABLED,
             KEY_DARK_MODE,
             KEY_KIOSK_MODE_ENABLED,
@@ -117,6 +119,18 @@ class LauncherPreferences(context: Context) {
         settingsStore.setAutoAnswerDelaySeconds(normalized)
         notifyPreferenceChanged(KEY_AUTO_ANSWER_DELAY_SECONDS)
     }
+
+    fun isPhoneFullCardTapEnabled(): Boolean {
+        return settingsStore.snapshot().phoneFullCardTapEnabled
+    }
+
+    fun setPhoneFullCardTapEnabled(enabled: Boolean) {
+        if (settingsStore.snapshot().phoneFullCardTapEnabled == enabled) return
+        settingsStore.setPhoneFullCardTapEnabled(enabled)
+        notifyPreferenceChanged(KEY_PHONE_FULL_CARD_TAP_ENABLED)
+    }
+
+    fun isPhoneFullCardTapKey(key: String?): Boolean = key == KEY_PHONE_FULL_CARD_TAP_ENABLED
 
     fun isFullCardTapEnabled(): Boolean {
         return settingsStore.snapshot().fullCardTapEnabled
@@ -234,6 +248,8 @@ class LauncherPreferences(context: Context) {
                 lowPerformanceModeEnabled = legacy[KEY_LOW_PERFORMANCE_MODE] as? Boolean,
                 autoAnswerEnabled = legacy[KEY_AUTO_ANSWER_ENABLED] as? Boolean,
                 autoAnswerDelaySeconds = legacy[KEY_AUTO_ANSWER_DELAY_SECONDS] as? Int,
+                phoneFullCardTapEnabled = (legacy[KEY_PHONE_FULL_CARD_TAP_ENABLED] as? Boolean)
+                    ?: (legacy[KEY_FULL_CARD_TAP_ENABLED] as? Boolean),
                 fullCardTapEnabled = legacy[KEY_FULL_CARD_TAP_ENABLED] as? Boolean,
                 darkMode = legacy[KEY_DARK_MODE] as? String,
                 kioskModeEnabled = legacy[KEY_KIOSK_MODE_ENABLED] as? Boolean,
