@@ -51,6 +51,22 @@ class FloatingStatusViewTest {
     }
 
     @Test
+    fun replacingCancelListenerUsesTheLatestCallback() {
+        val root = LayoutInflater.from(context)
+            .inflate(R.layout.floating_status, FrameLayout(context), false)
+        var firstListenerCalls = 0
+        var latestListenerCalls = 0
+        val statusView = FloatingStatusView(context)
+        statusView.setOnCancelListener { firstListenerCalls += 1 }
+        statusView.bindCancelAction(root)
+        statusView.setOnCancelListener { latestListenerCalls += 1 }
+
+        assertTrue(root.findViewById<View>(R.id.tv_cancel).performClick())
+        assertEquals(0, firstListenerCalls)
+        assertEquals(1, latestListenerCalls)
+    }
+
+    @Test
     fun textBindingKeepsContactAndStatusSeparate() {
         val root = LayoutInflater.from(context)
             .inflate(R.layout.floating_status, FrameLayout(context), false)

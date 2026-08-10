@@ -372,7 +372,7 @@ class SelectToSpeakService : AccessibilityService(), WeChatRequestHost {
 
         floatingView?.setOnCancelListener {
             if (currentSession === session) {
-                DebugLog.d(TAG) { "用户长按取消了视频通话流程" }
+                DebugLog.d(TAG) { "用户取消了视频通话流程" }
                 cancelSession(true)
             }
         }
