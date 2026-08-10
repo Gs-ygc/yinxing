@@ -76,7 +76,7 @@ Set the RecyclerView item animator to `null` and disable adapter animations when
 
 Focused tests must prove:
 
-- the inflated overlay has the exact cancel label/description, a minimum 56dp target, and no low-opacity glyph styling;
+- the inflated overlay has the exact cancel label/description, a minimum 56dp target, and an explicit text action;
 - binding a cancel listener makes one ordinary click invoke it once;
 - title/status binding preserves both lines and hides only a blank status;
 - the video Activity has no RecyclerView item animator and its adapter animation flag is disabled;
