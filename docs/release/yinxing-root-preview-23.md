@@ -17,6 +17,8 @@ Preview 23 聚焦老人每天使用微信视频时最容易迷失的接管阶段
 
 - 微信接管浮层始终以 `正在联系 <联系人>` 为主标题；下方只显示“正在打开微信”等当前
   动作，不再把“第几步/共几步”的内部诊断信息暴露给老人。
+- 2 倍系统字体和超长联系人下，标题最多显示 3 行、状态最多 2 行，超出时明确显示尾部
+  省略；底层文字与无障碍节点仍保留全文，浮层高度有界，`取消` 按钮不会被内容推出浮层。
 - 原来低对比度、36dp、必须长按的 `x` 已改为明确的 `取消` 按钮。按钮为 `88dp x 56dp`，
   带 `取消联系` 无障碍描述，普通单击立即复用既有取消会话和返回银杏路径。
 - 成功发起后，浮层仍保留联系人标题，并短暂显示 `视频通话已发起`，避免结果与目标对象
@@ -59,17 +61,19 @@ Preview 23 聚焦老人每天使用微信视频时最容易迷失的接管阶段
 ## 本地验证记录
 
 - 强制执行 `:app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest
-  --rerun-tasks --no-daemon --console=plain`：80/80 任务成功，外部耗时 94.76 秒；57 份
-  JUnit XML 共 441 tests、0 failures、0 errors、0 skipped，主 APK 与 androidTest APK
+  --rerun-tasks --no-daemon --console=plain`：80/80 任务成功，外部耗时 95.17 秒；57 份
+  JUnit XML 共 442 tests、0 failures、0 errors、0 skipped，主 APK 与 androidTest APK
   均生成。
 - Task 1 浮层测试、视频通话测试与 select-to-speak 服务回归在最终小项清理后再次通过；
-  新增覆盖包括按钮尺寸/文案/普通单击、监听替换、联系人标题回退、无列表动画和稳定行状态。
+  新增覆盖包括按钮尺寸/文案/普通单击、监听替换、联系人标题回退、无列表动画、稳定行状态，
+  以及有限屏幕高度下的大字体/长联系人/完整无障碍文字/取消按钮可达边界。
 - `:app:lintDebug` 仍以退出码 1 报告 2 个既有 `RootCommandRunner.kt:72`、`:150` API 26
   `NewApi` errors 和 134 warnings。本版变更文件没有新增 lint error；视频适配器命中的
   `String.toUri` warning 位于未改动的既有缩略图代码。
 - Preview 22 到 23 的完整差异复核覆盖取消监听生命周期、WindowManager 触控/焦点标志、
   大字体边界、会话身份保护、联系人状态更新、RecyclerView 回收和无障碍语义；没有发现
-  Critical 或 Important 问题。两项早期 Minor 已在发版前关闭。
+  Critical 或 Important 问题。审查发现的静默两行截断与随后识别的无限高度风险均已在
+  发版前改为 3 行标题、2 行状态和明确省略的有界方案；最终独立复审结论为 Ready。
 - Root 边界核对没有命中 `root/`、KernelSU module 或 `tools/test-yinxing-guard.sh`；浮层源码
   也不再命中长按监听、老人可见步骤计数或 `stepLabel()`。
 - `aapt2 dump badging`：包名 `com.yinxing.launcher`、`versionCode=39`、
@@ -83,5 +87,5 @@ Preview 23 聚焦老人每天使用微信视频时最容易迷失的接管阶段
 ## SHA-256
 
 ```text
-b0d1f1854f0a3f8585f140c2b8f356ecab7dc71eaed51bc2db49b92c39cb5f7b  yinxing-1.10.0-root-preview.23-debug.apk
+d4eb3a54928d1fa6e3923f7cbed6c5bb27f93d9c0e18ca3b3ae65681e226146c  yinxing-1.10.0-root-preview.23-debug.apk
 ```
