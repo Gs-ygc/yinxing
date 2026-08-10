@@ -27,10 +27,10 @@
 **Interfaces:**
 - `PhoneCallLauncher` reuses `launchIntent: (Intent) -> Unit` for `ACTION_DIAL` and produces the existing fallback callback only when that operation also throws.
 
-- [ ] Write tests for permission denial and direct-call failure automatically attempting `ACTION_DIAL`, and for dialer failure retaining the fallback callback.
-- [ ] Run the focused launcher tests and confirm the new cases fail because failure paths do not launch `ACTION_DIAL`.
-- [ ] Add one shared `openDialerOrFallback` path using `launchIntent`; keep `onCallLaunched` only on direct-call success.
-- [ ] Run the focused tests again; no Activity constructor wiring change is required.
+- [x] Write tests for permission denial and direct-call failure automatically attempting `ACTION_DIAL`, and for dialer failure retaining the fallback callback.
+- [x] Run the focused launcher tests and confirm the new cases fail because failure paths do not launch `ACTION_DIAL`.
+- [x] Add one shared `openDialerOrFallback` path using `launchIntent`; keep `onCallLaunched` only on direct-call success.
+- [x] Run the focused tests again; no Activity constructor wiring change is required.
 - [ ] Commit `feat: hand off failed calls to dialer`.
 
 ### Task 2: Same-target Home app launch gate

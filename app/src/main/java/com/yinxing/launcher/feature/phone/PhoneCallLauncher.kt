@@ -25,7 +25,7 @@ internal class PhoneCallLauncher(
             runCatching { requestPermission(contact) }
                 .onFailure {
                     pendingContact = null
-                    showFallback(contact, false)
+                    openDialerOrFallback(contact, number, directCallFailed = false)
                 }
             return
         }
@@ -36,11 +36,11 @@ internal class PhoneCallLauncher(
     fun onPermissionResult(granted: Boolean) {
         val contact = pendingContact ?: return
         pendingContact = null
+        val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return
         if (granted) {
-            val number = contact.phoneNumber?.takeIf { it.isNotBlank() } ?: return
             launchDirectCall(contact, number)
         } else {
-            showFallback(contact, false)
+            openDialerOrFallback(contact, number, directCallFailed = false)
         }
     }
 
@@ -54,6 +54,15 @@ internal class PhoneCallLauncher(
         if (!gate.tryAcquire(number)) return
         runCatching { launchIntent(PhoneCallIntentFactory.direct(number)) }
             .onSuccess { onCallLaunched(contact) }
-            .onFailure { showFallback(contact, true) }
+            .onFailure { openDialerOrFallback(contact, number, directCallFailed = true) }
+    }
+
+    private fun openDialerOrFallback(
+        contact: Contact,
+        number: String,
+        directCallFailed: Boolean
+    ) {
+        runCatching { launchIntent(PhoneCallIntentFactory.dialer(number)) }
+            .onFailure { showFallback(contact, directCallFailed) }
     }
 }

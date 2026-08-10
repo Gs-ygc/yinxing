@@ -49,7 +49,7 @@ class PhoneCallLauncherTest {
     }
 
     @Test
-    fun deniedPermissionShowsNonFailureFallbackOnce() {
+    fun deniedPermissionOpensDialerOnceWithoutRecordingCall() {
         val fixture = Fixture(hasPermission = false)
         val contact = contact("1", "妈妈", "13800138000")
 
@@ -58,8 +58,26 @@ class PhoneCallLauncherTest {
         fixture.launcher.onPermissionResult(granted = false)
 
         assertNull(fixture.launcher.pendingContactOrNull)
-        assertEquals(listOf(Fallback(contact, directCallFailed = false)), fixture.fallbacks)
-        assertTrue(fixture.launchedIntents.isEmpty())
+        assertEquals(listOf(Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertEquals(Intent.ACTION_DIAL, fixture.launchedIntents.single().action)
+        assertTrue(fixture.fallbacks.isEmpty())
+        assertTrue(fixture.recordedContacts.isEmpty())
+    }
+
+    @Test
+    fun permissionRequestFailureOpensDialerWithoutRecordingCall() {
+        val fixture = Fixture(
+            hasPermission = false,
+            permissionRequestFailure = IllegalStateException("permission launcher unavailable")
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        fixture.launcher.makeCall(contact)
+
+        assertNull(fixture.launcher.pendingContactOrNull)
+        assertEquals(listOf(Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertEquals(Intent.ACTION_DIAL, fixture.launchedIntents.single().action)
+        assertTrue(fixture.fallbacks.isEmpty())
         assertTrue(fixture.recordedContacts.isEmpty())
     }
 
@@ -78,12 +96,51 @@ class PhoneCallLauncherTest {
     }
 
     @Test
-    fun directIntentFailureShowsFailureFallbackWithoutRecordingSuccess() {
-        val fixture = Fixture(hasPermission = true, launchFailure = IllegalStateException("blocked"))
+    fun directIntentFailureOpensDialerWithoutRecordingSuccess() {
+        val fixture = Fixture(
+            hasPermission = true,
+            directLaunchFailure = IllegalStateException("blocked")
+        )
         val contact = contact("1", "妈妈", "13800138000")
 
         fixture.launcher.makeCall(contact)
 
+        assertEquals(listOf(Intent.ACTION_CALL, Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertEquals(Intent.ACTION_DIAL, fixture.launchedIntents.single().action)
+        assertTrue(fixture.fallbacks.isEmpty())
+        assertTrue(fixture.recordedContacts.isEmpty())
+    }
+
+    @Test
+    fun unavailableDialerKeepsFallbackAfterDeniedPermission() {
+        val fixture = Fixture(
+            hasPermission = false,
+            dialerLaunchFailure = IllegalStateException("no dialer")
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        fixture.launcher.makeCall(contact)
+        fixture.launcher.onPermissionResult(granted = false)
+
+        assertEquals(listOf(Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertTrue(fixture.launchedIntents.isEmpty())
+        assertEquals(listOf(Fallback(contact, directCallFailed = false)), fixture.fallbacks)
+        assertTrue(fixture.recordedContacts.isEmpty())
+    }
+
+    @Test
+    fun unavailableDialerKeepsFailureFallbackAfterDirectCallFailure() {
+        val fixture = Fixture(
+            hasPermission = true,
+            directLaunchFailure = IllegalStateException("blocked"),
+            dialerLaunchFailure = IllegalStateException("no dialer")
+        )
+        val contact = contact("1", "妈妈", "13800138000")
+
+        fixture.launcher.makeCall(contact)
+
+        assertEquals(listOf(Intent.ACTION_CALL, Intent.ACTION_DIAL), fixture.attemptedActions)
+        assertTrue(fixture.launchedIntents.isEmpty())
         assertEquals(listOf(Fallback(contact, directCallFailed = true)), fixture.fallbacks)
         assertTrue(fixture.recordedContacts.isEmpty())
     }
@@ -119,20 +176,30 @@ class PhoneCallLauncherTest {
 
     private class Fixture(
         hasPermission: Boolean,
-        private val launchFailure: Throwable? = null
+        private val permissionRequestFailure: Throwable? = null,
+        private val directLaunchFailure: Throwable? = null,
+        private val dialerLaunchFailure: Throwable? = null
     ) {
         var hasPermission = hasPermission
         var nowMillis = 100L
         val permissionRequests = mutableListOf<Contact>()
+        val attemptedActions = mutableListOf<String?>()
         val launchedIntents = mutableListOf<Intent>()
         val fallbacks = mutableListOf<Fallback>()
         val recordedContacts = mutableListOf<Contact>()
 
         val launcher = PhoneCallLauncher(
             hasCallPermission = { this.hasPermission },
-            requestPermission = permissionRequests::add,
+            requestPermission = { contact ->
+                permissionRequestFailure?.let { throw it }
+                permissionRequests += contact
+            },
             launchIntent = { intent ->
-                launchFailure?.let { throw it }
+                attemptedActions += intent.action
+                when (intent.action) {
+                    Intent.ACTION_CALL -> directLaunchFailure?.let { throw it }
+                    Intent.ACTION_DIAL -> dialerLaunchFailure?.let { throw it }
+                }
                 launchedIntents += intent
             },
             showFallback = { contact, failed -> fallbacks += Fallback(contact, failed) },
