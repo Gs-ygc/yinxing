@@ -1,6 +1,7 @@
 package com.yinxing.launcher.feature.home
 
 import android.content.SharedPreferences
+import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.data.weather.WeatherForecastDay
 import com.yinxing.launcher.data.weather.WeatherNow
 import com.yinxing.launcher.data.weather.WeatherState
@@ -157,6 +158,57 @@ class HomeViewModelTest {
     }
 
     @Test
+    fun refreshTrustedContactsSelectsCallableContacts() = runTest {
+        val source = FakeHomeTrustedContactSource(
+            listOf(
+                Contact("1", "家人", phoneNumber = "13800138000", isPinned = true),
+                Contact("2", "无号"),
+                Contact("3", "邻居", phoneNumber = "13900139000")
+            )
+        )
+        val viewModel = createViewModel(trustedContactSource = source)
+
+        viewModel.refreshTrustedContacts()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(listOf("1", "3"), viewModel.trustedContacts.value.map { it.id })
+    }
+
+    @Test
+    fun refreshTrustedContactsReplacesListAfterCaregiverEdit() = runTest {
+        val source = FakeHomeTrustedContactSource(
+            listOf(Contact("1", "家人", phoneNumber = "13800138000"))
+        )
+        val viewModel = createViewModel(trustedContactSource = source)
+
+        viewModel.refreshTrustedContacts()
+        dispatcher.scheduler.runCurrent()
+        source.contacts = listOf(Contact("2", "邻居", phoneNumber = "13900139000"))
+
+        viewModel.refreshTrustedContacts()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(listOf("2"), viewModel.trustedContacts.value.map { it.id })
+    }
+
+    @Test
+    fun failedTrustedContactRefreshPreservesPriorList() = runTest {
+        val source = FakeHomeTrustedContactSource(
+            listOf(Contact("1", "家人", phoneNumber = "13800138000"))
+        )
+        val viewModel = createViewModel(trustedContactSource = source)
+
+        viewModel.refreshTrustedContacts()
+        dispatcher.scheduler.runCurrent()
+        source.failure = IllegalStateException("boom")
+
+        viewModel.refreshTrustedContacts()
+        dispatcher.scheduler.runCurrent()
+
+        assertEquals(listOf("1"), viewModel.trustedContacts.value.map { it.id })
+    }
+
+    @Test
     fun maybeRefreshWeatherUsesCachedStateWithoutFetchWhenNotExpired() = runTest {
         val cached = weatherState(lastFetchTime = 900L)
         val weatherSource = FakeHomeWeatherSource(
@@ -210,9 +262,13 @@ class HomeViewModelTest {
     }
 
     private fun createViewModel(
-        appSource: HomeAppSource,
+        appSource: HomeAppSource = FakeHomeAppSource(
+            staticItems = builtInItems(),
+            homeItemsResult = Result.success(emptyList())
+        ),
         settingsSource: HomeSettingsSource = FakeHomeSettingsSource(),
         weatherSource: HomeWeatherSource = FakeHomeWeatherSource(),
+        trustedContactSource: HomeTrustedContactSource = FakeHomeTrustedContactSource(emptyList()),
         nowMillis: () -> Long = { System.currentTimeMillis() },
         weatherRefreshIntervalMillis: Long = 8 * 60 * 60 * 1000L
     ): HomeViewModel {
@@ -220,6 +276,7 @@ class HomeViewModelTest {
             appSource = appSource,
             settingsSource = settingsSource,
             weatherSource = weatherSource,
+            trustedContactSource = trustedContactSource,
             nowMillis = nowMillis,
             weatherRefreshIntervalMillis = weatherRefreshIntervalMillis
         )
@@ -330,6 +387,17 @@ class HomeViewModelTest {
         override suspend fun fetchWeather(cityName: String): WeatherState {
             fetchCount += 1
             return fetchResult
+        }
+    }
+
+    private class FakeHomeTrustedContactSource(
+        var contacts: List<Contact>
+    ) : HomeTrustedContactSource {
+        var failure: Throwable? = null
+
+        override suspend fun getContacts(): List<Contact> {
+            failure?.let { throw it }
+            return contacts
         }
     }
 }

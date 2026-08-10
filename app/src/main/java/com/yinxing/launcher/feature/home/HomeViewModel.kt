@@ -5,23 +5,29 @@ import android.content.SharedPreferences
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.data.home.LauncherAppRepository
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.weather.WeatherPreferences
 import com.yinxing.launcher.data.weather.WeatherRepository
 import com.yinxing.launcher.data.weather.WeatherState
+import com.yinxing.launcher.feature.phone.PhoneContactManager
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class HomeViewModel(
     private val appSource: HomeAppSource,
     private val settingsSource: HomeSettingsSource,
     private val weatherSource: HomeWeatherSource,
+    private val trustedContactSource: HomeTrustedContactSource,
     private val nowMillis: () -> Long = { System.currentTimeMillis() },
     private val weatherRefreshIntervalMillis: Long = 8 * 60 * 60 * 1000L
 ) : ViewModel() {
@@ -34,9 +40,13 @@ class HomeViewModel(
     private val _weatherState = MutableStateFlow(weatherSource.getCached())
     val weatherState: StateFlow<WeatherState?> = _weatherState.asStateFlow()
 
+    private val _trustedContacts = MutableStateFlow<List<Contact>>(emptyList())
+    val trustedContacts: StateFlow<List<Contact>> = _trustedContacts.asStateFlow()
+
     private var refreshAppsJob: Job? = null
     private var weatherJob: Job? = null
     private var weatherRefreshJob: Job? = null
+    private var trustedContactsJob: Job? = null
     private var weatherLoadingCity: String? = null
 
     private val preferenceListener =
@@ -79,6 +89,21 @@ class HomeViewModel(
                         error.message ?: error.javaClass.simpleName
                     )
                 }
+        }
+    }
+
+    fun refreshTrustedContacts() {
+        trustedContactsJob?.cancel()
+        trustedContactsJob = viewModelScope.launch {
+            try {
+                val contacts = trustedContactSource.getContacts()
+                coroutineContext.ensureActive()
+                _trustedContacts.value = HomeTrustedContactPolicy.select(contacts)
+            } catch (error: CancellationException) {
+                throw error
+            } catch (_: Throwable) {
+                // Keep the last successful contact list when a refresh fails.
+            }
         }
     }
 
@@ -153,7 +178,8 @@ class HomeViewModel(
             return HomeViewModel(
                 appSource = AndroidHomeAppSource(appRepository, preferences),
                 settingsSource = AndroidHomeSettingsSource(preferences),
-                weatherSource = AndroidHomeWeatherSource(weatherPreferences, appContext)
+                weatherSource = AndroidHomeWeatherSource(weatherPreferences, appContext),
+                trustedContactSource = AndroidHomeTrustedContactSource(appContext)
             ) as T
         }
     }
@@ -185,6 +211,10 @@ interface HomeWeatherSource {
     fun getCityName(): String
     fun getCached(): WeatherState?
     suspend fun fetchWeather(cityName: String): WeatherState
+}
+
+interface HomeTrustedContactSource {
+    suspend fun getContacts(): List<Contact>
 }
 
 private class AndroidHomeAppSource(
@@ -234,4 +264,12 @@ private class AndroidHomeWeatherSource(
     override fun getCached() = WeatherRepository.getCached()
 
     override suspend fun fetchWeather(cityName: String) = WeatherRepository.fetchWeather(cityName, appContext)
+}
+
+private class AndroidHomeTrustedContactSource(
+    private val appContext: Context
+) : HomeTrustedContactSource {
+    override suspend fun getContacts(): List<Contact> = withContext(Dispatchers.IO) {
+        PhoneContactManager.getInstance(appContext).getContacts()
+    }
 }
