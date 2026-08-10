@@ -7,6 +7,7 @@ MODE="${1:-all}"
 TEST_ROOT="$(mktemp -d)"
 FAKE_BIN="$TEST_ROOT/bin"
 CALLS="$TEST_ROOT/calls.log"
+HEAD_CALLS="$TEST_ROOT/head_calls.log"
 SERVICES="$TEST_ROOT/accessibility_services"
 ACCESSIBILITY_ENABLED="$TEST_ROOT/accessibility_enabled"
 HOME_HOLDER="$TEST_ROOT/home_holder"
@@ -46,15 +47,17 @@ trap cleanup EXIT
 
 mkdir -p "$FAKE_BIN"
 : > "$CALLS"
+: > "$HEAD_CALLS"
 : > "$SERVICES"
 printf '0\n' > "$ACCESSIBILITY_ENABLED"
 printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
-export TEST_ROOT FAKE_BIN CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER HOME_RESOLVED_COMPONENT
+export TEST_ROOT FAKE_BIN CALLS HEAD_CALLS SERVICES ACCESSIBILITY_ENABLED HOME_HOLDER HOME_RESOLVED_COMPONENT
 export YINXING_GUARD_STATE_DIR="$TEST_ROOT/state"
 export YINXING_GUARD_TEST_CLEANUP_TARGET="$CLEANUP_TARGET"
 export YINXING_GUARD_TEST_MODULE_DIR="$TEST_ROOT/modules/yinxing_guard"
 export YINXING_GUARD_MODULE_STATE_DIR="$MODULE_ROOT"
 export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id"
+export YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/boot_stat"
 export YINXING_GUARD_HOME_MARKER_LINK_COMMAND="yinxing-test-ln"
 export YINXING_GUARD_HOME_MARKER_SYNC_COMMAND="yinxing-test-sync"
 export PATH="$FAKE_BIN:$PATH"
@@ -245,6 +248,16 @@ write_fake getprop \
     'if [[ -e "$TEST_ROOT/boot_incomplete_once" ]]; then calls="$(cat "$TEST_ROOT/boot_incomplete_calls" 2>/dev/null || printf 0)"; calls=$((calls + 1)); printf "%s\\n" "$calls" > "$TEST_ROOT/boot_incomplete_calls"; if [[ "$calls" -ge 2 ]]; then rm -f "$TEST_ROOT/boot_incomplete_once"; fi; exit 1; fi' \
     '[[ "${1:-}" == "sys.boot_completed" ]] && printf "1\\n"'
 
+write_fake awk \
+    '#!/usr/bin/env bash' \
+    'if [[ "${!#}" == "/proc/stat" && -n "${YINXING_GUARD_BOOT_STAT_FILE:-}" ]]; then exec /usr/bin/awk "${@:1:$#-1}" "$YINXING_GUARD_BOOT_STAT_FILE"; fi' \
+    'exec /usr/bin/awk "$@"'
+
+write_fake head \
+    '#!/usr/bin/env bash' \
+    'printf "head %s\\n" "$*" >> "$HEAD_CALLS"' \
+    'exec /usr/bin/head "$@"'
+
 write_fake log \
     '#!/usr/bin/env bash' \
     'printf "log %s\\n" "$*" >> "$CALLS"' \
@@ -262,6 +275,8 @@ write_fake dumpsys \
     'if [[ "${1:-}" == "activity" && "${2:-}" == "activities" ]]; then' \
     '  [[ -e "$TEST_ROOT/hang_activity_dump" ]] && /bin/sleep 5' \
     '  [[ -e "$TEST_ROOT/fail_activity_dump" ]] && exit 1' \
+    '  if [[ -f "$TEST_ROOT/activity_dump_large" ]]; then cat "$TEST_ROOT/activity_dump_large"; exit 0; fi' \
+    '  if [[ -f "$TEST_ROOT/activity_dump_over_cap" ]]; then set -e; cat "$TEST_ROOT/activity_dump_over_cap"; while :; do printf x; /bin/sleep 0.01; done; fi' \
     '  if [[ -d "$TEST_ROOT/activity_dump_sequence" ]]; then' \
     '    sequence_call="$(cat "$TEST_ROOT/activity_dump_sequence_calls" 2>/dev/null || printf 0)"' \
     '    sequence_call=$((sequence_call + 1))' \
@@ -325,6 +340,7 @@ export ACCESSIBILITY_COMPONENT
 
 reset_fixture() {
     : > "$CALLS"
+    : > "$HEAD_CALLS"
     : > "$SERVICES"
     printf '0\n' > "$ACCESSIBILITY_ENABLED"
     rm -f \
@@ -406,9 +422,12 @@ reset_fixture() {
         "$TEST_ROOT/doze_marker_directory_race" \
         "$TEST_ROOT/cleanup_boot_id" \
         "$TEST_ROOT/fail_home_once" \
+        "$TEST_ROOT/empty_boot_stat" \
         "$TEST_ROOT/hang_activity_dump" \
         "$TEST_ROOT/fail_activity_dump" \
         "$TEST_ROOT/activity_dump" \
+        "$TEST_ROOT/activity_dump_large" \
+        "$TEST_ROOT/activity_dump_over_cap" \
         "$TEST_ROOT/activity_dump_sequence_calls" \
         "$TEST_ROOT/hang_dumpsys" \
         "$TEST_ROOT/hang_pm_path" \
@@ -433,11 +452,16 @@ reset_fixture() {
         "$TEST_ROOT/doze_whitelisted" \
         "$TEST_ROOT/package_disabled" \
         "$TEST_ROOT/component_disabled" \
-        "$TEST_ROOT/log_noise"
+        "$TEST_ROOT/log_noise" \
+        "$HEAD_CALLS"
+    : > "$HEAD_CALLS"
     rm -rf "$TEST_ROOT/proc" "$TEST_ROOT/state" "$TEST_ROOT/boot-completed.d" "$TEST_ROOT/modules" \
         "$TEST_ROOT/accessibility_dump_sequence" "$TEST_ROOT/home_publish_slot_one" \
         "$TEST_ROOT/activity_dump_sequence"
+    export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id"
+    export YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/boot_stat"
     printf 'fixture-boot\n' > "$TEST_ROOT/boot_id"
+    printf 'btime fixture-boot\n' > "$TEST_ROOT/boot_stat"
     printf 'com.oplus.launcher\n' > "$HOME_HOLDER"
     install_cleanup_helper "$MODULE_ROOT/bin/uninstall-cleanup.sh" || fail "could not install baseline cleanup helper"
 }
@@ -458,6 +482,23 @@ prepare_healthy_status_fixture() {
         "$TEST_ROOT/home_resolved_component"
     printf 'verified|test-boot\n' > "$TEST_ROOT/state/home_foreground_evidence"
     touch "$TEST_ROOT/doze_whitelisted"
+}
+
+write_target_activity_dump_at_size() {
+    local destination="$1"
+    local expected_size="$2"
+    local current_size padding
+
+    cat > "$destination" <<'EOF'
+mResumedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+mFocusedActivity: ActivityRecord{fixture com.yinxing.launcher/.feature.home.MainActivity}
+EOF
+    current_size="$(wc -c < "$destination")"
+    padding=$((expected_size - current_size))
+    [ "$padding" -ge 0 ] || fail "foreground fixture exceeds expected size"
+    printf '%*s' "$padding" '' | tr ' ' x >> "$destination"
+    assert_equals "$expected_size" "$(wc -c < "$destination")" \
+        "foreground fixture byte size"
 }
 
 test_merge_cases() {
@@ -968,6 +1009,69 @@ test_home_foreground_evidence_is_boot_scoped_and_safe() {
     fi
     [[ -L "$marker" ]] || fail "symlink foreground evidence was replaced"
     pass "HOME foreground evidence is boot-scoped and safe"
+}
+
+test_evidence_rejects_unavailable_boot_identity() {
+    local marker="$TEST_ROOT/state/home_foreground_evidence"
+    local output
+
+    reset_fixture
+    mkdir -p "$TEST_ROOT/state" "$TEST_ROOT/modules/yinxing_guard"
+    : > "$TEST_ROOT/empty_boot_stat"
+    export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/empty_boot_stat"
+    export YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/empty_boot_stat"
+    printf 'com.yinxing.launcher\n' > "$HOME_HOLDER"
+    printf 'verified|unknown\n' > "$marker"
+    assert_equals unknown "$(home_foreground_evidence_state)" \
+        "unavailable boot does not trust HOME evidence"
+    printf 'binding|unknown|2|0\n' > "$TEST_ROOT/state/accessibility_binding_stall"
+    if accessibility_binding_stall_is_persistent; then
+        fail "unknown boot trusted stall evidence"
+    fi
+    if write_home_foreground_evidence verified; then
+        fail "unknown boot accepted foreground evidence"
+    fi
+    output="$(YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/empty_boot_stat" \
+        YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/empty_boot_stat" \
+        run_module_script "$MODULE_ROOT/bin/status.sh")"
+    assert_contains_text "$output" "home_foreground=unknown"
+
+    printf 'fixture-boot\n' > "$TEST_ROOT/boot_id"
+    printf 'btime fixture-boot\n' > "$TEST_ROOT/boot_stat"
+    export YINXING_GUARD_BOOT_ID_FILE="$TEST_ROOT/boot_id"
+    export YINXING_GUARD_BOOT_STAT_FILE="$TEST_ROOT/boot_stat"
+    assert_equals unknown "$(home_foreground_evidence_state)" \
+        "unknown marker remains untrusted after boot identity returns"
+    printf 'verified|fixture-boot\n' > "$marker"
+    assert_equals verified "$(home_foreground_evidence_state)" \
+        "HOME evidence becomes trusted after identity is available"
+    printf 'binding|fixture-boot|2|0\n' > "$TEST_ROOT/state/accessibility_binding_stall"
+    accessibility_binding_stall_is_persistent || \
+        fail "known boot did not trust stall evidence"
+    pass "unavailable boot identity rejects evidence"
+}
+
+test_home_foreground_capture_is_bounded_before_parsing() {
+    local elapsed started_at
+
+    reset_fixture
+    write_target_activity_dump_at_size "$TEST_ROOT/activity_dump_large" 65536
+    assert_equals target "$(read_home_foreground_activity_state)" \
+        "foreground capture accepts exactly 65536 bytes"
+
+    reset_fixture
+    write_target_activity_dump_at_size "$TEST_ROOT/activity_dump_over_cap" 65537
+    started_at=$SECONDS
+    assert_equals unknown "$(YINXING_GUARD_COMMAND_TIMEOUT_SECONDS=1 \
+        run_module_script -c '. "$1"; read_home_foreground_activity_state' \
+        yinxing-test "$MODULE_ROOT/bin/common.sh")" \
+        "foreground capture rejects 65537 bytes"
+    elapsed=$((SECONDS - started_at))
+    [ "$elapsed" -lt 2 ] || \
+        fail "over-cap foreground producer exceeded one-second command budget (${elapsed}s)"
+    assert_equals "head -c 65537" "$(tr -d '\n' < "$HEAD_CALLS")" \
+        "foreground capture head bound"
+    pass "HOME foreground capture is bounded before parsing"
 }
 
 test_home_role_reconciles_other_holder() {
@@ -5091,6 +5195,43 @@ case "$MODE" in
         test_uninstall_removes_home_foreground_evidence_only
         test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
         test_home_launch_serializes_uninstall_evidence_transition
+        ;;
+    --preview18-evidence-only)
+        test_binding_stall_publishes_first_observation_without_toggle
+        test_binding_stall_rebinds_once_at_threshold
+        test_binding_stall_resets_observation_after_unresolved_rebind
+        test_binding_stall_stops_after_maximum_rebinds
+        test_binding_stall_resets_budget_on_new_boot
+        test_binding_stall_clears_when_bound
+        test_binding_stall_rejects_unsafe_marker
+        test_binding_stall_rejects_malformed_evidence
+        test_binding_stall_rejects_noncanonical_counts_without_shell_exit
+        test_binding_stall_sanitizes_retry_overrides
+        test_binding_stall_validates_evidence_before_initial_enable
+        test_binding_stall_clear_failure_compensates_initial_enable
+        test_binding_stall_rebind_preserves_concurrent_malformed_evidence
+        test_binding_stall_sync_failure_blocks_rebind
+        test_status_reports_persistent_binding_stall
+        test_uninstall_removes_binding_stall_marker_only
+        test_status_reports_healthy_state
+        test_status_reads_boot_scoped_home_foreground_evidence
+        test_home_foreground_parser_accepts_fixed_target_components
+        test_home_foreground_parser_rejects_ambiguous_or_untrusted_evidence
+        test_home_foreground_parser_bounds_failed_or_stalled_probe
+        test_home_foreground_evidence_is_boot_scoped_and_safe
+        test_home_launch_is_fixed
+        test_home_launch_requires_verified_foreground
+        test_home_launch_confirms_after_bounded_foreground_probe
+        test_home_launch_stops_on_unknown_foreground_evidence
+        test_home_launch_rejects_unsafe_foreground_marker
+        test_guard_retries_known_other_foreground_once_and_records_failure
+        test_guard_stops_after_unknown_foreground_evidence
+        test_action_marks_failed_when_home_foreground_is_unverified
+        test_uninstall_removes_home_foreground_evidence_only
+        test_uninstall_cleanup_removes_foreground_evidence_when_transaction_retries
+        test_home_launch_serializes_uninstall_evidence_transition
+        test_evidence_rejects_unavailable_boot_identity
+        test_home_foreground_capture_is_bounded_before_parsing
         ;;
     --review-regressions-only)
         test_accessibility_applied_write_errors_are_compensated
