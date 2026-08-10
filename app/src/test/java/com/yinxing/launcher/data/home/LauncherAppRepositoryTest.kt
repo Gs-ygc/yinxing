@@ -99,6 +99,10 @@ class LauncherAppRepositoryTest {
     fun staticHomeKeepsPhoneFirstWithFamiliarCallAndVideoIcons() {
         val items = LauncherAppRepository(context, FakeLauncherAppSource()).getStaticHomeItems()
 
+        assertEquals(
+            listOf(HomeAppItem.Type.PHONE, HomeAppItem.Type.WECHAT_VIDEO),
+            items.map(HomeAppItem::type)
+        )
         assertEquals(HomeAppItem.Type.PHONE, items[0].type)
         assertEquals(context.getString(R.string.home_trusted_calls_all), items[0].appName)
         assertEquals(android.R.drawable.ic_menu_call, items[0].iconResId)

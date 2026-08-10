@@ -12,7 +12,6 @@ data class HomeAppItem(
     enum class Type {
         APP,
         PHONE,
-        WECHAT_VIDEO,
-        ADD
+        WECHAT_VIDEO
     }
 }

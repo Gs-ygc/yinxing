@@ -49,7 +49,6 @@ class LauncherAppRepository(
     fun getStaticHomeItems(): List<HomeAppItem> {
         return buildList {
             addPrimaryBuiltInItems()
-            addSecondaryBuiltInItems()
         }
     }
 
@@ -97,7 +96,6 @@ class LauncherAppRepository(
                 orderedApps.forEach { app ->
                     selectedAppsByPackage[app.packageName]?.let(::add)
                 }
-                addSecondaryBuiltInItems()
             }
 
             preferences.syncAppOrder(orderedApps.map { it.packageName })
@@ -176,16 +174,6 @@ class LauncherAppRepository(
         )
     }
 
-    private fun MutableList<HomeAppItem>.addSecondaryBuiltInItems() {
-        add(
-            HomeAppItem(
-                packageName = "add",
-                appName = appContext.getString(R.string.home_item_add),
-                type = HomeAppItem.Type.ADD,
-                iconResId = android.R.drawable.ic_input_add
-            )
-        )
-    }
 }
 
 private class AndroidLauncherAppSource(context: Context) : LauncherAppSource {

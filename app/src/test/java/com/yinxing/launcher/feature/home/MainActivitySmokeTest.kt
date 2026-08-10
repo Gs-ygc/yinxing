@@ -68,13 +68,13 @@ class MainActivitySmokeTest {
 
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
         waitUntil {
-            homeAppItemCount(recyclerView) == 3 &&
+            homeAppItemCount(recyclerView) == 2 &&
                 activity.findViewById<View>(R.id.card_home_status)?.visibility == View.GONE
         }
         val statusCard = requireNotNull(activity.findViewById<View>(R.id.card_home_status))
         val timeView = requireNotNull(activity.findViewById<TextView>(R.id.tv_time))
 
-        assertEquals(3, homeAppItemCount(recyclerView))
+        assertEquals(2, homeAppItemCount(recyclerView))
         assertEquals(View.GONE, statusCard.visibility)
         assertTrue(timeView.text.isNotBlank())
     }
@@ -92,14 +92,14 @@ class MainActivitySmokeTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
         waitUntil {
-            homeAppItemCount(recyclerView) == 5 &&
+            homeAppItemCount(recyclerView) == 4 &&
                 activity.findViewById<View>(R.id.card_home_status)?.visibility == View.GONE
         }
 
         val adapter = requireNotNull(homeAppAdapter(recyclerView))
         val statusCard = requireNotNull(activity.findViewById<View>(R.id.card_home_status))
         assertEquals(
-            listOf("phone", "wechat_video", "pkg.browser", "pkg.camera", "add"),
+            listOf("phone", "wechat_video", "pkg.browser", "pkg.camera"),
             adapter.currentList.map { it.packageName }
         )
         assertEquals(View.GONE, statusCard.visibility)
@@ -123,7 +123,7 @@ class MainActivitySmokeTest {
     fun noPhoneContactsKeepTrustedCallsSectionHidden() {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        waitUntil { homeAppItemCount(recyclerView) == 3 }
+        waitUntil { homeAppItemCount(recyclerView) == 2 }
 
         assertEquals(
             View.GONE,
@@ -150,14 +150,14 @@ class MainActivitySmokeTest {
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
         waitUntil {
-            homeAppItemCount(recyclerView) == 3 &&
+            homeAppItemCount(recyclerView) == 2 &&
                 activity.findViewById<View>(R.id.layout_trusted_calls)?.visibility == View.VISIBLE &&
                 activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items)?.childCount == 2
         }
         val section = requireNotNull(activity.findViewById<View>(R.id.layout_trusted_calls))
         val items = requireNotNull(activity.findViewById<LinearLayout>(R.id.layout_trusted_call_items))
 
-        assertEquals(3, homeAppItemCount(recyclerView))
+        assertEquals(2, homeAppItemCount(recyclerView))
         assertEquals(View.VISIBLE, section.visibility)
         assertEquals(2, items.childCount)
         assertEquals("拨打 妈妈", items.getChildAt(0).contentDescription.toString())
@@ -238,10 +238,10 @@ class MainActivitySmokeTest {
 
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        waitUntil { homeAppItemCount(recyclerView) == 43 }
+        waitUntil { homeAppItemCount(recyclerView) == 42 }
         val totalRows = requireNotNull(recyclerView.adapter).itemCount
 
-        assertEquals(44, totalRows)
+        assertEquals(43, totalRows)
         assertTrue(recyclerView.childCount < totalRows)
 
         recyclerView.scrollToPosition(totalRows - 1)
@@ -314,7 +314,7 @@ class MainActivitySmokeTest {
         LauncherPreferences(context).setPackageSelected("pkg.camera", true)
         val activity = Robolectric.buildActivity(MainActivity::class.java).setup().get()
         val recyclerView = activity.findViewById<RecyclerView>(R.id.recycler_home)
-        waitUntil { homeAppItemCount(recyclerView) == 4 }
+        waitUntil { homeAppItemCount(recyclerView) == 3 }
         val item = requireNotNull(homeAppAdapter(recyclerView))
             .currentList
             .single { it.packageName == "pkg.camera" }

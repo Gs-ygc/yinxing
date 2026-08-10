@@ -12,12 +12,10 @@ import androidx.lifecycle.LifecycleCoroutineScope
 import androidx.recyclerview.widget.AsyncDifferConfig
 import androidx.recyclerview.widget.AsyncListDiffer
 import androidx.recyclerview.widget.DiffUtil
-import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.ListUpdateCallback
 import androidx.recyclerview.widget.RecyclerView
 import com.yinxing.launcher.R
 import com.yinxing.launcher.common.media.MediaThumbnailLoader
-import java.util.Collections
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
 
@@ -26,10 +24,9 @@ class HomeAppAdapter(
     private var lowPerformanceMode: Boolean,
     private var iconScale: Int = 100,
     private val onItemClick: (HomeAppItem) -> Unit,
-    private val onOrderChanged: (List<HomeAppItem>) -> Unit,
     private val loadAppIcon: suspend (Context, String, Int) -> Bitmap? =
         MediaThumbnailLoader::loadAppIcon
-) : RecyclerView.Adapter<RecyclerView.ViewHolder>(), ItemTouchHelperAdapter {
+) : RecyclerView.Adapter<RecyclerView.ViewHolder>() {
     companion object {
         const val VIEW_TYPE_APP = 0
         private const val PAYLOAD_UI = "payload_ui"
@@ -43,42 +40,32 @@ class HomeAppAdapter(
         }
     }
 
-    private var suppressDifferUpdates = false
     private val differ = AsyncListDiffer(
         object : ListUpdateCallback {
             override fun onInserted(position: Int, count: Int) {
-                if (!suppressDifferUpdates) notifyItemRangeInserted(position, count)
+                notifyItemRangeInserted(position, count)
             }
 
             override fun onRemoved(position: Int, count: Int) {
-                if (!suppressDifferUpdates) notifyItemRangeRemoved(position, count)
+                notifyItemRangeRemoved(position, count)
             }
 
             override fun onMoved(fromPosition: Int, toPosition: Int) {
-                if (!suppressDifferUpdates) notifyItemMoved(fromPosition, toPosition)
+                notifyItemMoved(fromPosition, toPosition)
             }
 
             override fun onChanged(position: Int, count: Int, payload: Any?) {
-                if (!suppressDifferUpdates) notifyItemRangeChanged(position, count, payload)
+                notifyItemRangeChanged(position, count, payload)
             }
         },
         AsyncDifferConfig.Builder(DiffCallback).build()
     )
-    private var touchHelper: ItemTouchHelper? = null
-    private var dragItems: MutableList<HomeAppItem>? = null
-    private var dragChanged = false
-    private var dragCommitInFlight = false
-    private var pendingSubmission: PendingSubmission? = null
 
     val currentList: List<HomeAppItem>
         get() = differ.currentList
 
     init {
         setHasStableIds(true)
-    }
-
-    fun setTouchHelper(helper: ItemTouchHelper) {
-        touchHelper = helper
     }
 
     fun setLowPerformanceMode(enabled: Boolean) {
@@ -94,10 +81,6 @@ class HomeAppAdapter(
     }
 
     fun submitList(items: List<HomeAppItem>, commitCallback: (() -> Unit)? = null) {
-        if (dragItems != null || dragCommitInFlight) {
-            pendingSubmission = PendingSubmission(items, commitCallback)
-            return
-        }
         differ.submitList(items) {
             commitCallback?.invoke()
         }
@@ -113,7 +96,7 @@ class HomeAppAdapter(
         var uiKey: Int = Int.MIN_VALUE
     }
 
-    override fun getItemCount(): Int = displayedItems().size
+    override fun getItemCount(): Int = currentList.size
 
     override fun getItemViewType(position: Int): Int = VIEW_TYPE_APP
 
@@ -161,11 +144,7 @@ class HomeAppAdapter(
         super.onViewRecycled(holder)
     }
 
-    private fun displayedItems(): List<HomeAppItem> = dragItems ?: currentList
-
-    private fun itemAt(position: Int): HomeAppItem = displayedItems()[position]
-
-    private fun itemAtOrNull(position: Int): HomeAppItem? = displayedItems().getOrNull(position)
+    private fun itemAt(position: Int): HomeAppItem = currentList[position]
 
     private fun applyUi(holder: AppViewHolder) {
         val context = holder.itemView.context
@@ -231,12 +210,6 @@ class HomeAppAdapter(
         holder.itemView.setOnClickListener(clickListener)
         holder.icon.setOnClickListener(clickListener)
         holder.name.setOnClickListener(clickListener)
-        if (item.type == HomeAppItem.Type.APP) {
-            holder.icon.setOnLongClickListener {
-                touchHelper?.startDrag(holder)
-                true
-            }
-        }
     }
 
     private fun loadApplicationIcon(
@@ -257,70 +230,6 @@ class HomeAppAdapter(
             }
         }
     }
-
-    override fun canMoveItem(position: Int): Boolean =
-        itemAtOrNull(position)?.type == HomeAppItem.Type.APP
-
-    override fun onDragStarted(position: Int) {
-        if (!canMoveItem(position) || dragItems != null) {
-            return
-        }
-        dragItems = currentList.toMutableList()
-        dragChanged = false
-    }
-
-    override fun onItemMove(fromPosition: Int, toPosition: Int): Boolean {
-        if (!canMoveItem(fromPosition) || !canMoveItem(toPosition)) return false
-        val reordered = dragItems ?: currentList.toMutableList().also {
-            dragItems = it
-            dragChanged = false
-        }
-        if (fromPosition !in reordered.indices || toPosition !in reordered.indices) {
-            return false
-        }
-        if (fromPosition < toPosition) {
-            for (index in fromPosition until toPosition) Collections.swap(reordered, index, index + 1)
-        } else {
-            for (index in fromPosition downTo toPosition + 1) Collections.swap(reordered, index, index - 1)
-        }
-        dragChanged = true
-        notifyItemMoved(fromPosition, toPosition)
-        return true
-    }
-
-    override fun onDragFinished() {
-        val reordered = dragItems ?: return
-        if (!dragChanged) {
-            dragItems = null
-            applyPendingSubmission()
-            return
-        }
-        val finalItems = reordered.toList()
-        dragChanged = false
-        dragCommitInFlight = true
-        suppressDifferUpdates = true
-        differ.submitList(finalItems) {
-            suppressDifferUpdates = false
-            dragItems = null
-            try {
-                onOrderChanged(finalItems)
-            } finally {
-                dragCommitInFlight = false
-                applyPendingSubmission()
-            }
-        }
-    }
-
-    private fun applyPendingSubmission() {
-        val pending = pendingSubmission ?: return
-        pendingSubmission = null
-        submitList(pending.items, pending.commitCallback)
-    }
-
-    private data class PendingSubmission(
-        val items: List<HomeAppItem>,
-        val commitCallback: (() -> Unit)?
-    )
 
     private fun android.content.Context.dpToPx(dp: Int): Int =
         (dp * resources.displayMetrics.density).toInt()

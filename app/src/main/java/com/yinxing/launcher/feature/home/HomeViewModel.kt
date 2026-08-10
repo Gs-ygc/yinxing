@@ -112,12 +112,6 @@ class HomeViewModel(
         refreshApps()
     }
 
-    fun saveAppOrder(items: List<HomeAppItem>) {
-        appSource.saveAppOrder(
-            items.filter { it.type == HomeAppItem.Type.APP }.map { it.packageName }
-        )
-    }
-
     fun maybeRefreshWeather() {
         val city = weatherSource.getCityName()
         val cached = weatherSource.getCached()
@@ -195,7 +189,6 @@ interface HomeAppSource {
     suspend fun getHomeItems(): List<HomeAppItem>
     fun invalidateInstalledApps()
     fun invalidateSelections()
-    fun saveAppOrder(packageNames: List<String>)
 }
 
 interface HomeSettingsSource {
@@ -228,8 +221,6 @@ private class AndroidHomeAppSource(
     override fun invalidateInstalledApps() = repository.invalidateInstalledApps()
 
     override fun invalidateSelections() = repository.invalidateSelections()
-
-    override fun saveAppOrder(packageNames: List<String>) = preferences.saveAppOrder(packageNames)
 }
 
 private class AndroidHomeSettingsSource(

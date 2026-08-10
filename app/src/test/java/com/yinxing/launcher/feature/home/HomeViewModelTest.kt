@@ -120,26 +120,6 @@ class HomeViewModelTest {
     }
 
     @Test
-    fun saveAppOrderOnlyPersistsAppItems() {
-        val appSource = FakeHomeAppSource(
-            staticItems = builtInItems(),
-            homeItemsResult = Result.success(emptyList())
-        )
-        val viewModel = createViewModel(appSource = appSource)
-
-        viewModel.saveAppOrder(
-            listOf(
-                homeItem(packageName = "phone", appName = "电话", type = HomeAppItem.Type.PHONE),
-                homeItem(packageName = "pkg.alpha", appName = "Alpha"),
-                homeItem(packageName = "add", appName = "添加", type = HomeAppItem.Type.ADD),
-                homeItem(packageName = "pkg.beta", appName = "Beta")
-            )
-        )
-
-        assertEquals(listOf("pkg.alpha", "pkg.beta"), appSource.savedPackageNames)
-    }
-
-    @Test
     fun onPackageChangedInvalidatesInstalledAppsAndRefreshesApps() = runTest {
         val staticItems = builtInItems()
         val loadedItems = staticItems + homeItem(packageName = "pkg.camera", appName = "相机")
@@ -285,8 +265,7 @@ class HomeViewModelTest {
     private fun builtInItems(): List<HomeAppItem> {
         return listOf(
             homeItem(packageName = "phone", appName = "电话", type = HomeAppItem.Type.PHONE),
-            homeItem(packageName = "wechat_video", appName = "微信视频", type = HomeAppItem.Type.WECHAT_VIDEO),
-            homeItem(packageName = "add", appName = "添加", type = HomeAppItem.Type.ADD)
+            homeItem(packageName = "wechat_video", appName = "微信视频", type = HomeAppItem.Type.WECHAT_VIDEO)
         )
     }
 
@@ -336,7 +315,6 @@ class HomeViewModelTest {
         private val homeItemsResult: Result<List<HomeAppItem>>
     ) : HomeAppSource {
         var invalidateInstalledAppsCount: Int = 0
-        var savedPackageNames: List<String> = emptyList()
 
         override fun getStaticHomeItems(): List<HomeAppItem> = staticItems
 
@@ -347,10 +325,6 @@ class HomeViewModelTest {
         }
 
         override fun invalidateSelections() {
-        }
-
-        override fun saveAppOrder(packageNames: List<String>) {
-            savedPackageNames = packageNames
         }
     }
 

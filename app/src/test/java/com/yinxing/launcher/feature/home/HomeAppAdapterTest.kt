@@ -44,8 +44,7 @@ class HomeAppAdapterTest {
         val adapter = HomeAppAdapter(
             scope = owner.lifecycleScope,
             lowPerformanceMode = false,
-            onItemClick = {},
-            onOrderChanged = {}
+            onItemClick = {}
         )
         val parent = FrameLayout(themedContext)
         val holder = adapter.onCreateViewHolder(parent, HomeAppAdapter.VIEW_TYPE_APP)
@@ -65,6 +64,25 @@ class HomeAppAdapterTest {
 
         assertEquals(1f, holder.itemView.alpha, 0f)
         assertEquals(0f, holder.itemView.translationY, 0f)
+    }
+
+    @Test
+    fun applicationCardLongPressIsAStableNoOp() {
+        val owner = TestOwner()
+        val adapter = HomeAppAdapter(
+            scope = owner.lifecycleScope,
+            lowPerformanceMode = false,
+            onItemClick = {}
+        )
+        val parent = FrameLayout(themedContext)
+        val holder = adapter.onCreateViewHolder(parent, HomeAppAdapter.VIEW_TYPE_APP)
+        adapter.submitList(listOf(appItem("pkg.camera", "相机")))
+        shadowOf(Looper.getMainLooper()).idle()
+        adapter.onBindViewHolder(holder, 0)
+        parent.addView(holder.itemView)
+
+        assertTrue(!holder.itemView.performLongClick())
+        assertTrue(!holder.itemView.findViewById<View>(R.id.icon).performLongClick())
     }
 
     @Test
@@ -91,7 +109,6 @@ class HomeAppAdapterTest {
             scope = owner.lifecycleScope,
             lowPerformanceMode = false,
             onItemClick = {},
-            onOrderChanged = {},
             loadAppIcon = { _, _, _ ->
                 allowIconLoad.await()
                 loadedBitmap
@@ -124,74 +141,6 @@ class HomeAppAdapterTest {
     }
 
     @Test
-    fun finishingDragCommitsOrderWithoutDispatchingTheMoveTwice() {
-        var persistedOrder: List<HomeAppItem>? = null
-        val adapter = HomeAppAdapter(
-            scope = TestOwner().lifecycleScope,
-            lowPerformanceMode = false,
-            onItemClick = {},
-            onOrderChanged = { persistedOrder = it }
-        )
-        val initialItems = listOf(
-            appItem("pkg.a", "应用 A"),
-            appItem("pkg.b", "应用 B"),
-            appItem("pkg.c", "应用 C")
-        )
-        adapter.submitList(initialItems)
-        waitUntil { adapter.currentList == initialItems }
-        var moveEvents = 0
-        adapter.registerAdapterDataObserver(object : RecyclerView.AdapterDataObserver() {
-            override fun onItemRangeMoved(fromPosition: Int, toPosition: Int, itemCount: Int) {
-                moveEvents += 1
-            }
-        })
-
-        adapter.onDragStarted(0)
-        assertTrue(adapter.onItemMove(0, 1))
-        adapter.onDragFinished()
-        waitUntil { persistedOrder != null }
-
-        val expectedPackages = listOf("pkg.b", "pkg.a", "pkg.c")
-        assertEquals(1, moveEvents)
-        assertEquals(expectedPackages, adapter.currentList.map(HomeAppItem::packageName))
-        assertEquals(expectedPackages, persistedOrder?.map(HomeAppItem::packageName))
-    }
-
-    @Test
-    fun listRefreshDuringDragAppliesAfterTheDraggedOrderIsCommitted() {
-        var persistedOrder: List<HomeAppItem>? = null
-        val adapter = HomeAppAdapter(
-            scope = TestOwner().lifecycleScope,
-            lowPerformanceMode = false,
-            onItemClick = {},
-            onOrderChanged = { persistedOrder = it }
-        )
-        val initialItems = listOf(
-            appItem("pkg.a", "应用 A"),
-            appItem("pkg.b", "应用 B")
-        )
-        adapter.submitList(initialItems)
-        waitUntil { adapter.currentList == initialItems }
-
-        adapter.onDragStarted(0)
-        assertTrue(adapter.onItemMove(0, 1))
-        val refreshedItems = listOf(
-            appItem("pkg.b", "应用 B"),
-            appItem("pkg.a", "应用 A"),
-            appItem("pkg.c", "应用 C")
-        )
-        adapter.submitList(refreshedItems)
-        adapter.onDragFinished()
-        waitUntil { persistedOrder != null && adapter.currentList.size == 3 }
-
-        assertEquals(listOf("pkg.b", "pkg.a"), persistedOrder?.map(HomeAppItem::packageName))
-        assertEquals(
-            listOf("pkg.b", "pkg.a", "pkg.c"),
-            adapter.currentList.map(HomeAppItem::packageName)
-        )
-    }
-
-    @Test
     fun iconScaleChangeReloadsVisibleApplicationIconAtTheNewSize() {
         val requestedSizes = mutableListOf<Int>()
         val loadedBitmap = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
@@ -199,7 +148,6 @@ class HomeAppAdapterTest {
             scope = TestOwner().lifecycleScope,
             lowPerformanceMode = false,
             onItemClick = {},
-            onOrderChanged = {},
             loadAppIcon = { _, _, size ->
                 requestedSizes += size
                 loadedBitmap

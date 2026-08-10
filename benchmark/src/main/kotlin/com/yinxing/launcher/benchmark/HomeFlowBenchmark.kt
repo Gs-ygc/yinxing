@@ -3,6 +3,7 @@ package com.yinxing.launcher.benchmark
 import android.content.Intent
 import androidx.benchmark.macro.CompilationMode
 import androidx.benchmark.macro.FrameTimingMetric
+import androidx.benchmark.macro.MacrobenchmarkScope
 import androidx.benchmark.macro.junit4.MacrobenchmarkRule
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
@@ -27,12 +28,18 @@ class HomeFlowBenchmark {
     @Test
     fun openAppManage() {
         measureAndReport("benchmark.open_app_manage") {
-            measureFromHome(
-                caseName = "打开应用管理",
-                entryLabel = "添加",
-                targetSelector = By.res(PACKAGE_NAME, "recycler_view"),
-                targetDescription = "应用管理列表 recycler_view"
-            )
+            benchmarkRule.measureRepeated(
+                packageName = PACKAGE_NAME,
+                metrics = listOf(FrameTimingMetric()),
+                compilationMode = CompilationMode.None(),
+                iterations = ITERATIONS,
+                setupBlock = {
+                    logStep("打开应用管理：回到首页准备测量")
+                    startLauncherAndWaitHome()
+                }
+            ) {
+                openHomeAppsFromCaregiver()
+            }
         }
     }
 
@@ -59,14 +66,7 @@ class HomeFlowBenchmark {
                 setupBlock = {
                     logStep("回到桌面：准备测量")
                     startLauncherAndWaitHome()
-                    device.clickObjectOrThrow(
-                        description = "首页添加入口",
-                        selectors = arrayOf(By.desc("添加"), By.text("添加"))
-                    )
-                    device.waitForObjectOrThrow(
-                        selector = By.res(PACKAGE_NAME, "recycler_view"),
-                        description = "应用管理列表 recycler_view"
-                    )
+                    openHomeAppsFromCaregiver()
                 }
             ) {
                 device.pressBackWithLog("应用管理返回首页")
@@ -138,6 +138,33 @@ class HomeFlowBenchmark {
                 description = targetDescription
             )
         }
+    }
+
+    private fun MacrobenchmarkScope.openHomeAppsFromCaregiver() {
+        device.clickObjectOrThrow(
+            description = "首页家属设置入口",
+            selectors = arrayOf(
+                By.res(PACKAGE_NAME, "btn_family_settings"),
+                By.desc("家属设置"),
+                By.text("家属设置")
+            )
+        )
+        device.clickObjectOrThrow(
+            description = "家属设置对话框继续按钮",
+            selectors = arrayOf(By.res(PACKAGE_NAME, "btn_open_settings"), By.text("继续设置"))
+        )
+        device.clickObjectOrThrow(
+            description = "家属设置中的联系人与首页入口",
+            selectors = arrayOf(By.res(PACKAGE_NAME, "btn_card_contacts"), By.text("电话、视频和首页应用"))
+        )
+        device.clickObjectOrThrow(
+            description = "家属设置中的首页应用",
+            selectors = arrayOf(By.text("首页应用"))
+        )
+        device.waitForObjectOrThrow(
+            selector = By.res(PACKAGE_NAME, "recycler_view"),
+            description = "应用管理列表 recycler_view"
+        )
     }
 
     private fun triggerIncomingCall(callerName: String) {

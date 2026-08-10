@@ -8,7 +8,6 @@ import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import com.yinxing.launcher.R
 import com.yinxing.launcher.common.lobster.LobsterClient
-import com.yinxing.launcher.feature.appmanage.AppManageActivity
 import com.yinxing.launcher.feature.phone.PhoneContactActivity
 import com.yinxing.launcher.feature.settings.SettingsActivity
 import com.yinxing.launcher.feature.videocall.VideoCallActivity
@@ -82,7 +81,6 @@ class HomeNavigator(
                         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 )
             }
-            HomeAppItem.Type.ADD -> activity.startActivity(Intent(activity, AppManageActivity::class.java))
         }
     }
 

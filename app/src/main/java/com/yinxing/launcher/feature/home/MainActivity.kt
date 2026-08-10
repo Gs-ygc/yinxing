@@ -18,7 +18,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.ConcatAdapter
 import androidx.recyclerview.widget.GridLayoutManager
-import androidx.recyclerview.widget.ItemTouchHelper
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.contact.Contact
 import com.yinxing.launcher.databinding.ActivityMainBinding
@@ -38,7 +37,6 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var binding: ActivityMainBinding
     private lateinit var adapter: HomeAppAdapter
-    private lateinit var itemMoveCallback: ItemMoveCallback
     private lateinit var homeHeaderAdapter: HomeHeaderAdapter
     private lateinit var navigator: HomeNavigator
     private lateinit var viewModel: HomeViewModel
@@ -148,8 +146,7 @@ class MainActivity : AppCompatActivity() {
             scope = lifecycleScope,
             lowPerformanceMode = settings.lowPerformanceMode,
             iconScale = settings.iconScale,
-            onItemClick = navigator::openHomeItem,
-            onOrderChanged = viewModel::saveAppOrder
+            onItemClick = navigator::openHomeItem
         )
         val layoutManager = GridLayoutManager(this, 2)
         layoutManager.spanSizeLookup = object : GridLayoutManager.SpanSizeLookup() {
@@ -160,11 +157,6 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerHome.setHasFixedSize(false)
         binding.recyclerHome.isNestedScrollingEnabled = true
         binding.recyclerHome.adapter = ConcatAdapter(homeHeaderAdapter, adapter)
-        itemMoveCallback = ItemMoveCallback(adapter, !settings.lowPerformanceMode)
-        ItemTouchHelper(itemMoveCallback).also {
-            it.attachToRecyclerView(binding.recyclerHome)
-            adapter.setTouchHelper(it)
-        }
         adapter.submitList(viewModel.homeUiState.value.items)
         homeHeaderAdapter.renderHomeState(viewModel.homeUiState.value)
         applySettings(settings)
@@ -200,7 +192,6 @@ class MainActivity : AppCompatActivity() {
         binding.recyclerHome.itemAnimator = null
         adapter.setLowPerformanceMode(settings.lowPerformanceMode)
         adapter.setIconScale(settings.iconScale)
-        itemMoveCallback.setAnimateDrag(!settings.lowPerformanceMode)
         homeHeaderAdapter.applySettings(settings)
     }
 
