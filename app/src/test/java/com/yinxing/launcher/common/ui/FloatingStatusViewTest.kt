@@ -2,16 +2,15 @@ package com.yinxing.launcher.common.ui
 
 import android.content.Context
 import android.content.res.Configuration
+import android.text.TextUtils
 import android.view.LayoutInflater
 import android.view.View
-import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -85,7 +84,7 @@ class FloatingStatusViewTest {
     }
 
     @Test
-    fun largeTextAndLongCopyHaveNoClippingCapWithinPhoneWidth() {
+    fun largeTextAndLongCopyStayBoundedWithCancelReachable() {
         val largeTextContext = context.createConfigurationContext(
             Configuration(context.resources.configuration).apply { fontScale = 2f }
         )
@@ -96,24 +95,31 @@ class FloatingStatusViewTest {
         FloatingStatusView(largeTextContext).bindText(root, titleText, statusText)
 
         val phoneWidth = largeTextContext.dp(360)
+        val availableHeight = largeTextContext.dp(540)
         root.measure(
             View.MeasureSpec.makeMeasureSpec(phoneWidth, View.MeasureSpec.AT_MOST),
-            View.MeasureSpec.makeMeasureSpec(0, View.MeasureSpec.UNSPECIFIED)
+            View.MeasureSpec.makeMeasureSpec(availableHeight, View.MeasureSpec.AT_MOST)
         )
         root.layout(0, 0, root.measuredWidth, root.measuredHeight)
 
         val title = root.findViewById<TextView>(R.id.tv_status)
         val status = root.findViewById<TextView>(R.id.tv_status_step)
+        val cancel = root.findViewById<View>(R.id.tv_cancel)
+        val titleNode = title.createAccessibilityNodeInfo()
+        val statusNode = status.createAccessibilityNodeInfo()
         assertEquals(2f, largeTextContext.resources.configuration.fontScale, 0f)
-        assertEquals(Int.MAX_VALUE, title.maxLines)
-        assertEquals(Int.MAX_VALUE, status.maxLines)
-        assertNull(title.ellipsize)
-        assertNull(status.ellipsize)
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, title.layoutParams.height)
-        assertEquals(ViewGroup.LayoutParams.WRAP_CONTENT, status.layoutParams.height)
-        assertEquals(titleText.length, title.layout.getLineEnd(title.layout.lineCount - 1))
-        assertEquals(statusText.length, status.layout.getLineEnd(status.layout.lineCount - 1))
+        assertEquals(3, title.maxLines)
+        assertEquals(2, status.maxLines)
+        assertEquals(TextUtils.TruncateAt.END, title.ellipsize)
+        assertEquals(TextUtils.TruncateAt.END, status.ellipsize)
+        assertEquals(titleText, title.text.toString())
+        assertEquals(statusText, status.text.toString())
+        assertEquals(titleText, titleNode.text.toString())
+        assertEquals(statusText, statusNode.text.toString())
         assertTrue(root.measuredWidth <= phoneWidth)
+        assertTrue(root.measuredHeight <= availableHeight)
+        assertTrue(cancel.top >= 0)
+        assertTrue(cancel.bottom <= root.measuredHeight)
     }
 
     private fun Context.dp(value: Int): Int =
