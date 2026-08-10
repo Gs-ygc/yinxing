@@ -20,6 +20,30 @@ object HomeAppOrderPolicy {
         return orderedApps
     }
 
+    fun orderManagementApps(
+        apps: Collection<OrderedApp>,
+        selectedPackages: Collection<String>,
+        savedOrder: Collection<String>
+    ): List<OrderedApp> {
+        val selected = selectedPackages.toSet()
+        val selectedApps = orderApps(apps.filter { it.packageName in selected }, savedOrder)
+        val unselectedApps = orderApps(apps.filterNot { it.packageName in selected }, emptyList())
+        return selectedApps + unselectedApps
+    }
+
+    fun moveSelectedPackage(
+        currentOrder: Collection<String>,
+        packageName: String,
+        offset: Int
+    ): List<String>? {
+        val normalizedOrder = normalizeSavedOrder(currentOrder)
+        if (packageName.isBlank() || offset !in setOf(-1, 1)) return null
+        val from = normalizedOrder.indexOf(packageName)
+        val to = from + offset
+        if (from < 0 || to !in normalizedOrder.indices) return null
+        return normalizedOrder.toMutableList().apply { java.util.Collections.swap(this, from, to) }
+    }
+
     fun updateOrderForSelection(
         savedOrder: Collection<String>,
         packageName: String,

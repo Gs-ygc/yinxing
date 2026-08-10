@@ -92,6 +92,78 @@ class HomeAppOrderPolicyTest {
     }
 
     @Test
+    fun orderManagementApps_keepsSelectedAppsInSavedOrderThenByName() {
+        val result = HomeAppOrderPolicy.orderManagementApps(
+            apps = listOf(
+                OrderedApp("pkg.alpha", "Alpha"),
+                OrderedApp("pkg.beta", "Beta"),
+                OrderedApp("pkg.gamma", "Gamma")
+            ),
+            selectedPackages = setOf("pkg.alpha", "pkg.gamma"),
+            savedOrder = listOf("pkg.gamma", "pkg.missing", "pkg.gamma")
+        )
+
+        assertEquals(
+            listOf("pkg.gamma", "pkg.alpha", "pkg.beta"),
+            result.map { it.packageName }
+        )
+    }
+
+    @Test
+    fun moveSelectedPackage_swapsWithPreviousPackage() {
+        assertEquals(
+            listOf("pkg.alpha", "pkg.gamma", "pkg.beta"),
+            HomeAppOrderPolicy.moveSelectedPackage(
+                currentOrder = listOf("pkg.alpha", "pkg.beta", "pkg.gamma"),
+                packageName = "pkg.gamma",
+                offset = -1
+            )
+        )
+    }
+
+    @Test
+    fun moveSelectedPackage_swapsWithNextPackage() {
+        assertEquals(
+            listOf("pkg.beta", "pkg.alpha", "pkg.gamma"),
+            HomeAppOrderPolicy.moveSelectedPackage(
+                currentOrder = listOf("pkg.alpha", "pkg.beta", "pkg.gamma"),
+                packageName = "pkg.alpha",
+                offset = 1
+            )
+        )
+    }
+
+    @Test
+    fun moveSelectedPackage_returnsNullForNoOpRequests() {
+        val currentOrder = listOf("pkg.alpha", "pkg.beta", "pkg.gamma")
+
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, "pkg.alpha", -1)
+        )
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, "pkg.gamma", 1)
+        )
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, "pkg.beta", 0)
+        )
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, "pkg.beta", 2)
+        )
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, " ", 1)
+        )
+        assertEquals(
+            null,
+            HomeAppOrderPolicy.moveSelectedPackage(currentOrder, "pkg.missing", 1)
+        )
+    }
+
+    @Test
     fun retainSelectedPackages_preservesSavedOrder() {
         val result = HomeAppOrderPolicy.retainSelectedPackages(
             listOf("pkg.c", "pkg.a", "pkg.b"),
