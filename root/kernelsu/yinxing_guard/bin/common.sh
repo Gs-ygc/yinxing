@@ -2550,7 +2550,8 @@ write_home_foreground_evidence() {
 
 read_home_foreground_activity_state() {
     if ! home_foreground_dump="$(
-        run_guard_command dumpsys activity activities 2>/dev/null
+        run_guard_command sh -c \
+            'dumpsys activity activities | head -c 65537' 2>/dev/null
         home_foreground_status=$?
         printf '|'
         exit "$home_foreground_status"
