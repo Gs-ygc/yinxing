@@ -474,6 +474,10 @@
     <string name="incoming_call_trace_accept_failed">接听失败</string>
     <string name="incoming_call_trace_decline_success">拒接成功</string>
     <string name="incoming_call_trace_decline_failed">拒接失败</string>
+    <string name="incoming_call_trace_system_ui_requested">系统电话界面已请求</string>
+    <string name="incoming_call_trace_system_ui_failed">系统电话界面请求失败</string>
+    <string name="incoming_call_trace_system_ui_answered">系统电话已接通</string>
+    <string name="incoming_call_trace_system_ui_ended">系统来电已结束</string>
     <string name="incoming_call_trace_speaker_on">扬声器已打开</string>
     <string name="incoming_call_trace_speaker_kept_private">保持当前输出</string>
     <string name="action_pick_contact">从通讯录选择</string>

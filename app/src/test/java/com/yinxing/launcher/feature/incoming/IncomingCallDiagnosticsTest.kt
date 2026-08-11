@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -104,5 +105,108 @@ class IncomingCallDiagnosticsTest {
         )
         assertTrue(IncomingCallDiagnostics.getDisplayText(context).contains("李叔叔"))
         assertTrue(IncomingCallDiagnostics.getDisplayText(context).contains("receiver failed"))
+    }
+
+    @Test
+    fun failedThenSuccessfulRetryKeepsStepsButClearsCurrentFailure() {
+        IncomingCallDiagnostics.recordAcceptFailure(
+            context = context,
+            detail = "first attempt failed",
+            failureReason = IncomingCallFailureReason(
+                IncomingCallFailureCategory.CallAction,
+                "OEM rejected"
+            )
+        )
+
+        IncomingCallDiagnostics.recordAcceptSuccess(context, "retry sent")
+
+        val summary = IncomingCallDiagnostics.getSummaryText(context)
+        assertTrue(summary.contains(context.getString(R.string.incoming_call_trace_accept_failed)))
+        assertTrue(summary.contains(context.getString(R.string.incoming_call_trace_accept_success)))
+        assertFalse(IncomingCallDiagnostics.getDisplayText(context).contains("失败分类"))
+    }
+
+    @Test
+    fun systemUiRequestIsNotLabeledSuccessAndKeepsOriginalFailure() {
+        IncomingCallDiagnostics.recordDeclineFailure(
+            context = context,
+            detail = "decline failed",
+            failureReason = IncomingCallFailureReason(
+                IncomingCallFailureCategory.PhonePermission,
+                "permission missing"
+            )
+        )
+
+        IncomingCallDiagnostics.recordSystemCallUiRequested(context)
+
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains(
+                context.getString(R.string.incoming_call_trace_system_ui_requested)
+            )
+        )
+        assertTrue(IncomingCallDiagnostics.getDisplayText(context).contains("失败分类：电话权限"))
+    }
+
+    @Test
+    fun systemUiRequestFailureKeepsActionCategoryAndAddsObservedError() {
+        IncomingCallDiagnostics.recordAcceptFailure(
+            context = context,
+            detail = "accept failed",
+            failureReason = IncomingCallFailureReason(
+                IncomingCallFailureCategory.CallAction,
+                "telecom rejected"
+            )
+        )
+
+        IncomingCallDiagnostics.recordSystemCallUiRequestFailure(
+            context,
+            SecurityException("show screen denied")
+        )
+
+        val display = IncomingCallDiagnostics.getDisplayText(context)
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains(
+                context.getString(R.string.incoming_call_trace_system_ui_failed)
+            )
+        )
+        assertTrue(display.contains("SecurityException"))
+        assertTrue(display.contains("show screen denied"))
+        assertTrue(display.contains("失败分类：接听指令：telecom rejected"))
+    }
+
+    @Test
+    fun observedSystemAnswerClearsFailureAndRecordsAnswer() {
+        IncomingCallDiagnostics.recordAcceptFailure(
+            context,
+            "accept failed",
+            IncomingCallFailureReason(IncomingCallFailureCategory.CallAction, "failed")
+        )
+
+        IncomingCallDiagnostics.recordSystemCallUiAnswered(context)
+
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains(
+                context.getString(R.string.incoming_call_trace_system_ui_answered)
+            )
+        )
+        assertFalse(IncomingCallDiagnostics.getDisplayText(context).contains("失败分类"))
+    }
+
+    @Test
+    fun observedSystemCallEndClearsFailureAndRecordsEnd() {
+        IncomingCallDiagnostics.recordDeclineFailure(
+            context,
+            "decline failed",
+            IncomingCallFailureReason(IncomingCallFailureCategory.CallAction, "failed")
+        )
+
+        IncomingCallDiagnostics.recordSystemCallUiEnded(context)
+
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains(
+                context.getString(R.string.incoming_call_trace_system_ui_ended)
+            )
+        )
+        assertFalse(IncomingCallDiagnostics.getDisplayText(context).contains("失败分类"))
     }
 }

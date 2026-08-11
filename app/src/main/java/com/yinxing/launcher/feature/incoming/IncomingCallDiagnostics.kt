@@ -28,6 +28,22 @@ object IncomingCallDiagnostics {
         AcceptFailed("accept_failed", R.string.incoming_call_trace_accept_failed),
         DeclineSucceeded("decline_succeeded", R.string.incoming_call_trace_decline_success),
         DeclineFailed("decline_failed", R.string.incoming_call_trace_decline_failed),
+        SystemCallUiRequested(
+            "system_call_ui_requested",
+            R.string.incoming_call_trace_system_ui_requested
+        ),
+        SystemCallUiRequestFailed(
+            "system_call_ui_request_failed",
+            R.string.incoming_call_trace_system_ui_failed
+        ),
+        SystemCallUiAnswered(
+            "system_call_ui_answered",
+            R.string.incoming_call_trace_system_ui_answered
+        ),
+        SystemCallUiEnded(
+            "system_call_ui_ended",
+            R.string.incoming_call_trace_system_ui_ended
+        ),
         SpeakerEnabled("speaker_enabled", R.string.incoming_call_trace_speaker_on),
         SpeakerKeptPrivate("speaker_kept_private", R.string.incoming_call_trace_speaker_kept_private);
 
@@ -200,7 +216,8 @@ object IncomingCallDiagnostics {
         append(
             context = context,
             step = Step.AcceptSucceeded,
-            detail = joinDetail(storedCallerLabel(context), detail, guardSnapshot(context).displayText())
+            detail = joinDetail(storedCallerLabel(context), detail, guardSnapshot(context).displayText()),
+            preserveStoredFailure = false
         )
     }
 
@@ -222,7 +239,8 @@ object IncomingCallDiagnostics {
         append(
             context = context,
             step = Step.DeclineSucceeded,
-            detail = joinDetail(storedCallerLabel(context), detail, guardSnapshot(context).displayText())
+            detail = joinDetail(storedCallerLabel(context), detail, guardSnapshot(context).displayText()),
+            preserveStoredFailure = false
         )
     }
 
@@ -238,6 +256,58 @@ object IncomingCallDiagnostics {
             failureReason = failureReason
         )
         failureReason?.let(IncomingCallSessionState::failed)
+    }
+
+    fun recordSystemCallUiRequested(context: Context) {
+        append(
+            context = context,
+            step = Step.SystemCallUiRequested,
+            detail = joinDetail(
+                storedCallerLabel(context),
+                context.getString(R.string.incoming_call_trace_system_ui_requested),
+                guardSnapshot(context).displayText()
+            )
+        )
+    }
+
+    fun recordSystemCallUiRequestFailure(context: Context, error: Exception) {
+        append(
+            context = context,
+            step = Step.SystemCallUiRequestFailed,
+            detail = joinDetail(
+                storedCallerLabel(context),
+                error.javaClass.simpleName,
+                error.message,
+                guardSnapshot(context).displayText()
+            ),
+            throwable = error
+        )
+    }
+
+    fun recordSystemCallUiAnswered(context: Context) {
+        append(
+            context = context,
+            step = Step.SystemCallUiAnswered,
+            detail = joinDetail(
+                storedCallerLabel(context),
+                context.getString(R.string.incoming_call_trace_system_ui_answered),
+                guardSnapshot(context).displayText()
+            ),
+            preserveStoredFailure = false
+        )
+    }
+
+    fun recordSystemCallUiEnded(context: Context) {
+        append(
+            context = context,
+            step = Step.SystemCallUiEnded,
+            detail = joinDetail(
+                storedCallerLabel(context),
+                context.getString(R.string.incoming_call_trace_system_ui_ended),
+                guardSnapshot(context).displayText()
+            ),
+            preserveStoredFailure = false
+        )
     }
 
     fun recordSpeakerEnabled(context: Context) {
@@ -308,7 +378,8 @@ object IncomingCallDiagnostics {
         callerLabel: String? = null,
         detail: String,
         throwable: Throwable? = null,
-        failureReason: IncomingCallFailureReason? = null
+        failureReason: IncomingCallFailureReason? = null,
+        preserveStoredFailure: Boolean = true
     ) {
         val existingSteps = readSteps(context)
         val nextSteps = buildList {
@@ -317,7 +388,11 @@ object IncomingCallDiagnostics {
                 add(step)
             }
         }
-        val storedFailure = failureReason ?: readFailureReason(context)
+        val storedFailure = when {
+            failureReason != null -> failureReason
+            preserveStoredFailure -> readFailureReason(context)
+            else -> null
+        }
         write(context, nextSteps, callerLabel ?: storedCallerLabel(context), detail, storedFailure)
         log(step, detail, throwable, storedFailure)
     }
