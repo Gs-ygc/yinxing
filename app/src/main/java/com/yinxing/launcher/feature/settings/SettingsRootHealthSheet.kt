@@ -310,11 +310,17 @@ internal fun SettingsActivity.rootFailureSummary(
         RootFailureReason.SU_EXECUTION_BLOCKED ->
             getString(R.string.settings_root_failure_su_execution_blocked)
         RootFailureReason.SU_START_FAILED -> getString(R.string.settings_root_failure_su_start_failed)
-        RootFailureReason.SU_AUTHORIZATION_DENIED ->
-            getString(R.string.settings_root_failure_authorization_denied)
         RootFailureReason.SCRIPT_NOT_FOUND -> getString(R.string.settings_root_failure_script_not_found)
+        RootFailureReason.SCRIPT_UNAVAILABLE -> getString(
+            R.string.settings_root_failure_script_unavailable,
+            exitCode ?: -1
+        )
         RootFailureReason.SCRIPT_EXECUTION_BLOCKED ->
             getString(R.string.settings_root_failure_script_execution_blocked)
+        RootFailureReason.COMMAND_PERMISSION_DENIED -> getString(
+            R.string.settings_root_failure_command_permission_denied,
+            exitCode ?: -1
+        )
         RootFailureReason.COMMAND_TIMEOUT -> getString(R.string.settings_root_failure_timeout)
         RootFailureReason.COMMAND_FAILED -> getString(
             R.string.settings_root_failure_command_failed,
@@ -333,10 +339,12 @@ private fun rootFailureBadge(reason: RootFailureReason?): Int {
         RootFailureReason.SU_NOT_FOUND -> R.string.settings_root_status_su_not_found
         RootFailureReason.SU_EXECUTION_BLOCKED -> R.string.settings_root_status_su_execution_blocked
         RootFailureReason.SU_START_FAILED -> R.string.settings_root_status_su_start_failed
-        RootFailureReason.SU_AUTHORIZATION_DENIED -> R.string.settings_root_status_authorization_denied
         RootFailureReason.SCRIPT_NOT_FOUND -> R.string.settings_root_status_script_not_found
+        RootFailureReason.SCRIPT_UNAVAILABLE -> R.string.settings_root_status_script_unavailable
         RootFailureReason.SCRIPT_EXECUTION_BLOCKED ->
             R.string.settings_root_status_script_execution_blocked
+        RootFailureReason.COMMAND_PERMISSION_DENIED ->
+            R.string.settings_root_status_command_permission_denied
         RootFailureReason.COMMAND_TIMEOUT -> R.string.settings_root_status_timeout
         RootFailureReason.COMMAND_FAILED -> R.string.settings_root_status_command_failed
         RootFailureReason.OUTPUT_LIMIT_EXCEEDED -> R.string.settings_root_status_output_too_large

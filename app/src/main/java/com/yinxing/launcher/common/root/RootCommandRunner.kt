@@ -31,9 +31,10 @@ internal enum class RootFailureReason {
     SU_NOT_FOUND,
     SU_EXECUTION_BLOCKED,
     SU_START_FAILED,
-    SU_AUTHORIZATION_DENIED,
     SCRIPT_NOT_FOUND,
+    SCRIPT_UNAVAILABLE,
     SCRIPT_EXECUTION_BLOCKED,
+    COMMAND_PERMISSION_DENIED,
     COMMAND_TIMEOUT,
     COMMAND_FAILED,
     OUTPUT_LIMIT_EXCEEDED,
@@ -245,24 +246,42 @@ private fun classifyRootFailure(
     if (exitCode == 0) return null
 
     val normalizedOutput = output.lowercase()
-    val guardPathMentioned = normalizedOutput.contains("/data/adb/modules/yinxing_guard/")
-    val accessDenied = listOf(
+    val permissionDeniedMessages = listOf(
         "permission denied",
+        "operation not permitted",
         "not allowed",
         "not granted",
         "unauthorized",
         "access denied"
-    ).any(normalizedOutput::contains)
-    if (guardPathMentioned && accessDenied) {
+    )
+    if (hasDirectRootCommandError(normalizedOutput, permissionDeniedMessages)) {
         return RootFailureReason.SCRIPT_EXECUTION_BLOCKED
     }
-    if (accessDenied) {
-        return RootFailureReason.SU_AUTHORIZATION_DENIED
+    if (permissionDeniedMessages.any(normalizedOutput::contains)) {
+        return RootFailureReason.COMMAND_PERMISSION_DENIED
     }
-    if (exitCode == 127 || normalizedOutput.contains("not found")) {
+    if (hasDirectRootCommandError(normalizedOutput, listOf("inaccessible or not found"))) {
+        return RootFailureReason.SCRIPT_UNAVAILABLE
+    }
+    if (
+        hasDirectRootCommandError(
+            normalizedOutput,
+            listOf("not found", "no such file or directory")
+        )
+    ) {
         return RootFailureReason.SCRIPT_NOT_FOUND
     }
     return RootFailureReason.COMMAND_FAILED
+}
+
+private fun hasDirectRootCommandError(output: String, messages: List<String>): Boolean {
+    return output.lineSequence()
+        .map(String::trim)
+        .any { line ->
+            RootCommand.values().any { command ->
+                messages.any { message -> line.endsWith("${command.shellPath}: $message") }
+            }
+        }
 }
 
 private fun classifySuStartFailure(message: String?): RootFailureReason {

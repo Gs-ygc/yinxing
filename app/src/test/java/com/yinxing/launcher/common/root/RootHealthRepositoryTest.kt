@@ -11,7 +11,12 @@ class RootHealthRepositoryTest {
     @Test
     fun nonZeroStatusCommandMapsToRootUnavailable() = runBlocking {
         val repository = RootHealthRepository(
-            FakeRunner(status = RootCommandResult(exitCode = 127, output = "not found"))
+            FakeRunner(
+                status = RootCommandResult(
+                    exitCode = 127,
+                    output = "/data/adb/modules/yinxing_guard/bin/status.sh: not found"
+                )
+            )
         )
 
         val snapshot = repository.query()

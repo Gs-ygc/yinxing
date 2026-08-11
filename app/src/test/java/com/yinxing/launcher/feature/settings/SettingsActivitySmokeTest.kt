@@ -151,9 +151,10 @@ class SettingsActivitySmokeTest {
             RootHealthSnapshot.unavailable(RootFailureReason.SU_NOT_FOUND) to "找不到 /system/bin/su",
             RootHealthSnapshot.unavailable(RootFailureReason.SU_EXECUTION_BLOCKED) to "系统拒绝启动它",
             RootHealthSnapshot.unavailable(RootFailureReason.SU_START_FAILED) to "su 进程启动失败",
-            RootHealthSnapshot.unavailable(RootFailureReason.SU_AUTHORIZATION_DENIED) to "KernelSU 没有允许银杏",
-            RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_NOT_FOUND) to "Root Guard 脚本或依赖不存在",
+            RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_NOT_FOUND) to "Root Guard 模块目录或固定脚本不存在",
+            RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_UNAVAILABLE, 127) to "不可访问或不存在",
             RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_EXECUTION_BLOCKED) to "Root Guard 脚本无法执行",
+            RootHealthSnapshot.unavailable(RootFailureReason.COMMAND_PERMISSION_DENIED, 13) to "退出码 13",
             RootHealthSnapshot.unavailable(RootFailureReason.COMMAND_TIMEOUT) to "Root 脚本响应超时",
             RootHealthSnapshot.unavailable(RootFailureReason.COMMAND_FAILED, 42) to "退出码 42",
             RootHealthSnapshot.unavailable(RootFailureReason.OUTPUT_LIMIT_EXCEEDED) to "状态输出异常过长",
@@ -174,21 +175,21 @@ class SettingsActivitySmokeTest {
     }
 
     @Test
-    fun rootHubShowsAuthorizationFailureInsteadOfGenericUnavailable() {
+    fun rootHubShowsSuEntryFailureInsteadOfGenericUnavailable() {
         val activity = buildActivity()
         activity.rootHealthSnapshot = RootHealthSnapshot.unavailable(
-            RootFailureReason.SU_AUTHORIZATION_DENIED
+            RootFailureReason.SU_NOT_FOUND
         )
 
         activity.updateRootHubCard()
 
         assertEquals(
-            activity.getString(R.string.settings_root_status_authorization_denied),
+            activity.getString(R.string.settings_root_status_su_not_found),
             activity.findViewById<TextView>(R.id.tv_root_hub_status).text.toString()
         )
-        assertEquals(
-            activity.getString(R.string.settings_root_failure_authorization_denied),
-            activity.findViewById<TextView>(R.id.tv_root_hub_summary).text.toString()
+        assertTrue(
+            activity.findViewById<TextView>(R.id.tv_root_hub_summary).text
+                .contains("找不到 /system/bin/su")
         )
     }
 

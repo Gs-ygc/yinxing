@@ -44,14 +44,14 @@ class RootCommandRunnerTest {
     }
 
     @Test
-    fun permissionDeniedOutputIsReportedAsAuthorizationFailure() {
+    fun unqualifiedPermissionDeniedOutputReportsAnUnknownPermissionSource() {
         withFakeSu("printf 'Permission denied\\n'; exit 1") { executable ->
             val result = SuRootCommandRunner(
                 timeoutMillis = 1_000,
                 suExecutable = executable.toString()
             ).run(RootCommand.STATUS)
 
-            assertEquals(RootFailureReason.SU_AUTHORIZATION_DENIED, result.failureReason)
+            assertEquals(RootFailureReason.COMMAND_PERMISSION_DENIED, result.failureReason)
             assertEquals(1, result.exitCode)
         }
     }
@@ -80,6 +80,36 @@ class RootCommandRunnerTest {
             ).run(RootCommand.STATUS)
 
             assertEquals(RootFailureReason.SCRIPT_NOT_FOUND, result.failureReason)
+        }
+    }
+
+    @Test
+    fun inaccessibleOrNotFoundKeepsTheShellAmbiguity() {
+        withFakeSu(
+            "printf '/data/adb/modules/yinxing_guard/bin/status.sh: inaccessible or not found\\n'; exit 127"
+        ) { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SCRIPT_UNAVAILABLE, result.failureReason)
+            assertEquals(127, result.exitCode)
+        }
+    }
+
+    @Test
+    fun missingDependencyInsideGuardScriptIsNotReportedAsMissingGuardScript() {
+        withFakeSu(
+            "printf '/data/adb/modules/yinxing_guard/bin/status.sh: line 12: helper: not found\\n'; exit 127"
+        ) { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.COMMAND_FAILED, result.failureReason)
+            assertEquals(127, result.exitCode)
         }
     }
 
