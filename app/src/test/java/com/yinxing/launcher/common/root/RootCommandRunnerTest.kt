@@ -2,6 +2,7 @@ package com.yinxing.launcher.common.root
 
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
+import java.nio.file.attribute.PosixFilePermission
 import kotlin.system.measureTimeMillis
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -16,6 +17,55 @@ class RootCommandRunnerTest {
     }
 
     @Test
+    fun usesSystemShellToReadOnlyTheThreeFixedScripts() {
+        val record = Files.createTempFile("yinxing-root-commands", ".txt")
+        withFakeSu("printf '%s\\n' \"${'$'}2\" >> '$record'; exit 0") { executable ->
+            val runner = SuRootCommandRunner(timeoutMillis = 1_000, suExecutable = executable.toString())
+            RootCommand.values().forEach(runner::run)
+        }
+
+        assertEquals(
+            listOf(
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/status.sh",
+                "/system/bin/sh /data/adb/modules/yinxing_guard/action.sh",
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/kiosk-home.sh"
+            ),
+            Files.readAllLines(record)
+        )
+        Files.deleteIfExists(record)
+    }
+
+    @Test
+    fun systemShellReadsNonExecutableScriptWhileDirectShellCommandDoesNot() {
+        val script = Files.createTempFile("yinxing-shell-read", ".sh")
+        Files.write(script, "printf 'shell-read\\n'\n".toByteArray(StandardCharsets.UTF_8))
+        try {
+            Files.setPosixFilePermissions(
+                script,
+                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+            )
+
+            val direct = ProcessBuilder("/bin/sh", "-c", script.toString())
+                .redirectErrorStream(true)
+                .start()
+            val directOutput = direct.inputStream.bufferedReader().readText()
+            val directExit = direct.waitFor()
+
+            val shellRead = ProcessBuilder("/bin/sh", script.toString())
+                .redirectErrorStream(true)
+                .start()
+            val shellReadOutput = shellRead.inputStream.bufferedReader().readText()
+            val shellReadExit = shellRead.waitFor()
+
+            assertTrue("direct shell invocation unexpectedly succeeded: $directOutput", directExit != 0)
+            assertEquals(0, shellReadExit)
+            assertEquals("shell-read\n", shellReadOutput)
+        } finally {
+            Files.deleteIfExists(script)
+        }
+    }
+
+    @Test
     fun missingSuIsReportedAsExecutableUnavailable() {
         val result = SuRootCommandRunner(
             timeoutMillis = 1_000,
@@ -23,6 +73,10 @@ class RootCommandRunnerTest {
         ).run(RootCommand.STATUS)
 
         assertEquals(RootFailureReason.SU_NOT_FOUND, result.failureReason)
+        assertEquals(RootFailureStage.SU_START, result.evidence?.stage)
+        assertEquals(RootCommand.STATUS, result.evidence?.command)
+        assertTrue(result.evidence?.invocation.orEmpty().contains("/system/bin/su -c"))
+        assertTrue(result.evidence?.detail.orEmpty().contains("IOException"))
     }
 
     @Test
@@ -68,6 +122,9 @@ class RootCommandRunnerTest {
 
             assertEquals(RootFailureReason.SCRIPT_EXECUTION_BLOCKED, result.failureReason)
             assertEquals(126, result.exitCode)
+            assertEquals(RootFailureStage.COMMAND_RUN, result.evidence?.stage)
+            assertEquals(126, result.evidence?.exitCode)
+            assertTrue(result.evidence?.detail.orEmpty().contains("Permission denied"))
         }
     }
 
@@ -131,9 +188,9 @@ class RootCommandRunnerTest {
         withFakeSu(
             """
             case "${'$'}2" in
-                /data/adb/modules/yinxing_guard/bin/status.sh) printf 'status-ok\n' ;;
-                /data/adb/modules/yinxing_guard/action.sh) printf 'recover-ok\n' ;;
-                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) printf 'kiosk-ok\n' ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/status.sh") printf 'status-ok\n' ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/action.sh") printf 'recover-ok\n' ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/kiosk-home.sh") printf 'kiosk-ok\n' ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
@@ -162,7 +219,7 @@ class RootCommandRunnerTest {
         withFakeSu(
             """
             case "${'$'}2" in
-                /data/adb/modules/yinxing_guard/action.sh) /bin/sleep 4 ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/action.sh") /bin/sleep 4 ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
@@ -184,7 +241,7 @@ class RootCommandRunnerTest {
         withFakeSu(
             """
             case "${'$'}2" in
-                /data/adb/modules/yinxing_guard/bin/kiosk-home.sh) /bin/sleep 4 ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/kiosk-home.sh") /bin/sleep 4 ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
@@ -206,7 +263,7 @@ class RootCommandRunnerTest {
         withFakeSu(
             """
             case "${'$'}2" in
-                /data/adb/modules/yinxing_guard/bin/status.sh) /bin/sleep 4 ;;
+                "/system/bin/sh /data/adb/modules/yinxing_guard/bin/status.sh") /bin/sleep 4 ;;
                 *) exit 64 ;;
             esac
             """.trimIndent()
