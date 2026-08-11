@@ -147,7 +147,7 @@ git add app/src/main/java/com/yinxing/launcher/feature/home/HomeNavigator.kt app
 git commit -m "feat: make home app handoff failures recoverable"
 ```
 
-### Task 3: Branch-level verification and release readiness
+### Task 3: Branch-level verification and review readiness
 
 **Files:**
 - Modify: `docs/superpowers/specs/2026-08-11-preview-24-home-app-failure-recovery-design.md` only if review finds a design correction.
@@ -168,3 +168,48 @@ Check `git diff --check`, resource IDs, button bounds/content descriptions, no n
 - [ ] **Step 3: Commit verification evidence and hand off for independent review**
 
 The branch is ready for the standard whole-branch review and release packaging only when the focused and complete suites are green and the diff contains no unrelated infrastructure work.
+
+### Task 4: Version, package, and publish Preview 24
+
+**Files:**
+- Modify: `app/build.gradle.kts` (`versionCode=40`, `versionName="1.10.0-root-preview.24"`)
+- Create: `docs/release/yinxing-root-preview-24.md`
+- Create: `out/release/yinxing-1.10.0-root-preview.24-debug.apk` (generated, not committed)
+- Create: `out/release/SHA256SUMS.txt` (generated, not committed)
+
+**Interfaces:**
+- Produces one Debug APK and its checksum under the exact release names above.
+- Publishes GitHub prerelease tag `v1.10.0-root-preview.24` with exactly those two assets.
+- Links the unchanged Preview 18 KernelSU module; no Root module asset is rebuilt or uploaded.
+
+- [ ] **Step 1: Write release metadata and elderly acceptance notes**
+
+Set the exact app metadata:
+
+```kotlin
+versionCode = 40
+versionName = "1.10.0-root-preview.24"
+```
+
+Document the persistent failed-app dialog, retry behavior, caregiver settings route, unchanged success-path latency/power boundary, Preview 23 rollback URL, and the OnePlus 15 acceptance sequence for an unavailable/disabled app.
+
+- [ ] **Step 2: Run final forced verification and classify lint**
+
+Run in isolation with the known complete cache:
+
+```bash
+/usr/bin/time -f 'ELAPSED_SECONDS=%e EXIT_STATUS=%x' \
+  env GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home \
+  bash gradlew :app:testDebugUnitTest :app:assembleDebug :app:assembleDebugAndroidTest \
+  --rerun-tasks --no-daemon --console=plain
+```
+
+Then run `:app:lintDebug`. Require zero test failures/errors/skips and no new lint error in Preview 24 changed files; classify only the two existing `RootCommandRunner.kt` API findings separately.
+
+- [ ] **Step 3: Verify APK metadata, signature, checksums, and Root boundary**
+
+Use SDK `aapt2` and `apksigner` to require package `com.yinxing.launcher`, `versionCode=40`, `versionName=1.10.0-root-preview.24`, `minSdk=24`, `targetSdk=36`, and v2 Debug signing. Copy the APK into `out/release`, generate `SHA256SUMS.txt` from inside that directory, and run `sha256sum -c`. Confirm the source diff contains no `root/`, KernelSU module, or BusyBox changes.
+
+- [ ] **Step 4: Push, tag, publish, and fresh-download verify**
+
+Commit metadata/release notes, push the feature branch, fast-forward/push `main`, create annotated tag `v1.10.0-root-preview.24`, and publish a non-draft prerelease to `Gs-ygc/yinxing`. Download both remote assets into a fresh temporary directory and require checksum success, byte-for-byte APK equality, exact asset names/body, remote branch/tag equality, and no device claims when `adb devices -l` is empty.
