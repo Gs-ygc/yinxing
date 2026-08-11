@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="utf-8"?>
+<com.google.android.material.card.MaterialCardView xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    style="@style/Widget.OldLauncher.DialogSurfaceCard"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_margin="16dp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="28dp">
+
+        <TextView
+            android:id="@+id/tv_home_app_failure_title"
+            style="@style/TextAppearance.OldLauncher.DialogTitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:gravity="center"
+            android:maxLines="2" />
+
+        <TextView
+            android:id="@+id/tv_home_app_failure_message"
+            style="@style/TextAppearance.OldLauncher.DialogMessage"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:gravity="center" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_home_app_retry"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="28dp"
+            android:contentDescription="@string/home_app_failure_retry"
+            android:ellipsize="end"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:maxLines="2"
+            android:minHeight="68dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/home_app_failure_retry"
+            android:textAllCaps="false"
+            android:textColor="@android:color/white"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/launcher_action"
+            app:cornerRadius="18dp" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_home_app_settings"
+            style="@style/Widget.MaterialComponents.Button"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="10dp"
+            android:contentDescription="@string/home_app_failure_settings"
+            android:ellipsize="end"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:maxLines="2"
+            android:minHeight="68dp"
+            android:paddingStart="16dp"
+            android:paddingEnd="16dp"
+            android:text="@string/home_app_failure_settings"
+            android:textAllCaps="false"
+            android:textColor="@color/launcher_primary"
+            android:textSize="20sp"
+            android:textStyle="bold"
+            app:backgroundTint="@color/launcher_surface_muted"
+            app:cornerRadius="18dp"
+            app:strokeColor="@color/launcher_outline"
+            app:strokeWidth="1dp" />
+    </LinearLayout>
+</com.google.android.material.card.MaterialCardView>

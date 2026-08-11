@@ -27,6 +27,10 @@
 
 
     <string name="open_app_failed">无法打开%1$s</string>
+    <string name="home_app_failure_title">无法打开%1$s</string>
+    <string name="home_app_failure_message">这个应用可能被停用、卸载，或暂时没有响应。可以再试一次；仍然打不开时，请让家属到设置里检查首页应用。</string>
+    <string name="home_app_failure_retry">再试一次</string>
+    <string name="home_app_failure_settings">家属设置</string>
     <string name="open_settings_failed">无法打开设置</string>
     <string name="weather_fallback_notice">已改为浏览器查看天气</string>
     <string name="weather_not_available">未找到天气应用或浏览器</string>
