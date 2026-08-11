@@ -22,6 +22,22 @@ class RootHealthSnapshotTest {
     }
 
     @Test
+    fun unavailableSnapshotRetainsExactFailureEvidence() {
+        val evidence = RootFailureEvidence.create(
+            command = RootCommand.STATUS,
+            stage = RootFailureStage.SU_START,
+            detail = "IOException: error=2"
+        )
+
+        val snapshot = RootHealthSnapshot.unavailable(
+            reason = RootFailureReason.SU_NOT_FOUND,
+            evidence = evidence
+        )
+
+        assertEquals(evidence, snapshot.failureEvidence)
+    }
+
+    @Test
     fun schemaThreeRequiresVerifiedForegroundForHealthy() {
         val snapshot = RootHealthSnapshot.parse(
             validSnapshot().replace("home_foreground=verified", "home_foreground=unverified")

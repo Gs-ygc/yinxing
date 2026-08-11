@@ -12,6 +12,7 @@ internal data class RootHealthSnapshot(
     val state: RootHealthState,
     val failureReason: RootFailureReason? = null,
     val failureExitCode: Int? = null,
+    val failureEvidence: RootFailureEvidence? = null,
     val version: String? = null,
     val module: String = "unknown",
     val guard: String = "unknown",
@@ -54,11 +55,13 @@ internal data class RootHealthSnapshot(
 
         fun unavailable(
             reason: RootFailureReason = RootFailureReason.UNKNOWN,
-            exitCode: Int? = null
+            exitCode: Int? = null,
+            evidence: RootFailureEvidence? = null
         ): RootHealthSnapshot = RootHealthSnapshot(
             state = RootHealthState.ROOT_UNAVAILABLE,
             failureReason = reason,
-            failureExitCode = exitCode
+            failureExitCode = exitCode,
+            failureEvidence = evidence
         )
 
         fun parse(output: String): RootHealthSnapshot? {

@@ -8,7 +8,8 @@ internal data class RootRecoveryResult(
     val actionSucceeded: Boolean,
     val snapshot: RootHealthSnapshot,
     val actionFailureReason: RootFailureReason? = null,
-    val actionFailureExitCode: Int? = null
+    val actionFailureExitCode: Int? = null,
+    val actionFailureEvidence: RootFailureEvidence? = null
 )
 
 internal class RootHealthRepository(
@@ -29,7 +30,10 @@ internal class RootHealthRepository(
             actionFailureExitCode = actionResult
                 .takeUnless { it.isSuccessful }
                 ?.exitCode
-                ?.takeIf { it >= 0 }
+                ?.takeIf { it >= 0 },
+            actionFailureEvidence = actionResult
+                .takeUnless { it.isSuccessful }
+                ?.failureEvidence(RootCommand.RECOVER)
         )
     }
 
@@ -38,11 +42,21 @@ internal class RootHealthRepository(
         if (!result.isSuccessful) {
             return RootHealthSnapshot.unavailable(
                 reason = result.failureReason ?: RootFailureReason.UNKNOWN,
-                exitCode = result.exitCode.takeIf { it >= 0 }
+                exitCode = result.exitCode.takeIf { it >= 0 },
+                evidence = result.failureEvidence(RootCommand.STATUS)
             )
         }
         return RootHealthSnapshot.parse(result.output)
-            ?: RootHealthSnapshot.unavailable(RootFailureReason.STATUS_FORMAT_INVALID)
+            ?: RootHealthSnapshot.unavailable(
+                reason = RootFailureReason.STATUS_FORMAT_INVALID,
+                exitCode = result.exitCode.takeIf { it >= 0 },
+                evidence = RootFailureEvidence.create(
+                    command = RootCommand.STATUS,
+                    stage = RootFailureStage.STATUS_PARSE,
+                    exitCode = result.exitCode.takeIf { it >= 0 },
+                    detail = result.output
+                )
+            )
     }
 
     private fun runCommand(command: RootCommand): RootCommandResult {
@@ -50,12 +64,31 @@ internal class RootHealthRepository(
             runner.run(command)
         } catch (cancelled: CancellationException) {
             throw cancelled
-        } catch (_: Exception) {
+        } catch (error: Exception) {
             RootCommandResult(
                 exitCode = -1,
                 output = "",
+                evidence = RootFailureEvidence.create(
+                    command = command,
+                    stage = RootFailureStage.RUNNER_EXCEPTION,
+                    detail = error.diagnosticText()
+                ),
                 failureReasonOverride = RootFailureReason.UNKNOWN
             )
         }
+    }
+
+    private fun RootCommandResult.failureEvidence(command: RootCommand): RootFailureEvidence {
+        return evidence ?: RootFailureEvidence.create(
+            command = command,
+            stage = RootFailureStage.COMMAND_RUN,
+            exitCode = exitCode.takeIf { it >= 0 },
+            detail = output
+        )
+    }
+
+    private fun Throwable.diagnosticText(): String = buildString {
+        append(this@diagnosticText::class.java.simpleName)
+        message?.takeIf(String::isNotBlank)?.let { append(": ").append(it) }
     }
 }
