@@ -1,5 +1,6 @@
 package com.yinxing.launcher.feature.incoming
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.telecom.TelecomManager
 import android.telephony.TelephonyManager
@@ -26,6 +27,7 @@ internal class AndroidIncomingCallSystemUiGateway(
     private val readCallState: () -> Int
 ) : IncomingCallSystemUiGateway {
 
+    @SuppressLint("MissingPermission")
     constructor(context: Context) : this(
         requestSystemUi = {
             requireNotNull(context.getSystemService(TelecomManager::class.java))
