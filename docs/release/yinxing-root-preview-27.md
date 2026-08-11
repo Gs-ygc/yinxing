@@ -67,7 +67,19 @@ Root 故障合并成同一句“Root 不可用”，并移除 APK 对模块脚�
 
 ## 本地验证边界
 
-- Root 执行与家属面板的 74 个聚焦测试已通过，0 failures、0 errors、0 skipped；强制执行 32 个
-  Gradle 任务，外部耗时 71.35 秒。
-- 完整 Root Guard、Android 构建、lint 差异、APK 元数据/签名和 GitHub 新鲜下载验证在发布前执行；
-  Release 只会从通过这些门禁的提交创建。
+- Root 执行与家属面板的 74 个聚焦测试通过，0 failures、0 errors、0 skipped；强制执行 32 个
+  Gradle 任务，外部耗时 71.35 秒。独立审查发现的面板端到端测试缺口已经补齐并复审通过。
+- Preview 26 的完整 Root Guard 宿主与递归 standalone BusyBox `ash` 测试通过；相对 Preview 26 的
+  `root/` 与 `AndroidManifest.xml` 差异为零。
+- 最终源码强制执行全部 80 个 Android 任务并通过，外部耗时 101.22 秒；517 个 JUnit 测试为
+  0 failures、0 errors、0 skipped，主 APK 与 androidTest APK 均生成。
+- lint 为 2 errors、135 warnings；两个 error 仍是已有的 minSdk 24 / API 26
+  `Process.waitFor(timeout, TimeUnit)` 兼容检查，没有新增 lint 类别。
+- APK 为 8,709,676 字节，包名 `com.yinxing.launcher`、minSdk 24、targetSdk 36，v2 Debug 签名有效，
+  只有一个 Android Debug 签名者。SDK 绝对路径执行 `adb devices -l` 没有发现连接设备。
+
+## SHA-256
+
+```text
+8c3cc1d2179a378f528995b3bf572f699827d8e6e76c01779aece224a64f6dd3  yinxing-1.10.0-root-preview.27-debug.apk
+```
