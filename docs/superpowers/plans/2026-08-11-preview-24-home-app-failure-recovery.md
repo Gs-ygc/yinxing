@@ -153,21 +153,25 @@ git commit -m "feat: make home app handoff failures recoverable"
 - Modify: `docs/superpowers/specs/2026-08-11-preview-24-home-app-failure-recovery-design.md` only if review finds a design correction.
 - Modify: `docs/superpowers/plans/2026-08-11-preview-24-home-app-failure-recovery.md` to mark completed steps and record evidence.
 
-- [ ] **Step 1: Run the complete Android verification matrix**
+- [x] **Step 1: Run the complete Android verification matrix**
 
 ```bash
 bash gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --rerun-tasks
 ```
 
-Record task count, test totals, elapsed time, and unchanged pre-existing lint errors separately from new warnings.
+  Evidence: 80/80 tasks succeeded in 96.49 seconds; 59 JUnit XML files reported 449 tests, 0 failures,
+  0 errors, and 0 skipped. `lintDebug` exited 1 with only the unchanged `RootCommandRunner.kt:72` and
+  `:150` API 26 errors plus 135 warnings; no Preview24 file had a lint error.
 
-- [ ] **Step 2: Inspect the final UI/resource and behavioral diff**
+- [x] **Step 2: Inspect the final UI/resource and behavioral diff**
 
-Check `git diff --check`, resource IDs, button bounds/content descriptions, no new timers/services/Root strings, and that success-path tests still assert one launch.
+Evidence: `git diff --check` passed; the focused tests assert one successful launch, both action targets
+are at least 68dp with content descriptions, and the source diff contains no new timers/services/Root strings.
 
-- [ ] **Step 3: Commit verification evidence and hand off for independent review**
+- [x] **Step 3: Commit verification evidence and hand off for independent review**
 
-The branch is ready for the standard whole-branch review and release packaging only when the focused and complete suites are green and the diff contains no unrelated infrastructure work.
+Evidence: Task 2 commit `b336444` received an independent review with no findings; release packaging is
+complete below. The known lint baseline is documented separately from the green test/build evidence.
 
 ### Task 4: Version, package, and publish Preview 24
 
@@ -182,18 +186,18 @@ The branch is ready for the standard whole-branch review and release packaging o
 - Publishes GitHub prerelease tag `v1.10.0-root-preview.24` with exactly those two assets.
 - Links the unchanged Preview 18 KernelSU module; no Root module asset is rebuilt or uploaded.
 
-- [ ] **Step 1: Write release metadata and elderly acceptance notes**
+- [x] **Step 1: Write release metadata and elderly acceptance notes**
 
-Set the exact app metadata:
+Set the exact app metadata (done):
 
 ```kotlin
 versionCode = 40
 versionName = "1.10.0-root-preview.24"
 ```
 
-Document the persistent failed-app dialog, retry behavior, caregiver settings route, unchanged success-path latency/power boundary, Preview 23 rollback URL, and the OnePlus 15 acceptance sequence for an unavailable/disabled app.
+Documented in `docs/release/yinxing-root-preview-24.md`.
 
-- [ ] **Step 2: Run final forced verification and classify lint**
+- [x] **Step 2: Run final forced verification and classify lint**
 
 Run in isolation with the known complete cache:
 
@@ -204,11 +208,15 @@ Run in isolation with the known complete cache:
   --rerun-tasks --no-daemon --console=plain
 ```
 
-Then run `:app:lintDebug`. Require zero test failures/errors/skips and no new lint error in Preview 24 changed files; classify only the two existing `RootCommandRunner.kt` API findings separately.
+Evidence: final forced run succeeded (104.46 seconds); tests remained 449/0/0/0. Final lint classification is
+two pre-existing RootCommandRunner API errors and no error in changed files.
 
-- [ ] **Step 3: Verify APK metadata, signature, checksums, and Root boundary**
+- [x] **Step 3: Verify APK metadata, signature, checksums, and Root boundary**
 
-Use SDK `aapt2` and `apksigner` to require package `com.yinxing.launcher`, `versionCode=40`, `versionName=1.10.0-root-preview.24`, `minSdk=24`, `targetSdk=36`, and v2 Debug signing. Copy the APK into `out/release`, generate `SHA256SUMS.txt` from inside that directory, and run `sha256sum -c`. Confirm the source diff contains no `root/`, KernelSU module, or BusyBox changes.
+Evidence: `aapt2` reports package `com.yinxing.launcher`, versionCode 40, versionName
+`1.10.0-root-preview.24`, min/target 24/36; `apksigner` reports one Android Debug signer and v2=true.
+`sha256sum -c` passed for `38f12bc412f2bd82e7156f112803dac857c4b22fd074844fddf76881c3755381`.
+Root boundary scan is clean.
 
 - [ ] **Step 4: Push, tag, publish, and fresh-download verify**
 
