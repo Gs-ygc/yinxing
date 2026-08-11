@@ -293,6 +293,15 @@
     <string name="settings_root_failure_output_too_large">Root 状态输出异常过长，请重启模块后重试</string>
     <string name="settings_root_failure_status_invalid">Root Guard 返回的状态格式不完整，请确认 APK 与模块版本匹配</string>
     <string name="settings_root_failure_unknown">Root 检查发生未知错误，请重新检查；仍失败时重启手机</string>
+    <string name="settings_root_diagnostic_stage_su_start">启动 su</string>
+    <string name="settings_root_diagnostic_stage_command_status">执行状态脚本</string>
+    <string name="settings_root_diagnostic_stage_command_recover">执行修复脚本</string>
+    <string name="settings_root_diagnostic_stage_command_home">执行桌面恢复脚本</string>
+    <string name="settings_root_diagnostic_stage_status_parse">解析状态</string>
+    <string name="settings_root_diagnostic_stage_runner_exception">执行器异常</string>
+    <string name="settings_root_diagnostic_not_started">未启动</string>
+    <string name="settings_root_diagnostic_no_output">无输出</string>
+    <string name="settings_root_diagnostic_format">诊断阶段：%1$s\n应用 UID：%2$d\n固定命令：%3$s\n退出码：%4$s\n系统原文：%5$s</string>
     <string name="settings_root_hub_summary_missing">没有发现银杏 Root Guard 模块</string>
     <string name="settings_root_hub_summary_degraded">无障碍、桌面或保活有一项需要修复</string>
     <string name="settings_root_hub_summary_healthy">桌面、保活、无障碍恢复和守护进程都在线</string>

@@ -11,7 +11,10 @@ import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootCommand
+import com.yinxing.launcher.common.root.RootFailureEvidence
 import com.yinxing.launcher.common.root.RootFailureReason
+import com.yinxing.launcher.common.root.RootFailureStage
 import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.common.root.RootHealthState
 import com.yinxing.launcher.data.home.LauncherPreferences
@@ -191,6 +194,87 @@ class SettingsActivitySmokeTest {
             activity.findViewById<TextView>(R.id.tv_root_hub_summary).text
                 .contains("找不到 /system/bin/su")
         )
+    }
+
+    @Test
+    fun rootFailureEvidenceSummaryShowsSuStartBoundaryWithoutCollapsingDetails() {
+        val activity = buildActivity()
+        val evidence = RootFailureEvidence.create(
+            command = RootCommand.STATUS,
+            stage = RootFailureStage.SU_START,
+            detail = "IOException: Cannot run program /system/bin/su: error=2, No such file or directory"
+        )
+
+        val summary = activity.rootFailureEvidenceSummary(evidence)
+
+        assertTrue(summary.contains("启动 su"))
+        assertTrue(summary.contains(android.os.Process.myUid().toString()))
+        assertTrue(
+            summary.contains(
+                "/system/bin/su -c \"/system/bin/sh /data/adb/modules/yinxing_guard/bin/status.sh\""
+            )
+        )
+        assertTrue(summary.contains("未启动"))
+        assertTrue(summary.contains("IOException"))
+        assertTrue(summary.contains("error=2"))
+    }
+
+    @Test
+    fun rootUnavailableStatusAppendsExit126CommandAndOriginalSystemText() {
+        val activity = buildActivity()
+        val evidence = RootFailureEvidence.create(
+            command = RootCommand.STATUS,
+            stage = RootFailureStage.COMMAND_RUN,
+            exitCode = 126,
+            detail = "/system/bin/sh: status.sh: Permission denied"
+        )
+        val snapshot = RootHealthSnapshot.unavailable(
+            reason = RootFailureReason.SCRIPT_EXECUTION_BLOCKED,
+            exitCode = 126,
+            evidence = evidence
+        )
+
+        val summary = activity.rootHealthStatusSummary(snapshot)
+
+        assertTrue(summary.contains("执行状态脚本"))
+        assertTrue(summary.contains("退出码：126"))
+        assertTrue(summary.contains("/data/adb/modules/yinxing_guard/bin/status.sh"))
+        assertTrue(summary.contains("/system/bin/sh: status.sh: Permission denied"))
+    }
+
+    @Test
+    fun rootFailureEvidenceSummaryNamesEmptySystemOutput() {
+        val activity = buildActivity()
+        val evidence = RootFailureEvidence.create(
+            command = RootCommand.RECOVER,
+            stage = RootFailureStage.COMMAND_RUN,
+            exitCode = 126
+        )
+
+        val summary = activity.rootFailureEvidenceSummary(evidence)
+
+        assertTrue(summary.contains("执行修复脚本"))
+        assertTrue(summary.contains("系统原文：无输出"))
+    }
+
+    @Test
+    fun rootRecoveryEntrySummaryKeepsFailedActionEvidenceAfterHealthyRefresh() {
+        val activity = buildActivity()
+        val evidence = RootFailureEvidence.create(
+            command = RootCommand.RECOVER,
+            stage = RootFailureStage.COMMAND_RUN,
+            exitCode = 126,
+            detail = "/system/bin/sh: /data/adb/modules/yinxing_guard/action.sh: Permission denied"
+        )
+
+        val summary = activity.rootRecoveryEntrySummary(
+            busy = false,
+            recoveryFailureEvidence = evidence
+        )
+
+        assertTrue(summary.contains("action.sh"))
+        assertTrue(summary.contains("退出码：126"))
+        assertTrue(summary.contains("Permission denied"))
     }
 
     // ═══════════════════════════════════════════════════════════════════════

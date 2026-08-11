@@ -5,7 +5,10 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootCommand
+import com.yinxing.launcher.common.root.RootFailureEvidence
 import com.yinxing.launcher.common.root.RootFailureReason
+import com.yinxing.launcher.common.root.RootFailureStage
 import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.common.root.RootHealthState
 import kotlinx.coroutines.CancellationException
@@ -22,6 +25,7 @@ internal fun SettingsActivity.showRootHealthSheet() {
         message = getString(R.string.settings_sheet_root_message)
     )
     var busy = false
+    var recoveryFailureEvidence: RootFailureEvidence? = null
     lateinit var statusEntry: View
     lateinit var recoveryEntry: View
 
@@ -36,7 +40,8 @@ internal fun SettingsActivity.showRootHealthSheet() {
             statusEntry = statusEntry,
             recoveryEntry = recoveryEntry,
             isBusy = { busy },
-            setBusy = { busy = it }
+            setBusy = { busy = it },
+            recoveryFailureEvidence = { recoveryFailureEvidence }
         )
     }
     recoveryEntry = addSheetEntry(
@@ -50,7 +55,9 @@ internal fun SettingsActivity.showRootHealthSheet() {
             statusEntry = statusEntry,
             recoveryEntry = recoveryEntry,
             isBusy = { busy },
-            setBusy = { busy = it }
+            setBusy = { busy = it },
+            getRecoveryFailureEvidence = { recoveryFailureEvidence },
+            setRecoveryFailureEvidence = { recoveryFailureEvidence = it }
         )
     }
     addSheetTip(
@@ -73,7 +80,8 @@ internal fun SettingsActivity.showRootHealthSheet() {
         statusEntry = statusEntry,
         recoveryEntry = recoveryEntry,
         isBusy = { busy },
-        setBusy = { busy = it }
+        setBusy = { busy = it },
+        recoveryFailureEvidence = { recoveryFailureEvidence }
     )
 }
 
@@ -112,24 +120,43 @@ private fun SettingsActivity.queryRootHealth(
     statusEntry: View,
     recoveryEntry: View,
     isBusy: () -> Boolean,
-    setBusy: (Boolean) -> Unit
+    setBusy: (Boolean) -> Unit,
+    recoveryFailureEvidence: () -> RootFailureEvidence?
 ) {
     if (!isCurrentRootHealthSession(sessionId) || isBusy()) return
     setBusy(true)
-    renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = true)
+    renderRootHealthEntries(
+        statusEntry,
+        recoveryEntry,
+        rootHealthSnapshot,
+        busy = true,
+        recoveryFailureEvidence = recoveryFailureEvidence()
+    )
     val job = lifecycleScope.launch {
         try {
             val snapshot = rootHealthRepository.query()
             if (isCurrentRootHealthSession(sessionId)) {
                 rootHealthSnapshot = snapshot
-                renderRootHealthEntries(statusEntry, recoveryEntry, snapshot, busy = false)
+                renderRootHealthEntries(
+                    statusEntry,
+                    recoveryEntry,
+                    snapshot,
+                    busy = false,
+                    recoveryFailureEvidence = recoveryFailureEvidence()
+                )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (_: Throwable) {
             if (isCurrentRootHealthSession(sessionId)) {
                 rootHealthSnapshot = RootHealthSnapshot.unavailable()
-                renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+                renderRootHealthEntries(
+                    statusEntry,
+                    recoveryEntry,
+                    rootHealthSnapshot,
+                    busy = false,
+                    recoveryFailureEvidence = recoveryFailureEvidence()
+                )
             }
         } finally {
             if (isCurrentRootHealthSession(sessionId)) {
@@ -146,17 +173,27 @@ private fun SettingsActivity.recoverRootHealth(
     statusEntry: View,
     recoveryEntry: View,
     isBusy: () -> Boolean,
-    setBusy: (Boolean) -> Unit
+    setBusy: (Boolean) -> Unit,
+    getRecoveryFailureEvidence: () -> RootFailureEvidence?,
+    setRecoveryFailureEvidence: (RootFailureEvidence?) -> Unit
 ) {
     if (!isCurrentRootHealthSession(sessionId) || isBusy()) return
     Toast.makeText(this, getString(R.string.settings_root_recover_running), Toast.LENGTH_SHORT).show()
     setBusy(true)
-    renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = true)
+    setRecoveryFailureEvidence(null)
+    renderRootHealthEntries(
+        statusEntry,
+        recoveryEntry,
+        rootHealthSnapshot,
+        busy = true,
+        recoveryFailureEvidence = getRecoveryFailureEvidence()
+    )
     val job = lifecycleScope.launch {
         try {
             val result = rootHealthRepository.recoverAndQuery()
             if (isCurrentRootHealthSession(sessionId)) {
                 rootHealthSnapshot = result.snapshot
+                setRecoveryFailureEvidence(result.actionFailureEvidence)
                 Toast.makeText(
                     this@recoverRootHealth,
                     if (result.actionSucceeded) {
@@ -169,7 +206,13 @@ private fun SettingsActivity.recoverRootHealth(
                     },
                     Toast.LENGTH_LONG
                 ).show()
-                renderRootHealthEntries(statusEntry, recoveryEntry, result.snapshot, busy = false)
+                renderRootHealthEntries(
+                    statusEntry,
+                    recoveryEntry,
+                    result.snapshot,
+                    busy = false,
+                    recoveryFailureEvidence = getRecoveryFailureEvidence()
+                )
             }
         } catch (cancelled: CancellationException) {
             throw cancelled
@@ -181,7 +224,13 @@ private fun SettingsActivity.recoverRootHealth(
                     rootFailureSummary(RootFailureReason.UNKNOWN),
                     Toast.LENGTH_LONG
                 ).show()
-                renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
+                renderRootHealthEntries(
+                    statusEntry,
+                    recoveryEntry,
+                    rootHealthSnapshot,
+                    busy = false,
+                    recoveryFailureEvidence = getRecoveryFailureEvidence()
+                )
             }
         } finally {
             if (isCurrentRootHealthSession(sessionId)) {
@@ -197,7 +246,8 @@ private fun SettingsActivity.renderRootHealthEntries(
     statusEntry: View,
     recoveryEntry: View,
     snapshot: RootHealthSnapshot,
-    busy: Boolean
+    busy: Boolean,
+    recoveryFailureEvidence: RootFailureEvidence? = null
 ) {
     val statusSummary = statusEntry.findViewById<TextView>(R.id.tv_permission_item_summary)
     val statusBadge = statusEntry.findViewById<TextView>(R.id.tv_permission_item_status)
@@ -219,11 +269,7 @@ private fun SettingsActivity.renderRootHealthEntries(
         textColorResId = statusStyle.textColorResId,
         backgroundColorResId = statusStyle.backgroundColorResId
     )
-    recoverySummary.text = if (busy) {
-        getString(R.string.settings_root_recover_running)
-    } else {
-        getString(R.string.settings_root_entry_recover_summary)
-    }
+    recoverySummary.text = rootRecoveryEntrySummary(busy, recoveryFailureEvidence)
     val recoveryStyle = actionBadge(
         getString(if (busy) R.string.settings_root_recover_running else R.string.settings_root_entry_recover)
     )
@@ -249,19 +295,60 @@ private fun SettingsActivity.rootHealthHubSummary(snapshot: RootHealthSnapshot):
 }
 
 internal fun SettingsActivity.rootHealthStatusSummary(snapshot: RootHealthSnapshot): String {
-    if (snapshot.state == RootHealthState.UNCHECKED || snapshot.state == RootHealthState.ROOT_UNAVAILABLE) {
-        return rootHealthHubSummary(snapshot)
+    val summary = if (
+        snapshot.state == RootHealthState.UNCHECKED ||
+        snapshot.state == RootHealthState.ROOT_UNAVAILABLE
+    ) {
+        rootHealthHubSummary(snapshot)
+    } else {
+        getString(
+            R.string.settings_root_entry_status_summary,
+            rootValueLabel(snapshot.module),
+            rootValueLabel(snapshot.guard),
+            rootValueLabel(snapshot.accessibility),
+            rootValueLabel(snapshot.home),
+            rootValueLabel(snapshot.homeForeground),
+            rootValueLabel(snapshot.doze),
+            rootValueLabel(snapshot.cleanup),
+            rootValueLabel(snapshot.lastRepair)
+        )
+    }
+    return snapshot.failureEvidence?.let { "$summary\n\n${rootFailureEvidenceSummary(it)}" } ?: summary
+}
+
+internal fun SettingsActivity.rootRecoveryEntrySummary(
+    busy: Boolean,
+    recoveryFailureEvidence: RootFailureEvidence?
+): String {
+    return when {
+        busy -> getString(R.string.settings_root_recover_running)
+        recoveryFailureEvidence != null -> rootFailureEvidenceSummary(recoveryFailureEvidence)
+        else -> getString(R.string.settings_root_entry_recover_summary)
+    }
+}
+
+internal fun SettingsActivity.rootFailureEvidenceSummary(evidence: RootFailureEvidence): String {
+    val stage = when (evidence.stage) {
+        RootFailureStage.SU_START -> getString(R.string.settings_root_diagnostic_stage_su_start)
+        RootFailureStage.COMMAND_RUN -> getString(
+            when (evidence.command) {
+                RootCommand.STATUS -> R.string.settings_root_diagnostic_stage_command_status
+                RootCommand.RECOVER -> R.string.settings_root_diagnostic_stage_command_recover
+                RootCommand.KIOSK_HOME -> R.string.settings_root_diagnostic_stage_command_home
+            }
+        )
+        RootFailureStage.STATUS_PARSE ->
+            getString(R.string.settings_root_diagnostic_stage_status_parse)
+        RootFailureStage.RUNNER_EXCEPTION ->
+            getString(R.string.settings_root_diagnostic_stage_runner_exception)
     }
     return getString(
-        R.string.settings_root_entry_status_summary,
-        rootValueLabel(snapshot.module),
-        rootValueLabel(snapshot.guard),
-        rootValueLabel(snapshot.accessibility),
-        rootValueLabel(snapshot.home),
-        rootValueLabel(snapshot.homeForeground),
-        rootValueLabel(snapshot.doze),
-        rootValueLabel(snapshot.cleanup),
-        rootValueLabel(snapshot.lastRepair)
+        R.string.settings_root_diagnostic_format,
+        stage,
+        android.os.Process.myUid(),
+        evidence.invocation,
+        evidence.exitCode?.toString() ?: getString(R.string.settings_root_diagnostic_not_started),
+        evidence.detail.ifEmpty { getString(R.string.settings_root_diagnostic_no_output) }
     )
 }
 
