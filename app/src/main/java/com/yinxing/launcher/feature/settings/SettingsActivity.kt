@@ -65,10 +65,8 @@ class SettingsActivity : AppCompatActivity() {
         get() = runtime.rootHealthSessionId
         set(value) { runtime.rootHealthSessionId = value }
 
-    /** 延迟创建，设置页启动和普通刷新不会触发 Root 授权提示。 */
-    internal val rootHealthRepository: RootHealthRepository by lazy {
-        RootHealthRepository(SuRootCommandRunner())
-    }
+    /** 创建仓库不会启动 su；只有 Root 面板的显式查询和修复操作才会调用 runner。 */
+    internal var rootHealthRepository = RootHealthRepository(SuRootCommandRunner())
 
     internal var contactsSummaryJob: Job?
         get() = runtime.contactsSummaryJob

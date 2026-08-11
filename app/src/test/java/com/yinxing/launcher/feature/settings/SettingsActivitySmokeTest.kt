@@ -8,13 +8,17 @@ import android.content.pm.ResolveInfo
 import android.os.Looper
 import android.provider.Settings
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import com.yinxing.launcher.common.root.RootCommand
+import com.yinxing.launcher.common.root.RootCommandResult
+import com.yinxing.launcher.common.root.RootCommandRunner
 import com.yinxing.launcher.common.root.RootFailureEvidence
 import com.yinxing.launcher.common.root.RootFailureReason
 import com.yinxing.launcher.common.root.RootFailureStage
+import com.yinxing.launcher.common.root.RootHealthRepository
 import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.common.root.RootHealthState
 import com.yinxing.launcher.data.home.LauncherPreferences
@@ -31,6 +35,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -258,7 +263,7 @@ class SettingsActivitySmokeTest {
     }
 
     @Test
-    fun rootRecoveryEntrySummaryKeepsFailedActionEvidenceAfterHealthyRefresh() {
+    fun rootSheetKeepsFailedActionEvidenceBesideHealthyRefresh() {
         val activity = buildActivity()
         val evidence = RootFailureEvidence.create(
             command = RootCommand.RECOVER,
@@ -266,15 +271,49 @@ class SettingsActivitySmokeTest {
             exitCode = 126,
             detail = "/system/bin/sh: /data/adb/modules/yinxing_guard/action.sh: Permission denied"
         )
-
-        val summary = activity.rootRecoveryEntrySummary(
-            busy = false,
-            recoveryFailureEvidence = evidence
+        val commands = mutableListOf<RootCommand>()
+        activity.rootHealthRepository = RootHealthRepository(
+            RootCommandRunner { command ->
+                synchronized(commands) { commands += command }
+                when (command) {
+                    RootCommand.RECOVER -> RootCommandResult(
+                        exitCode = 126,
+                        output = evidence.detail,
+                        evidence = evidence
+                    )
+                    RootCommand.STATUS -> RootCommandResult(
+                        exitCode = 0,
+                        output = schemaThreeRootHealth()
+                    )
+                    RootCommand.KIOSK_HOME -> error("unexpected Kiosk HOME command")
+                }
+            }
         )
 
-        assertTrue(summary.contains("action.sh"))
-        assertTrue(summary.contains("退出码：126"))
-        assertTrue(summary.contains("Permission denied"))
+        activity.findViewById<View>(R.id.btn_card_root).performClick()
+        awaitRootHealth(activity)
+        val dialog = requireNotNull(ShadowDialog.getLatestDialog())
+        val entries = requireNotNull(
+            dialog.findViewById<LinearLayout>(R.id.layout_permission_items)
+        )
+        val statusEntry = entries.getChildAt(0)
+        val recoveryEntry = entries.getChildAt(1)
+
+        recoveryEntry.performClick()
+        awaitRootHealth(activity)
+
+        val statusSummary = statusEntry.findViewById<TextView>(R.id.tv_permission_item_summary).text
+        val recoverySummary = recoveryEntry.findViewById<TextView>(R.id.tv_permission_item_summary).text
+
+        assertEquals(RootHealthState.HEALTHY, activity.rootHealthSnapshot.state)
+        assertTrue(statusSummary.contains("模块 正常"))
+        assertTrue(recoverySummary.contains("action.sh"))
+        assertTrue(recoverySummary.contains("退出码：126"))
+        assertTrue(recoverySummary.contains("Permission denied"))
+        assertEquals(
+            listOf(RootCommand.STATUS, RootCommand.RECOVER, RootCommand.STATUS),
+            synchronized(commands) { commands.toList() }
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -428,6 +467,16 @@ class SettingsActivitySmokeTest {
         Robolectric.buildActivity(SettingsActivity::class.java).setup().get()
 
     private fun idle() = shadowOf(Looper.getMainLooper()).idle()
+
+    private fun awaitRootHealth(activity: SettingsActivity) {
+        val deadlineNanos = System.nanoTime() + 5_000_000_000L
+        while (activity.rootHealthJob != null && System.nanoTime() < deadlineNanos) {
+            idle()
+            Thread.yield()
+        }
+        idle()
+        assertTrue("Root health coroutine did not finish", activity.rootHealthJob == null)
+    }
 
     private fun schemaThreeRootHealth(): String = """
         schema=3
