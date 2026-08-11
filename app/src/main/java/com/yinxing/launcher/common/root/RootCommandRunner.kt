@@ -7,6 +7,8 @@ import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
+internal const val KERNEL_SU_EXECUTABLE = "/system/bin/su"
+
 internal enum class RootCommand(
     val shellPath: String,
     val timeoutMillis: Long
@@ -25,12 +27,35 @@ internal enum class RootCommand(
     )
 }
 
+internal enum class RootFailureReason {
+    SU_NOT_FOUND,
+    SU_EXECUTION_BLOCKED,
+    SU_START_FAILED,
+    SU_AUTHORIZATION_DENIED,
+    SCRIPT_NOT_FOUND,
+    SCRIPT_EXECUTION_BLOCKED,
+    COMMAND_TIMEOUT,
+    COMMAND_FAILED,
+    OUTPUT_LIMIT_EXCEEDED,
+    STATUS_FORMAT_INVALID,
+    UNKNOWN
+}
+
 internal data class RootCommandResult(
     val exitCode: Int,
     val output: String,
     val timedOut: Boolean = false,
-    val outputLimitExceeded: Boolean = false
-)
+    val outputLimitExceeded: Boolean = false,
+    internal val failureReasonOverride: RootFailureReason? = null
+) {
+    val failureReason: RootFailureReason?
+        get() = failureReasonOverride ?: classifyRootFailure(
+            exitCode = exitCode,
+            output = output,
+            timedOut = timedOut,
+            outputLimitExceeded = outputLimitExceeded
+        )
+}
 
 internal val RootCommandResult.isSuccessful: Boolean
     get() = exitCode == 0 && !timedOut && !outputLimitExceeded
@@ -42,7 +67,7 @@ internal fun interface RootCommandRunner {
 internal class SuRootCommandRunner(
     private val timeoutMillis: Long? = null,
     private val maxOutputBytes: Int = MAX_OUTPUT_BYTES,
-    private val suExecutable: String = "su"
+    private val suExecutable: String = KERNEL_SU_EXECUTABLE
 ) : RootCommandRunner {
 
     init {
@@ -56,10 +81,18 @@ internal class SuRootCommandRunner(
             ProcessBuilder(suExecutable, "-c", command.shellPath)
                 .redirectErrorStream(true)
                 .start()
-        } catch (_: IOException) {
-            return RootCommandResult(exitCode = -1, output = "")
+        } catch (error: IOException) {
+            return RootCommandResult(
+                exitCode = -1,
+                output = "",
+                failureReasonOverride = classifySuStartFailure(error.message)
+            )
         } catch (_: SecurityException) {
-            return RootCommandResult(exitCode = -1, output = "")
+            return RootCommandResult(
+                exitCode = -1,
+                output = "",
+                failureReasonOverride = RootFailureReason.SU_EXECUTION_BLOCKED
+            )
         }
 
         val readResult = AtomicReference(BoundedReadResult())
@@ -198,5 +231,48 @@ internal class SuRootCommandRunner(
         const val TERMINATION_GRACE_MILLIS = 100L
         const val READER_JOIN_MILLIS = 250L
         const val READER_JOIN_AFTER_CLOSE_MILLIS = 100L
+    }
+}
+
+private fun classifyRootFailure(
+    exitCode: Int,
+    output: String,
+    timedOut: Boolean,
+    outputLimitExceeded: Boolean
+): RootFailureReason? {
+    if (timedOut) return RootFailureReason.COMMAND_TIMEOUT
+    if (outputLimitExceeded) return RootFailureReason.OUTPUT_LIMIT_EXCEEDED
+    if (exitCode == 0) return null
+
+    val normalizedOutput = output.lowercase()
+    val guardPathMentioned = normalizedOutput.contains("/data/adb/modules/yinxing_guard/")
+    val accessDenied = listOf(
+        "permission denied",
+        "not allowed",
+        "not granted",
+        "unauthorized",
+        "access denied"
+    ).any(normalizedOutput::contains)
+    if (guardPathMentioned && accessDenied) {
+        return RootFailureReason.SCRIPT_EXECUTION_BLOCKED
+    }
+    if (accessDenied) {
+        return RootFailureReason.SU_AUTHORIZATION_DENIED
+    }
+    if (exitCode == 127 || normalizedOutput.contains("not found")) {
+        return RootFailureReason.SCRIPT_NOT_FOUND
+    }
+    return RootFailureReason.COMMAND_FAILED
+}
+
+private fun classifySuStartFailure(message: String?): RootFailureReason {
+    val normalizedMessage = message.orEmpty().lowercase()
+    return when {
+        normalizedMessage.contains("no such file") || normalizedMessage.contains("error=2") ->
+            RootFailureReason.SU_NOT_FOUND
+        normalizedMessage.contains("permission denied") ||
+            normalizedMessage.contains("operation not permitted") ||
+            normalizedMessage.contains("error=13") -> RootFailureReason.SU_EXECUTION_BLOCKED
+        else -> RootFailureReason.SU_START_FAILED
     }
 }

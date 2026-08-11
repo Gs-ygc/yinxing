@@ -11,6 +11,92 @@ import org.junit.Test
 class RootCommandRunnerTest {
 
     @Test
+    fun kernelSuCompatibilityEntryUsesTheSystemSuPath() {
+        assertEquals("/system/bin/su", KERNEL_SU_EXECUTABLE)
+    }
+
+    @Test
+    fun missingSuIsReportedAsExecutableUnavailable() {
+        val result = SuRootCommandRunner(
+            timeoutMillis = 1_000,
+            suExecutable = "/tmp/yinxing-su-that-does-not-exist"
+        ).run(RootCommand.STATUS)
+
+        assertEquals(RootFailureReason.SU_NOT_FOUND, result.failureReason)
+    }
+
+    @Test
+    fun nonExecutableSuIsReportedAsExecutionBlocked() {
+        val directory = Files.createTempDirectory("yinxing-blocked-su")
+        val executable = directory.resolve("su")
+        Files.write(executable, "#!/bin/sh\nexit 0\n".toByteArray(StandardCharsets.UTF_8))
+        check(executable.toFile().setExecutable(false))
+        try {
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SU_EXECUTION_BLOCKED, result.failureReason)
+        } finally {
+            directory.toFile().deleteRecursively()
+        }
+    }
+
+    @Test
+    fun permissionDeniedOutputIsReportedAsAuthorizationFailure() {
+        withFakeSu("printf 'Permission denied\\n'; exit 1") { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SU_AUTHORIZATION_DENIED, result.failureReason)
+            assertEquals(1, result.exitCode)
+        }
+    }
+
+    @Test
+    fun guardScriptPermissionFailureIsNotReportedAsKernelSuAuthorizationFailure() {
+        withFakeSu(
+            "printf '/data/adb/modules/yinxing_guard/bin/status.sh: Permission denied\\n'; exit 126"
+        ) { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SCRIPT_EXECUTION_BLOCKED, result.failureReason)
+            assertEquals(126, result.exitCode)
+        }
+    }
+
+    @Test
+    fun missingScriptOutputIsReportedSeparatelyFromAuthorization() {
+        withFakeSu("printf '/data/adb/modules/yinxing_guard/bin/status.sh: not found\\n'; exit 127") { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SCRIPT_NOT_FOUND, result.failureReason)
+        }
+    }
+
+    @Test
+    fun ordinaryNonZeroExitRetainsExitCodeAsCommandFailure() {
+        withFakeSu("printf 'script failed\\n'; exit 42") { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.COMMAND_FAILED, result.failureReason)
+            assertEquals(42, result.exitCode)
+        }
+    }
+
+    @Test
     fun usesOnlyTheFixedStatusRecoveryAndKioskPaths() {
         withFakeSu(
             """
@@ -123,6 +209,7 @@ class RootCommandRunnerTest {
 
             assertTrue(result.timedOut)
             assertEquals(-1, result.exitCode)
+            assertEquals(RootFailureReason.COMMAND_TIMEOUT, result.failureReason)
             assertTrue("timeout cleanup took ${elapsed}ms", elapsed < 1_500)
         }
     }
@@ -148,6 +235,7 @@ class RootCommandRunnerTest {
 
             assertTrue(result.outputLimitExceeded)
             assertFalse(result.timedOut)
+            assertEquals(RootFailureReason.OUTPUT_LIMIT_EXCEEDED, result.failureReason)
             assertTrue(result.output.toByteArray(StandardCharsets.UTF_8).size <= 1_024)
         }
     }

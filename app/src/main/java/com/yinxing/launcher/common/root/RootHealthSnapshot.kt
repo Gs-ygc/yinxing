@@ -10,6 +10,8 @@ internal enum class RootHealthState {
 
 internal data class RootHealthSnapshot(
     val state: RootHealthState,
+    val failureReason: RootFailureReason? = null,
+    val failureExitCode: Int? = null,
     val version: String? = null,
     val module: String = "unknown",
     val guard: String = "unknown",
@@ -50,7 +52,14 @@ internal data class RootHealthSnapshot(
 
         fun unchecked(): RootHealthSnapshot = RootHealthSnapshot(state = RootHealthState.UNCHECKED)
 
-        fun unavailable(): RootHealthSnapshot = RootHealthSnapshot(state = RootHealthState.ROOT_UNAVAILABLE)
+        fun unavailable(
+            reason: RootFailureReason = RootFailureReason.UNKNOWN,
+            exitCode: Int? = null
+        ): RootHealthSnapshot = RootHealthSnapshot(
+            state = RootHealthState.ROOT_UNAVAILABLE,
+            failureReason = reason,
+            failureExitCode = exitCode
+        )
 
         fun parse(output: String): RootHealthSnapshot? {
             if (output.length > MAX_OUTPUT_CHARS) {

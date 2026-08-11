@@ -1,9 +1,9 @@
 package com.yinxing.launcher.common.root
 
 import kotlinx.coroutines.runBlocking
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
-import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class RootHealthRepositoryTest {
@@ -14,7 +14,10 @@ class RootHealthRepositoryTest {
             FakeRunner(status = RootCommandResult(exitCode = 127, output = "not found"))
         )
 
-        assertEquals(RootHealthState.ROOT_UNAVAILABLE, repository.query().state)
+        val snapshot = repository.query()
+        assertEquals(RootHealthState.ROOT_UNAVAILABLE, snapshot.state)
+        assertEquals(RootFailureReason.SCRIPT_NOT_FOUND, snapshot.failureReason)
+        assertEquals(127, snapshot.failureExitCode)
     }
 
     @Test
@@ -23,7 +26,9 @@ class RootHealthRepositoryTest {
             FakeRunner(status = RootCommandResult(exitCode = -1, output = "", timedOut = true))
         )
 
-        assertEquals(RootHealthState.ROOT_UNAVAILABLE, repository.query().state)
+        val snapshot = repository.query()
+        assertEquals(RootHealthState.ROOT_UNAVAILABLE, snapshot.state)
+        assertEquals(RootFailureReason.COMMAND_TIMEOUT, snapshot.failureReason)
     }
 
     @Test
@@ -33,6 +38,18 @@ class RootHealthRepositoryTest {
         )
 
         assertEquals(RootHealthState.HEALTHY, repository.query().state)
+    }
+
+    @Test
+    fun malformedSuccessfulStatusIsReportedAsFormatFailure() = runBlocking {
+        val repository = RootHealthRepository(
+            FakeRunner(status = RootCommandResult(exitCode = 0, output = "schema=3\n"))
+        )
+
+        val snapshot = repository.query()
+
+        assertEquals(RootHealthState.ROOT_UNAVAILABLE, snapshot.state)
+        assertEquals(RootFailureReason.STATUS_FORMAT_INVALID, snapshot.failureReason)
     }
 
     @Test
@@ -47,6 +64,20 @@ class RootHealthRepositoryTest {
         assertEquals(RootHealthState.HEALTHY, result.snapshot.state)
         assertTrue(runner.commands.contains(RootCommand.RECOVER))
         assertTrue(runner.commands.contains(RootCommand.STATUS))
+    }
+
+    @Test
+    fun failedRecoveryPreservesActionFailureReasonAndExitCode() = runBlocking {
+        val runner = FakeRunner(
+            status = RootCommandResult(exitCode = 0, output = healthyOutput()),
+            recover = RootCommandResult(exitCode = 42, output = "script failed")
+        )
+
+        val result = RootHealthRepository(runner).recoverAndQuery()
+
+        assertFalse(result.actionSucceeded)
+        assertEquals(RootFailureReason.COMMAND_FAILED, result.actionFailureReason)
+        assertEquals(42, result.actionFailureExitCode)
     }
 
     @Test

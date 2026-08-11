@@ -11,13 +11,14 @@ import android.view.View
 import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootFailureReason
 import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.common.root.RootHealthState
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import com.yinxing.launcher.feature.incoming.IncomingCallDiagnostics
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -141,6 +142,54 @@ class SettingsActivitySmokeTest {
         assertTrue(activity.rootHealthStatusSummary(otherHome).contains("前台确认 未知"))
         assertTrue(activity.rootHealthStatusSummary(schemaOne).contains("桌面 未知"))
         assertTrue(activity.rootHealthStatusSummary(schemaOne).contains("前台确认 未知"))
+    }
+
+    @Test
+    fun rootUnavailableSummaryNamesTheActualFailureAndNextAction() {
+        val activity = buildActivity()
+        val cases = listOf(
+            RootHealthSnapshot.unavailable(RootFailureReason.SU_NOT_FOUND) to "找不到 /system/bin/su",
+            RootHealthSnapshot.unavailable(RootFailureReason.SU_EXECUTION_BLOCKED) to "系统拒绝启动它",
+            RootHealthSnapshot.unavailable(RootFailureReason.SU_START_FAILED) to "su 进程启动失败",
+            RootHealthSnapshot.unavailable(RootFailureReason.SU_AUTHORIZATION_DENIED) to "KernelSU 没有允许银杏",
+            RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_NOT_FOUND) to "Root Guard 脚本或依赖不存在",
+            RootHealthSnapshot.unavailable(RootFailureReason.SCRIPT_EXECUTION_BLOCKED) to "Root Guard 脚本无法执行",
+            RootHealthSnapshot.unavailable(RootFailureReason.COMMAND_TIMEOUT) to "Root 脚本响应超时",
+            RootHealthSnapshot.unavailable(RootFailureReason.COMMAND_FAILED, 42) to "退出码 42",
+            RootHealthSnapshot.unavailable(RootFailureReason.OUTPUT_LIMIT_EXCEEDED) to "状态输出异常过长",
+            RootHealthSnapshot.unavailable(RootFailureReason.STATUS_FORMAT_INVALID) to "状态格式不完整"
+        )
+
+        cases.forEach { (snapshot, expectedText) ->
+            assertTrue(
+                "missing '$expectedText' in '${activity.rootHealthStatusSummary(snapshot)}'",
+                activity.rootHealthStatusSummary(snapshot).contains(expectedText)
+            )
+        }
+        assertTrue(
+            activity.rootHealthStatusSummary(
+                RootHealthSnapshot.unavailable(RootFailureReason.SU_NOT_FOUND)
+            ).contains(android.os.Process.myUid().toString())
+        )
+    }
+
+    @Test
+    fun rootHubShowsAuthorizationFailureInsteadOfGenericUnavailable() {
+        val activity = buildActivity()
+        activity.rootHealthSnapshot = RootHealthSnapshot.unavailable(
+            RootFailureReason.SU_AUTHORIZATION_DENIED
+        )
+
+        activity.updateRootHubCard()
+
+        assertEquals(
+            activity.getString(R.string.settings_root_status_authorization_denied),
+            activity.findViewById<TextView>(R.id.tv_root_hub_status).text.toString()
+        )
+        assertEquals(
+            activity.getString(R.string.settings_root_failure_authorization_denied),
+            activity.findViewById<TextView>(R.id.tv_root_hub_summary).text.toString()
+        )
     }
 
     // ═══════════════════════════════════════════════════════════════════════

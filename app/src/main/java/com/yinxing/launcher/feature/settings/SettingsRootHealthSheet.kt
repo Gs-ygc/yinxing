@@ -5,6 +5,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.lifecycle.lifecycleScope
 import com.yinxing.launcher.R
+import com.yinxing.launcher.common.root.RootFailureReason
 import com.yinxing.launcher.common.root.RootHealthSnapshot
 import com.yinxing.launcher.common.root.RootHealthState
 import kotlinx.coroutines.CancellationException
@@ -158,14 +159,15 @@ private fun SettingsActivity.recoverRootHealth(
                 rootHealthSnapshot = result.snapshot
                 Toast.makeText(
                     this@recoverRootHealth,
-                    getString(
-                        if (result.actionSucceeded) {
-                            R.string.settings_root_recover_success
-                        } else {
-                            R.string.settings_root_recover_failed
-                        }
-                    ),
-                    Toast.LENGTH_SHORT
+                    if (result.actionSucceeded) {
+                        getString(R.string.settings_root_recover_success)
+                    } else {
+                        rootFailureSummary(
+                            reason = result.actionFailureReason ?: RootFailureReason.UNKNOWN,
+                            exitCode = result.actionFailureExitCode
+                        )
+                    },
+                    Toast.LENGTH_LONG
                 ).show()
                 renderRootHealthEntries(statusEntry, recoveryEntry, result.snapshot, busy = false)
             }
@@ -174,7 +176,11 @@ private fun SettingsActivity.recoverRootHealth(
         } catch (_: Throwable) {
             if (isCurrentRootHealthSession(sessionId)) {
                 rootHealthSnapshot = RootHealthSnapshot.unavailable()
-                Toast.makeText(this@recoverRootHealth, getString(R.string.settings_root_recover_failed), Toast.LENGTH_SHORT).show()
+                Toast.makeText(
+                    this@recoverRootHealth,
+                    rootFailureSummary(RootFailureReason.UNKNOWN),
+                    Toast.LENGTH_LONG
+                ).show()
                 renderRootHealthEntries(statusEntry, recoveryEntry, rootHealthSnapshot, busy = false)
             }
         } finally {
@@ -233,15 +239,13 @@ private fun SettingsActivity.renderRootHealthEntries(
 }
 
 private fun SettingsActivity.rootHealthHubSummary(snapshot: RootHealthSnapshot): String {
-    return getString(
-        when (snapshot.state) {
-            RootHealthState.UNCHECKED -> R.string.settings_root_hub_summary_unchecked
-            RootHealthState.ROOT_UNAVAILABLE -> R.string.settings_root_hub_summary_unavailable
-            RootHealthState.MODULE_MISSING -> R.string.settings_root_hub_summary_missing
-            RootHealthState.DEGRADED -> R.string.settings_root_hub_summary_degraded
-            RootHealthState.HEALTHY -> R.string.settings_root_hub_summary_healthy
-        }
-    )
+    return when (snapshot.state) {
+        RootHealthState.UNCHECKED -> getString(R.string.settings_root_hub_summary_unchecked)
+        RootHealthState.ROOT_UNAVAILABLE -> rootFailureSummary(snapshot)
+        RootHealthState.MODULE_MISSING -> getString(R.string.settings_root_hub_summary_missing)
+        RootHealthState.DEGRADED -> getString(R.string.settings_root_hub_summary_degraded)
+        RootHealthState.HEALTHY -> getString(R.string.settings_root_hub_summary_healthy)
+    }
 }
 
 internal fun SettingsActivity.rootHealthStatusSummary(snapshot: RootHealthSnapshot): String {
@@ -265,7 +269,7 @@ private fun SettingsActivity.rootHealthBadge(snapshot: RootHealthSnapshot): Badg
     return when (snapshot.state) {
         RootHealthState.UNCHECKED -> actionBadge(getString(R.string.settings_root_status_unchecked))
         RootHealthState.ROOT_UNAVAILABLE -> BadgeStyle(
-            text = getString(R.string.settings_root_status_unavailable),
+            text = getString(rootFailureBadge(snapshot.failureReason)),
             textColorResId = R.color.launcher_danger,
             backgroundColorResId = R.color.launcher_danger_soft
         )
@@ -284,6 +288,60 @@ private fun SettingsActivity.rootHealthBadge(snapshot: RootHealthSnapshot): Badg
             textColorResId = R.color.launcher_action_dark,
             backgroundColorResId = R.color.launcher_primary_soft
         )
+    }
+}
+
+private fun SettingsActivity.rootFailureSummary(snapshot: RootHealthSnapshot): String {
+    return rootFailureSummary(
+        reason = snapshot.failureReason ?: RootFailureReason.UNKNOWN,
+        exitCode = snapshot.failureExitCode
+    )
+}
+
+internal fun SettingsActivity.rootFailureSummary(
+    reason: RootFailureReason,
+    exitCode: Int? = null
+): String {
+    return when (reason) {
+        RootFailureReason.SU_NOT_FOUND -> getString(
+            R.string.settings_root_failure_su_not_found,
+            android.os.Process.myUid()
+        )
+        RootFailureReason.SU_EXECUTION_BLOCKED ->
+            getString(R.string.settings_root_failure_su_execution_blocked)
+        RootFailureReason.SU_START_FAILED -> getString(R.string.settings_root_failure_su_start_failed)
+        RootFailureReason.SU_AUTHORIZATION_DENIED ->
+            getString(R.string.settings_root_failure_authorization_denied)
+        RootFailureReason.SCRIPT_NOT_FOUND -> getString(R.string.settings_root_failure_script_not_found)
+        RootFailureReason.SCRIPT_EXECUTION_BLOCKED ->
+            getString(R.string.settings_root_failure_script_execution_blocked)
+        RootFailureReason.COMMAND_TIMEOUT -> getString(R.string.settings_root_failure_timeout)
+        RootFailureReason.COMMAND_FAILED -> getString(
+            R.string.settings_root_failure_command_failed,
+            exitCode ?: -1
+        )
+        RootFailureReason.OUTPUT_LIMIT_EXCEEDED ->
+            getString(R.string.settings_root_failure_output_too_large)
+        RootFailureReason.STATUS_FORMAT_INVALID ->
+            getString(R.string.settings_root_failure_status_invalid)
+        RootFailureReason.UNKNOWN -> getString(R.string.settings_root_failure_unknown)
+    }
+}
+
+private fun rootFailureBadge(reason: RootFailureReason?): Int {
+    return when (reason ?: RootFailureReason.UNKNOWN) {
+        RootFailureReason.SU_NOT_FOUND -> R.string.settings_root_status_su_not_found
+        RootFailureReason.SU_EXECUTION_BLOCKED -> R.string.settings_root_status_su_execution_blocked
+        RootFailureReason.SU_START_FAILED -> R.string.settings_root_status_su_start_failed
+        RootFailureReason.SU_AUTHORIZATION_DENIED -> R.string.settings_root_status_authorization_denied
+        RootFailureReason.SCRIPT_NOT_FOUND -> R.string.settings_root_status_script_not_found
+        RootFailureReason.SCRIPT_EXECUTION_BLOCKED ->
+            R.string.settings_root_status_script_execution_blocked
+        RootFailureReason.COMMAND_TIMEOUT -> R.string.settings_root_status_timeout
+        RootFailureReason.COMMAND_FAILED -> R.string.settings_root_status_command_failed
+        RootFailureReason.OUTPUT_LIMIT_EXCEEDED -> R.string.settings_root_status_output_too_large
+        RootFailureReason.STATUS_FORMAT_INVALID -> R.string.settings_root_status_format_invalid
+        RootFailureReason.UNKNOWN -> R.string.settings_root_status_unavailable
     }
 }
 
