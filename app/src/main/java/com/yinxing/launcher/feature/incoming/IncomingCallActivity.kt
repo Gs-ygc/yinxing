@@ -41,6 +41,7 @@ class IncomingCallActivity : AppCompatActivity() {
     private var currentCallerName: String = ""
     private var recoveryDialog: AlertDialog? = null
     private var recoveryContext: RecoveryContext? = null
+    private var systemUiRequestFailed: Boolean = false
 
     private data class RecoveryContext(
         val action: IncomingCallFailedAction,
@@ -57,6 +58,8 @@ class IncomingCallActivity : AppCompatActivity() {
         private const val STATE_RECOVERY_ACTION = "incoming_call_recovery_action"
         private const val STATE_RECOVERY_CATEGORY = "incoming_call_recovery_category"
         private const val STATE_RECOVERY_DETAIL = "incoming_call_recovery_detail"
+        private const val STATE_SYSTEM_UI_REQUEST_FAILED =
+            "incoming_call_system_ui_request_failed"
         private const val STATE_CALLER_NAME = "incoming_call_caller_name"
 
         const val EXTRA_CALLER_NAME = "extra_caller_name"
@@ -136,6 +139,7 @@ class IncomingCallActivity : AppCompatActivity() {
             outState.putString(STATE_RECOVERY_ACTION, recovery.action.name)
             outState.putString(STATE_RECOVERY_CATEGORY, recovery.reason.category.code)
             outState.putString(STATE_RECOVERY_DETAIL, recovery.reason.detail)
+            outState.putBoolean(STATE_SYSTEM_UI_REQUEST_FAILED, systemUiRequestFailed)
         }
         super.onSaveInstanceState(outState)
     }
@@ -219,6 +223,7 @@ class IncomingCallActivity : AppCompatActivity() {
         riskJob?.cancel()
         dismissRecoveryDialog()
         recoveryContext = null
+        systemUiRequestFailed = false
         recoveryCoordinator.reset()
         setActionButtonsEnabled(true)
         hideCountdown()
@@ -259,6 +264,7 @@ class IncomingCallActivity : AppCompatActivity() {
         val result = answerRingingCall()
         if (result.success) {
             recoveryContext = null
+            systemUiRequestFailed = false
             IncomingCallSessionState.answered()
             IncomingCallDiagnostics.recordAcceptSuccess(this, result.detail)
             applyAnsweredCallAudioStrategy()
@@ -283,6 +289,7 @@ class IncomingCallActivity : AppCompatActivity() {
         val result = endRingingCall()
         if (result.success) {
             recoveryContext = null
+            systemUiRequestFailed = false
             IncomingCallSessionState.rejected()
             IncomingCallDiagnostics.recordDeclineSuccess(this, result.detail)
             IncomingCallForegroundService.stop(this)
@@ -308,6 +315,7 @@ class IncomingCallActivity : AppCompatActivity() {
             detail = result.detail
         )
         recoveryContext = RecoveryContext(action, reason)
+        systemUiRequestFailed = false
         showRecoveryDialog(action, reason, retry)
     }
 
@@ -321,13 +329,16 @@ class IncomingCallActivity : AppCompatActivity() {
             callerName = currentCallerName,
             action = action,
             reason = reason,
+            systemUiRequestPreviouslyFailed = systemUiRequestFailed,
             onOpenSystemCall = {
                 recoveryCoordinator.requestSystemCallUi().also { requestResult ->
                     when (requestResult) {
                         SystemCallUiRequestResult.Requested -> {
+                            systemUiRequestFailed = false
                             IncomingCallDiagnostics.recordSystemCallUiRequested(this)
                         }
                         is SystemCallUiRequestResult.Failed -> {
+                            systemUiRequestFailed = true
                             IncomingCallDiagnostics.recordSystemCallUiRequestFailure(
                                 this,
                                 requestResult.error
@@ -338,6 +349,7 @@ class IncomingCallActivity : AppCompatActivity() {
             },
             onRetry = {
                 recoveryContext = null
+                systemUiRequestFailed = false
                 retry()
             }
         )
@@ -358,6 +370,7 @@ class IncomingCallActivity : AppCompatActivity() {
         when (decision) {
             IncomingCallResumeDecision.FINISH_ANSWERED -> {
                 recoveryContext = null
+                systemUiRequestFailed = false
                 IncomingCallSessionState.answered()
                 IncomingCallDiagnostics.recordSystemCallUiAnswered(this)
                 IncomingCallForegroundService.stop(this)
@@ -365,6 +378,7 @@ class IncomingCallActivity : AppCompatActivity() {
             }
             IncomingCallResumeDecision.FINISH_ENDED -> {
                 recoveryContext = null
+                systemUiRequestFailed = false
                 IncomingCallSessionState.idle()
                 IncomingCallDiagnostics.recordSystemCallUiEnded(this)
                 IncomingCallForegroundService.stop(this)
@@ -406,6 +420,9 @@ class IncomingCallActivity : AppCompatActivity() {
         if (hasRecovery && action != null) {
             recoveryContext = RecoveryContext(action, reason)
         }
+        systemUiRequestFailed = savedInstanceState.getBoolean(
+            STATE_SYSTEM_UI_REQUEST_FAILED
+        )
         IncomingCallSessionState.failed(reason)
 
         if (

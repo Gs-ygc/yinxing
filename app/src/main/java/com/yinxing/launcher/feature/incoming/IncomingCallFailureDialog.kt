@@ -17,6 +17,7 @@ internal fun AppCompatActivity.showIncomingCallFailureDialog(
     callerName: String,
     action: IncomingCallFailedAction,
     reason: IncomingCallFailureReason,
+    systemUiRequestPreviouslyFailed: Boolean = false,
     onOpenSystemCall: () -> SystemCallUiRequestResult,
     onRetry: () -> Unit
 ): AlertDialog {
@@ -31,12 +32,16 @@ internal fun AppCompatActivity.showIncomingCallFailureDialog(
         IncomingCallFailedAction.ACCEPT -> R.string.incoming_call_failure_retry_accept
         IncomingCallFailedAction.DECLINE -> R.string.incoming_call_failure_retry_decline
     }
-    val messageRes = when (reason.category) {
-        IncomingCallFailureCategory.PhonePermission ->
-            R.string.incoming_call_failure_permission_message
-        IncomingCallFailureCategory.UnsupportedPlatform ->
-            R.string.incoming_call_failure_unsupported_message
-        else -> R.string.incoming_call_failure_action_message
+    val messageRes = if (systemUiRequestPreviouslyFailed) {
+        R.string.incoming_call_failure_system_ui_failed_message
+    } else {
+        when (reason.category) {
+            IncomingCallFailureCategory.PhonePermission ->
+                R.string.incoming_call_failure_permission_message
+            IncomingCallFailureCategory.UnsupportedPlatform ->
+                R.string.incoming_call_failure_unsupported_message
+            else -> R.string.incoming_call_failure_action_message
+        }
     }
     val dialogView = layoutInflater.inflate(R.layout.dialog_incoming_call_failure, null)
     val messageView = dialogView.findViewById<TextView>(R.id.tv_incoming_call_failure_message)

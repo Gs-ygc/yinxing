@@ -451,6 +451,35 @@ class IncomingCallActivitySmokeTest {
         }
     }
 
+    @Test
+    fun failedSystemUiRequestMessageSurvivesActivityRecreation() {
+        denyAnswerPermission()
+        val controller = buildController("王大爷", autoAnswer = false)
+        controller.get().btn_accept.performClick()
+        idle()
+        installRecoveryCoordinator(
+            controller.get(),
+            IncomingCallRecoveryCoordinator(FailedSystemUiGateway())
+        )
+        val firstDialog = latestRecoveryDialog()
+        firstDialog.requireView<View>(R.id.btn_incoming_call_system_ui).performClick()
+        idle()
+        assertEquals(
+            context.getString(R.string.incoming_call_failure_system_ui_failed_message),
+            firstDialog.requireView<TextView>(R.id.tv_incoming_call_failure_message).text.toString()
+        )
+
+        controller.recreate()
+        idle()
+
+        val restoredDialog = latestRecoveryDialog()
+        assertTrue(restoredDialog.isShowing)
+        assertEquals(
+            context.getString(R.string.incoming_call_failure_system_ui_failed_message),
+            restoredDialog.requireView<TextView>(R.id.tv_incoming_call_failure_message).text.toString()
+        )
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // onNewIntent — 刷新来电人
     // ═══════════════════════════════════════════════════════════════════════
@@ -697,6 +726,15 @@ class IncomingCallActivitySmokeTest {
         return requireNotNull(ShadowDialog.getLatestDialog() as? AlertDialog)
     }
 
+    private fun installRecoveryCoordinator(
+        activity: IncomingCallActivity,
+        coordinator: IncomingCallRecoveryCoordinator
+    ) {
+        val field = IncomingCallActivity::class.java.getDeclaredField("recoveryCoordinator")
+        field.isAccessible = true
+        field.set(activity, coordinator)
+    }
+
     private fun buildIntent(
         callerName: String?,
         autoAnswer: Boolean = false,
@@ -756,5 +794,15 @@ class IncomingCallActivitySmokeTest {
 
     private inline fun <reified T : View> AlertDialog.requireView(id: Int): T {
         return requireNotNull(findViewById(id))
+    }
+
+    private class FailedSystemUiGateway : IncomingCallSystemUiGateway {
+        override fun requestSystemCallUi(): SystemCallUiRequestResult {
+            return SystemCallUiRequestResult.Failed(SecurityException("show denied"))
+        }
+
+        override fun currentCallState(): IncomingDeviceCallState {
+            error("failed request must not read call state")
+        }
     }
 }
