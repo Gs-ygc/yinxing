@@ -454,6 +454,15 @@
     <string name="incoming_call_status_permission_missing">缺少电话权限，请先去设置里授权</string>
     <string name="incoming_call_status_unknown_error">未知原因</string>
     <string name="incoming_call_status_action_failed">%1$s失败：%2$s</string>
+    <string name="incoming_call_failure_accept_title">还没有接通 %1$s</string>
+    <string name="incoming_call_failure_decline_title">还没有挂断 %1$s</string>
+    <string name="incoming_call_failure_permission_message">银杏缺少处理电话所需的权限。可以先打开系统电话完成这次操作，之后请家属检查电话权限。</string>
+    <string name="incoming_call_failure_unsupported_message">这台手机暂时不能由银杏直接完成这一步。可以打开系统电话，手动处理这次来电。</string>
+    <string name="incoming_call_failure_action_message">银杏刚才没有完成这一步。可以重新尝试，或打开系统电话手动处理。</string>
+    <string name="incoming_call_failure_system_ui_failed_message">系统电话也没有打开。请留在这里重新尝试，或让家属从通知栏进入电话。</string>
+    <string name="incoming_call_failure_open_system_ui">打开系统电话</string>
+    <string name="incoming_call_failure_retry_accept">重新接听</string>
+    <string name="incoming_call_failure_retry_decline">重新挂断</string>
     <string name="incoming_call_status_speaker_on">已切到扬声器</string>
     <string name="incoming_call_status_speaker_kept_private">已保持耳机或蓝牙输出</string>
     <string name="incoming_call_mode_auto">自动守护已开启</string>
