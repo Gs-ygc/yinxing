@@ -7,7 +7,7 @@ import android.os.Bundle
 import android.os.CountDownTimer
 import android.view.WindowManager
 import android.widget.TextView
-import android.widget.Toast
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.cardview.widget.CardView
 import androidx.core.content.ContextCompat
@@ -36,10 +36,15 @@ class IncomingCallActivity : AppCompatActivity() {
     private var actionInProgress = false
     private val platformCompat = IncomingPlatformCompat()
     private lateinit var actions: IncomingCallActions
+    private lateinit var recoveryCoordinator: IncomingCallRecoveryCoordinator
     private var announcer: IncomingCallAnnouncer? = null
+    private var currentCallerName: String = ""
+    private var recoveryDialog: AlertDialog? = null
 
     companion object {
         private const val TAG = "IncomingCallActivity"
+        private const val STATE_AWAITING_SYSTEM_UI_RETURN =
+            "incoming_call_awaiting_system_ui_return"
 
         const val EXTRA_CALLER_NAME = "extra_caller_name"
         const val EXTRA_AUTO_ANSWER = "extra_auto_answer"
@@ -76,6 +81,12 @@ class IncomingCallActivity : AppCompatActivity() {
         configureWindowForIncomingCall()
         setContentView(R.layout.activity_incoming_call)
         actions = IncomingCallActions(this, platformCompat)
+        recoveryCoordinator = IncomingCallRecoveryCoordinator(
+            AndroidIncomingCallSystemUiGateway(this)
+        )
+        if (savedInstanceState?.getBoolean(STATE_AWAITING_SYSTEM_UI_RETURN) == true) {
+            recoveryCoordinator.restoreAwaitingSystemUiReturn()
+        }
         announcer = IncomingCallAnnouncer(this)
 
         tvCaller = findViewById(R.id.tv_incoming_caller)
@@ -90,6 +101,19 @@ class IncomingCallActivity : AppCompatActivity() {
         applyIntent(intent)
     }
 
+    override fun onResume() {
+        super.onResume()
+        applyRecoveryResumeDecision(recoveryCoordinator.onHostResumed())
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putBoolean(
+            STATE_AWAITING_SYSTEM_UI_RETURN,
+            recoveryCoordinator.awaitingSystemUiReturn
+        )
+        super.onSaveInstanceState(outState)
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -101,6 +125,8 @@ class IncomingCallActivity : AppCompatActivity() {
     override fun onDestroy() {
         riskJob?.cancel()
         hideCountdown()
+        dismissRecoveryDialog()
+        recoveryCoordinator.reset()
         announcer?.shutdown()
         announcer = null
         super.onDestroy()
@@ -108,6 +134,7 @@ class IncomingCallActivity : AppCompatActivity() {
 
     private fun applyIntent(intent: Intent) {
         val callerName = resolveCallerName(intent.getStringExtra(EXTRA_CALLER_NAME))
+        currentCallerName = callerName
         val incomingNumber = intent.getStringExtra(EXTRA_INCOMING_NUMBER).orEmpty()
         val knownContact = intent.getBooleanExtra(EXTRA_KNOWN_CONTACT, false)
         val preferences = LauncherPreferences.getInstance(this)
@@ -162,6 +189,8 @@ class IncomingCallActivity : AppCompatActivity() {
     private fun resetUiState() {
         actionInProgress = false
         riskJob?.cancel()
+        dismissRecoveryDialog()
+        recoveryCoordinator.reset()
         setActionButtonsEnabled(true)
         hideCountdown()
         renderRisk(null)
@@ -211,9 +240,7 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         IncomingCallDiagnostics.recordAcceptFailure(this, result.detail, result.failureReason)
-        Toast.makeText(this, result.detail, Toast.LENGTH_SHORT).show()
-        actionInProgress = false
-        setActionButtonsEnabled(true)
+        handleActionFailure(IncomingCallFailedAction.ACCEPT, result) { acceptCall() }
     }
 
     private fun declineCall() {
@@ -235,9 +262,81 @@ class IncomingCallActivity : AppCompatActivity() {
         }
 
         IncomingCallDiagnostics.recordDeclineFailure(this, result.detail, result.failureReason)
-        Toast.makeText(this, result.detail, Toast.LENGTH_SHORT).show()
+        handleActionFailure(IncomingCallFailedAction.DECLINE, result) { declineCall() }
+    }
+
+    private fun handleActionFailure(
+        action: IncomingCallFailedAction,
+        result: IncomingCallActions.Result,
+        retry: () -> Unit
+    ) {
         actionInProgress = false
         setActionButtonsEnabled(true)
+        val reason = result.failureReason ?: IncomingCallFailureReason(
+            category = IncomingCallFailureCategory.Unknown,
+            detail = result.detail
+        )
+        showRecoveryDialog(action, reason, retry)
+    }
+
+    private fun showRecoveryDialog(
+        action: IncomingCallFailedAction,
+        reason: IncomingCallFailureReason,
+        retry: () -> Unit
+    ) {
+        dismissRecoveryDialog()
+        val dialog = showIncomingCallFailureDialog(
+            callerName = currentCallerName,
+            action = action,
+            reason = reason,
+            onOpenSystemCall = {
+                recoveryCoordinator.requestSystemCallUi().also { requestResult ->
+                    when (requestResult) {
+                        SystemCallUiRequestResult.Requested -> {
+                            IncomingCallDiagnostics.recordSystemCallUiRequested(this)
+                        }
+                        is SystemCallUiRequestResult.Failed -> {
+                            IncomingCallDiagnostics.recordSystemCallUiRequestFailure(
+                                this,
+                                requestResult.error
+                            )
+                        }
+                    }
+                }
+            },
+            onRetry = retry
+        )
+        dialog.setOnDismissListener {
+            if (recoveryDialog === dialog) {
+                recoveryDialog = null
+            }
+        }
+        recoveryDialog = dialog
+    }
+
+    private fun dismissRecoveryDialog() {
+        recoveryDialog?.dismiss()
+        recoveryDialog = null
+    }
+
+    internal fun applyRecoveryResumeDecision(decision: IncomingCallResumeDecision) {
+        when (decision) {
+            IncomingCallResumeDecision.FINISH_ANSWERED -> {
+                IncomingCallSessionState.answered()
+                IncomingCallDiagnostics.recordSystemCallUiAnswered(this)
+                IncomingCallForegroundService.stop(this)
+                finish()
+            }
+            IncomingCallResumeDecision.FINISH_ENDED -> {
+                IncomingCallSessionState.idle()
+                IncomingCallDiagnostics.recordSystemCallUiEnded(this)
+                IncomingCallForegroundService.stop(this)
+                finish()
+            }
+            IncomingCallResumeDecision.NO_PENDING,
+            IncomingCallResumeDecision.KEEP_RINGING,
+            IncomingCallResumeDecision.KEEP_UNKNOWN -> Unit
+        }
     }
 
     private fun configureWindowForIncomingCall() {

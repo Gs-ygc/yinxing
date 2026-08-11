@@ -6,6 +6,7 @@ import android.widget.TextView
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -44,6 +45,55 @@ class IncomingCallStatusSmokeTest {
         val countdownView = controller.get().findViewById<TextView>(R.id.tv_incoming_countdown)
         assertEquals(View.GONE, countdownView.visibility)
         assertTrue(countdownView.text.isEmpty())
+    }
+
+    @Test
+    fun recoveredSystemCallAnsweredMarksAnsweredAndFinishes() {
+        val activity = buildActivity("王大爷")
+
+        activity.applyRecoveryResumeDecision(IncomingCallResumeDecision.FINISH_ANSWERED)
+
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Answered)
+        assertTrue(activity.isFinishing)
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains("系统电话已接通")
+        )
+    }
+
+    @Test
+    fun recoveredSystemCallEndedReturnsToIdleAndFinishes() {
+        val activity = buildActivity("李阿姨")
+
+        activity.applyRecoveryResumeDecision(IncomingCallResumeDecision.FINISH_ENDED)
+
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Idle)
+        assertTrue(activity.isFinishing)
+        assertTrue(
+            IncomingCallDiagnostics.getSummaryText(context).contains("系统来电已结束")
+        )
+    }
+
+    @Test
+    fun nonTerminalRecoveryDecisionsKeepIncomingActivityOpen() {
+        listOf(
+            IncomingCallResumeDecision.NO_PENDING,
+            IncomingCallResumeDecision.KEEP_RINGING,
+            IncomingCallResumeDecision.KEEP_UNKNOWN
+        ).forEach { decision ->
+            val activity = buildActivity("仍在响铃")
+
+            activity.applyRecoveryResumeDecision(decision)
+
+            assertFalse("$decision 不应关闭来电页", activity.isFinishing)
+            activity.finish()
+        }
+    }
+
+    private fun buildActivity(callerName: String): IncomingCallActivity {
+        return Robolectric.buildActivity(
+            IncomingCallActivity::class.java,
+            IncomingCallActivity.buildLaunchIntent(context, callerName, autoAnswer = false)
+        ).setup().get()
     }
 
     private fun resetLauncherPreferencesSingleton() {

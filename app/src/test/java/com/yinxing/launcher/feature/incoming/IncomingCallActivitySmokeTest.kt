@@ -1,17 +1,22 @@
 package com.yinxing.launcher.feature.incoming
 
+import android.Manifest
+import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.Looper
 import android.view.View
 import android.widget.TextView
 import androidx.cardview.widget.CardView
+import androidx.appcompat.app.AlertDialog
 import androidx.test.core.app.ApplicationProvider
 import com.yinxing.launcher.R
 import com.yinxing.launcher.data.home.LauncherPreferences
 import com.yinxing.launcher.data.settings.LauncherSettingsDataStore
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -20,6 +25,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -268,6 +274,77 @@ class IncomingCallActivitySmokeTest {
         assertTrue(!activity.isDestroyed || activity.isFinishing)
     }
 
+    @Test
+    fun missingPermissionShowsPersistentAcceptRecoveryAndFailedState() {
+        denyAnswerPermission()
+        val activity = buildActivity("王大爷", autoAnswer = false)
+
+        activity.btn_accept.performClick()
+        idle()
+
+        val dialog = latestRecoveryDialog()
+        assertTrue(dialog.isShowing)
+        assertEquals(
+            "还没有接通 王大爷",
+            dialog.requireView<TextView>(R.id.tv_incoming_call_failure_title).text.toString()
+        )
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+        assertTrue(activity.btn_accept.isEnabled)
+        assertTrue(activity.btn_decline.isEnabled)
+    }
+
+    @Test
+    fun missingPermissionShowsPersistentDeclineRecoveryAndFailedState() {
+        denyAnswerPermission()
+        val activity = buildActivity("李阿姨", autoAnswer = false)
+
+        activity.btn_decline.performClick()
+        idle()
+
+        val dialog = latestRecoveryDialog()
+        assertTrue(dialog.isShowing)
+        assertEquals(
+            "还没有挂断 李阿姨",
+            dialog.requireView<TextView>(R.id.tv_incoming_call_failure_title).text.toString()
+        )
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+        assertTrue(activity.btn_accept.isEnabled)
+        assertTrue(activity.btn_decline.isEnabled)
+    }
+
+    @Test
+    fun actionFailureWhileAutoAnswerIsEnabledLeavesCountdownStopped() {
+        denyAnswerPermission()
+        prefs().setAutoAnswerEnabled(true)
+        val activity = buildActivity("王大爷", autoAnswer = true)
+        assertTrue(activity.tv_countdown.text.isNotEmpty())
+
+        activity.btn_accept.performClick()
+        idle()
+
+        assertEquals(View.GONE, activity.tv_countdown.visibility)
+        assertTrue(activity.tv_countdown.text.isEmpty())
+        assertTrue(latestRecoveryDialog().isShowing)
+    }
+
+    @Test
+    fun explicitRetryReplacesFailedDialogOnceWithoutRestartingCountdown() {
+        denyAnswerPermission()
+        val activity = buildActivity("王大爷", autoAnswer = false)
+        activity.btn_accept.performClick()
+        idle()
+        val firstDialog = latestRecoveryDialog()
+
+        firstDialog.requireView<View>(R.id.btn_incoming_call_retry).performClick()
+        idle()
+
+        val replacementDialog = latestRecoveryDialog()
+        assertFalse(firstDialog.isShowing)
+        assertNotSame(firstDialog, replacementDialog)
+        assertTrue(replacementDialog.isShowing)
+        assertEquals(View.GONE, activity.tv_countdown.visibility)
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // onNewIntent — 刷新来电人
     // ═══════════════════════════════════════════════════════════════════════
@@ -346,6 +423,21 @@ class IncomingCallActivitySmokeTest {
         assertTrue(controller.get().tv_countdown.text.isEmpty())
     }
 
+    @Test
+    fun onNewIntentDismissesOldRecoveryAndRendersNewCaller() {
+        denyAnswerPermission()
+        val controller = buildController("旧来电人", autoAnswer = false)
+        controller.get().btn_accept.performClick()
+        idle()
+        val oldDialog = latestRecoveryDialog()
+
+        controller.newIntent(buildIntent("新来电人", autoAnswer = false))
+        idle()
+
+        assertFalse(oldDialog.isShowing)
+        assertEquals("新来电人", controller.get().tv_caller.text.toString())
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // Activity 生命周期 — 不崩溃
     // ═══════════════════════════════════════════════════════════════════════
@@ -372,6 +464,20 @@ class IncomingCallActivitySmokeTest {
         val controller = buildController("销毁测试")
         idle()
         runCatching { controller.destroy() }
+    }
+
+    @Test
+    fun onDestroyDismissesRecoveryDialog() {
+        denyAnswerPermission()
+        val controller = buildController("销毁测试")
+        controller.get().btn_accept.performClick()
+        idle()
+        val dialog = latestRecoveryDialog()
+        assertTrue(dialog.isShowing)
+
+        controller.destroy()
+
+        assertFalse(dialog.isShowing)
     }
 
     @Test
@@ -473,6 +579,14 @@ class IncomingCallActivitySmokeTest {
 
     private fun prefs() = LauncherPreferences.getInstance(context)
 
+    private fun denyAnswerPermission() {
+        shadowOf(context as Application).denyPermissions(Manifest.permission.ANSWER_PHONE_CALLS)
+    }
+
+    private fun latestRecoveryDialog(): AlertDialog {
+        return requireNotNull(ShadowDialog.getLatestDialog() as? AlertDialog)
+    }
+
     private fun buildIntent(
         callerName: String?,
         autoAnswer: Boolean = false,
@@ -525,4 +639,8 @@ class IncomingCallActivitySmokeTest {
         get() = findViewById<CardView>(R.id.btn_incoming_accept)
     private val android.app.Activity.btn_decline
         get() = findViewById<CardView>(R.id.btn_incoming_decline)
+
+    private inline fun <reified T : View> AlertDialog.requireView(id: Int): T {
+        return requireNotNull(findViewById(id))
+    }
 }
