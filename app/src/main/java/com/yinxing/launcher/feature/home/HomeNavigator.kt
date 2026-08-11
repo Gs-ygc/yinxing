@@ -15,16 +15,12 @@ import com.yinxing.launcher.feature.videocall.VideoCallActivity
 class HomeNavigator(
     private val activity: AppCompatActivity
 ) {
+    private var appFailureDialog: AlertDialog? = null
+
     private val appLauncher = HomeAppLauncher(
         resolveLaunchIntent = activity.packageManager::getLaunchIntentForPackage,
         launchIntent = activity::startActivity,
-        onUnavailable = { item ->
-            Toast.makeText(
-                activity,
-                activity.getString(R.string.open_app_failed, item.appName),
-                Toast.LENGTH_SHORT
-            ).show()
-        }
+        onUnavailable = ::showAppFailure
     )
 
     fun openWeatherEntry() {
@@ -88,7 +84,41 @@ class HomeNavigator(
         activity.startActivity(PhoneContactActivity.createIntent(activity))
     }
 
+    fun dismissTransientDialogs() {
+        appFailureDialog?.setOnDismissListener(null)
+        appFailureDialog?.dismiss()
+        appFailureDialog = null
+    }
+
     private fun openApp(item: HomeAppItem) {
         appLauncher.open(item)
+    }
+
+    private fun showAppFailure(item: HomeAppItem) {
+        if (activity.isFinishing || activity.isDestroyed) return
+        appFailureDialog?.dismiss()
+        appFailureDialog = null
+
+        val dialog = activity.showHomeAppFailureDialog(
+            item = item,
+            onRetry = { appLauncher.open(item) },
+            onOpenSettings = {
+                runCatching {
+                    activity.startActivity(Intent(activity, SettingsActivity::class.java))
+                }.onFailure {
+                    Toast.makeText(
+                        activity,
+                        activity.getString(R.string.open_settings_failed),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+            }
+        )
+        dialog.setOnDismissListener {
+            if (appFailureDialog === dialog) {
+                appFailureDialog = null
+            }
+        }
+        appFailureDialog = dialog
     }
 }

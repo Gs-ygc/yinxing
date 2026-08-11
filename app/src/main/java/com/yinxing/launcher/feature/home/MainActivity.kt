@@ -103,6 +103,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (::navigator.isInitialized) {
+            navigator.dismissTransientDialogs()
+        }
         callFallbackDialog?.setOnDismissListener(null)
         callFallbackDialog?.dismiss()
         callFallbackDialog = null

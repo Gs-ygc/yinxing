@@ -42,7 +42,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
-import org.robolectric.shadows.ShadowToast
+import org.robolectric.shadows.ShadowDialog
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [34])
@@ -344,10 +344,17 @@ class MainActivitySmokeTest {
         HomeNavigator(activity).openHomeItem(item)
 
         assertNull(shadowOf(activity).nextStartedActivity)
+        val dialog = requireNotNull(ShadowDialog.getLatestDialog())
+        assertTrue(dialog.isShowing)
         assertEquals(
-            activity.getString(R.string.open_app_failed, "相机"),
-            ShadowToast.getTextOfLatestToast()
+            activity.getString(R.string.home_app_failure_title, "相机"),
+            dialog.findViewById<TextView>(R.id.tv_home_app_failure_title).text.toString()
         )
+        assertEquals(
+            activity.getString(R.string.home_app_failure_retry),
+            dialog.findViewById<TextView>(R.id.btn_home_app_retry).text.toString()
+        )
+        dialog.dismiss()
     }
 
 
