@@ -282,6 +282,12 @@ change. No ADB device was connected, so no OnePlus 15 runtime claim was made.
 
 ### Task 6: Push, tag, publish, and fresh-download verify
 
-- [ ] **Step 1: Publish only after Task 5 verification**
+- [x] **Step 1: Publish only after Task 5 verification**
 
-Commit metadata/release notes, push the feature branch, fast-forward/push `main`, create annotated tag `v1.10.0-root-preview.24`, and publish a non-draft prerelease to `Gs-ygc/yinxing`. Download both remote assets into a fresh temporary directory and require checksum success, byte-for-byte APK equality, exact asset names/body, remote branch/tag equality, and no device claims when `adb devices -l` is empty.
+Evidence: feature branch and `main` were pushed at `c498f134086db346fb6f7248e19837c18fba3478`; annotated
+tag `v1.10.0-root-preview.24` dereferences to the same commit. GitHub published a non-draft prerelease at
+`https://github.com/Gs-ygc/yinxing/releases/tag/v1.10.0-root-preview.24` with exactly
+`yinxing-1.10.0-root-preview.24-debug.apk` (8,681,655 bytes) and `SHA256SUMS.txt` (107 bytes). Both assets
+were downloaded into fresh directory `/tmp/yinxing-preview24-release.6ynUJc`; remote checksum verification
+passed and `cmp` proved the remote APK byte-identical to the local verified APK. Remote `aapt2` metadata still
+reported package/version 40/`1.10.0-root-preview.24`, and the release body retained the no-device-claim boundary.
