@@ -3,16 +3,15 @@ package com.yinxing.launcher.feature.incoming
 import android.content.Context
 import android.content.res.Configuration
 import android.text.TextUtils
-import android.view.ContextThemeWrapper
-import android.view.LayoutInflater
 import android.view.MotionEvent
 import android.view.View
-import android.widget.FrameLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.graphics.ColorUtils
+import androidx.core.view.ViewCompat
 import androidx.core.widget.NestedScrollView
-import androidx.test.core.app.ApplicationProvider
 import com.google.android.material.button.MaterialButton
+import com.google.android.material.card.MaterialCardView
 import com.yinxing.launcher.R
 import kotlin.math.roundToInt
 import org.junit.Assert.assertEquals
@@ -56,6 +55,63 @@ class IncomingCallFailureDialogTest {
         assertTrue(retry.minimumHeight >= activity.dp(68))
         assertEquals(systemCall.text, systemCall.contentDescription)
         assertEquals(retry.text, retry.contentDescription)
+        assertTrue(buttonContrast(systemCall) >= 4.5)
+        controller.close()
+    }
+
+    @Test
+    @Config(sdk = [34], qualifiers = "night")
+    fun primaryActionKeepsHighContrastInNightMode() {
+        val controller = Robolectric.buildActivity(IncomingCallFailureDialogTestActivity::class.java).setup()
+        val activity = controller.get()
+        val dialog = activity.showIncomingCallFailureDialog(
+            callerName = "王大爷",
+            action = IncomingCallFailedAction.ACCEPT,
+            reason = reason(IncomingCallFailureCategory.CallAction),
+            onOpenSystemCall = { SystemCallUiRequestResult.Requested },
+            onRetry = {}
+        )
+
+        assertTrue(
+            buttonContrast(
+                dialog.requireView(R.id.btn_incoming_call_system_ui)
+            ) >= 4.5
+        )
+        controller.close()
+    }
+
+    @Test
+    fun dialogExposesPaneHeadingAndLiveFailureMessage() {
+        val controller = Robolectric.buildActivity(IncomingCallFailureDialogTestActivity::class.java).setup()
+        val activity = controller.get()
+        val dialog = activity.showIncomingCallFailureDialog(
+            callerName = "王大爷",
+            action = IncomingCallFailedAction.ACCEPT,
+            reason = reason(IncomingCallFailureCategory.PhonePermission),
+            onOpenSystemCall = {
+                SystemCallUiRequestResult.Failed(SecurityException("show denied"))
+            },
+            onRetry = {}
+        )
+        val title = dialog.requireView<TextView>(R.id.tv_incoming_call_failure_title)
+        val message = dialog.requireView<TextView>(R.id.tv_incoming_call_failure_message)
+        val pane = requireNotNull(title.parent?.parent?.parent as? MaterialCardView)
+
+        assertEquals(title.text, ViewCompat.getAccessibilityPaneTitle(pane))
+        assertTrue(ViewCompat.isAccessibilityHeading(title))
+        assertEquals(
+            View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE,
+            message.accessibilityLiveRegion
+        )
+        dialog.requireView<View>(R.id.btn_incoming_call_system_ui).performClick()
+        assertEquals(
+            activity.getString(R.string.incoming_call_failure_system_ui_failed_message),
+            message.text.toString()
+        )
+        assertEquals(
+            View.ACCESSIBILITY_LIVE_REGION_ASSERTIVE,
+            message.accessibilityLiveRegion
+        )
         controller.close()
     }
 
@@ -224,48 +280,60 @@ class IncomingCallFailureDialogTest {
     }
 
     @Test
+    @Config(sdk = [34], qualifiers = "w360dp-h540dp")
     fun largeTextLayoutStaysBoundedAndActionsRemainReachableByScrolling() {
-        val baseContext: Context = ApplicationProvider.getApplicationContext()
-        val largeTextContext = ContextThemeWrapper(
-            baseContext.createConfigurationContext(
-                Configuration(baseContext.resources.configuration).apply { fontScale = 2f }
-            ),
-            R.style.Theme_OldLauncher
+        val controller = Robolectric.buildActivity(
+            LargeTextIncomingCallFailureDialogTestActivity::class.java
+        ).setup()
+        val activity = controller.get()
+        val titleText =
+            "住在上海负责照护和联系的女儿小王以及紧急备用联系人小王家属"
+        val dialog = activity.showIncomingCallFailureDialog(
+            callerName = titleText,
+            action = IncomingCallFailedAction.ACCEPT,
+            reason = reason(IncomingCallFailureCategory.PhonePermission),
+            onOpenSystemCall = { SystemCallUiRequestResult.Requested },
+            onRetry = {}
         )
-        val root = LayoutInflater.from(largeTextContext).inflate(
-            R.layout.dialog_incoming_call_failure,
-            FrameLayout(largeTextContext),
-            false
-        )
-        val titleText = "还没有接通 住在上海负责照护和联系的女儿小王以及紧急备用联系人小王家属"
-        val messageText = largeTextContext.getString(R.string.incoming_call_failure_permission_message)
-        val title = root.findViewById<TextView>(R.id.tv_incoming_call_failure_title)
-        val message = root.findViewById<TextView>(R.id.tv_incoming_call_failure_message)
-        val scroll = root.findViewById<NestedScrollView>(R.id.scroll_incoming_call_failure)
-        val systemCall = root.findViewById<MaterialButton>(R.id.btn_incoming_call_system_ui)
-        val retry = root.findViewById<MaterialButton>(R.id.btn_incoming_call_retry)
-        title.text = titleText
-        message.text = messageText
-
-        val phoneWidth = largeTextContext.dp(360)
-        val availableHeight = largeTextContext.dp(540)
-        root.measure(
-            View.MeasureSpec.makeMeasureSpec(phoneWidth, View.MeasureSpec.AT_MOST),
+        val title = dialog.requireView<TextView>(R.id.tv_incoming_call_failure_title)
+        val message = dialog.requireView<TextView>(R.id.tv_incoming_call_failure_message)
+        val scroll = dialog.requireView<NestedScrollView>(R.id.scroll_incoming_call_failure)
+        val systemCall = dialog.requireView<MaterialButton>(R.id.btn_incoming_call_system_ui)
+        val retry = dialog.requireView<MaterialButton>(R.id.btn_incoming_call_retry)
+        val window = requireNotNull(dialog.window)
+        val decor = window.decorView
+        val phoneWidth = activity.resources.displayMetrics.widthPixels
+        val availableHeight = activity.resources.displayMetrics.heightPixels
+        val expectedDialogWidth = (phoneWidth * 0.92f).toInt()
+        decor.measure(
+            View.MeasureSpec.makeMeasureSpec(expectedDialogWidth, View.MeasureSpec.EXACTLY),
             View.MeasureSpec.makeMeasureSpec(availableHeight, View.MeasureSpec.AT_MOST)
         )
-        root.layout(0, 0, root.measuredWidth, root.measuredHeight)
+        decor.layout(0, 0, decor.measuredWidth, decor.measuredHeight)
         scroll.fullScroll(View.FOCUS_DOWN)
 
-        assertEquals(2f, largeTextContext.resources.configuration.fontScale, 0f)
+        assertEquals(2f, activity.resources.configuration.fontScale, 0f)
+        assertEquals(expectedDialogWidth, window.attributes.width)
         assertEquals(2, title.maxLines)
         assertEquals(TextUtils.TruncateAt.END, title.ellipsize)
-        assertEquals(titleText, title.createAccessibilityNodeInfo().text.toString())
-        assertEquals(messageText, message.createAccessibilityNodeInfo().text.toString())
-        assertTrue(root.measuredWidth <= phoneWidth)
-        assertTrue(root.measuredHeight <= availableHeight)
-        assertTrue(systemCall.minimumHeight >= largeTextContext.dp(68))
-        assertTrue(retry.minimumHeight >= largeTextContext.dp(68))
+        assertEquals(
+            "还没有接通 $titleText",
+            title.createAccessibilityNodeInfo().text.toString()
+        )
+        assertEquals(
+            activity.getString(R.string.incoming_call_failure_permission_message),
+            message.createAccessibilityNodeInfo().text.toString()
+        )
+        assertEquals("打开系统电话", systemCall.text.toString())
+        assertEquals("重新接听", retry.text.toString())
+        assertEquals(0, systemCall.totalEllipsisCount())
+        assertEquals(0, retry.totalEllipsisCount())
+        assertTrue(decor.measuredWidth <= phoneWidth)
+        assertTrue(decor.measuredHeight <= availableHeight)
+        assertTrue(systemCall.minimumHeight >= activity.dp(68))
+        assertTrue(retry.minimumHeight >= activity.dp(68))
         assertTrue(retry.bottom - scroll.scrollY <= scroll.height)
+        controller.close()
     }
 
     private fun reason(category: IncomingCallFailureCategory): IncomingCallFailureReason {
@@ -275,9 +343,28 @@ class IncomingCallFailureDialogTest {
     private fun Context.dp(value: Int): Int =
         (value * resources.displayMetrics.density).roundToInt()
 
+    private fun buttonContrast(button: MaterialButton): Double {
+        val background = requireNotNull(button.backgroundTintList).defaultColor
+        return ColorUtils.calculateContrast(button.currentTextColor, background)
+    }
+
+    private fun TextView.totalEllipsisCount(): Int {
+        val textLayout = requireNotNull(layout)
+        return (0 until textLayout.lineCount).sumOf(textLayout::getEllipsisCount)
+    }
+
     private inline fun <reified T : View> androidx.appcompat.app.AlertDialog.requireView(id: Int): T {
         return requireNotNull(findViewById(id))
     }
 }
 
 class IncomingCallFailureDialogTestActivity : AppCompatActivity()
+
+class LargeTextIncomingCallFailureDialogTestActivity : AppCompatActivity() {
+    override fun attachBaseContext(newBase: Context) {
+        val configuration = Configuration(newBase.resources.configuration).apply {
+            fontScale = 2f
+        }
+        super.attachBaseContext(newBase.createConfigurationContext(configuration))
+    }
+}

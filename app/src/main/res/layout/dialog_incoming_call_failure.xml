@@ -35,6 +35,7 @@
                 style="@style/TextAppearance.OldLauncher.DialogMessage"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
+                android:accessibilityLiveRegion="assertive"
                 android:layout_marginTop="16dp"
                 android:gravity="center"
                 tools:text="银杏刚才没有完成这一步，可以重新尝试。" />
@@ -58,7 +59,7 @@
                 android:textColor="@android:color/white"
                 android:textSize="22sp"
                 android:textStyle="bold"
-                app:backgroundTint="@color/launcher_action"
+                app:backgroundTint="@color/launcher_phone_action"
                 app:cornerRadius="18dp" />
 
             <com.google.android.material.button.MaterialButton

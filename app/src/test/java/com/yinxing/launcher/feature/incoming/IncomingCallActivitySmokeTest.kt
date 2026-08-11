@@ -5,6 +5,7 @@ import android.app.Application
 import android.content.Context
 import android.content.Intent
 import android.os.Looper
+import android.telephony.TelephonyManager
 import android.view.View
 import android.widget.TextView
 import androidx.cardview.widget.CardView
@@ -17,6 +18,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -345,6 +347,110 @@ class IncomingCallActivitySmokeTest {
         assertEquals(View.GONE, activity.tv_countdown.visibility)
     }
 
+    @Test
+    fun manualFailureSurvivesActivityRecreation() {
+        denyAnswerPermission()
+        val controller = buildController("王大爷", autoAnswer = false)
+        controller.get().btn_accept.performClick()
+        idle()
+        val firstDialog = latestRecoveryDialog()
+
+        controller.recreate()
+        idle()
+
+        val restoredDialog = latestRecoveryDialog()
+        assertFalse(firstDialog.isShowing)
+        assertNotSame(firstDialog, restoredDialog)
+        assertTrue(restoredDialog.isShowing)
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+        assertEquals(View.GONE, controller.get().tv_countdown.visibility)
+    }
+
+    @Test
+    fun autoAnswerFailureSurvivesRecreationWithoutRestartingCountdown() {
+        denyAnswerPermission()
+        prefs().setAutoAnswerEnabled(true)
+        val controller = buildController("王大爷", autoAnswer = true)
+        controller.get().btn_accept.performClick()
+        idle()
+
+        controller.recreate()
+        idle()
+
+        assertTrue(latestRecoveryDialog().isShowing)
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+        assertEquals(View.GONE, controller.get().tv_countdown.visibility)
+        assertTrue(controller.get().tv_countdown.text.isEmpty())
+    }
+
+    @Test
+    fun cancelledRecoveryDoesNotRestartAutoAnswerAfterRecreation() {
+        denyAnswerPermission()
+        prefs().setAutoAnswerEnabled(true)
+        val controller = buildController("王大爷", autoAnswer = true)
+        controller.get().btn_accept.performClick()
+        idle()
+        val dialog = latestRecoveryDialog()
+        dialog.onBackPressed()
+        assertFalse(dialog.isShowing)
+
+        controller.recreate()
+        idle()
+
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+        assertEquals(View.GONE, controller.get().tv_countdown.visibility)
+        assertTrue(controller.get().tv_countdown.text.isEmpty())
+        assertFalse(latestRecoveryDialog().isShowing)
+    }
+
+    @Test
+    fun triggerFailureSurvivesRecreationWithoutReplayingTriggerAction() {
+        denyAnswerPermission()
+        val controller = buildController(
+            callerName = "通知接听",
+            autoAnswer = false,
+            triggerAction = IncomingCallActivity.TRIGGER_ACTION_ACCEPT
+        )
+        idle()
+        assertTrue(latestRecoveryDialog().isShowing)
+        assertNull(controller.get().intent.getStringExtra(IncomingCallActivity.EXTRA_TRIGGER_ACTION))
+        grantAnswerPermission()
+
+        controller.recreate()
+        idle()
+
+        assertFalse(controller.get().isFinishing)
+        assertTrue(latestRecoveryDialog().isShowing)
+        assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+    }
+
+    @Test
+    fun pendingSystemUiReturnDoesNotRestartAutoAnswerForRingingOrUnknownState() {
+        listOf(TelephonyManager.CALL_STATE_RINGING, 99).forEach { deviceCallState ->
+            denyAnswerPermission()
+            shadowOf(context as Application).grantPermissions(Manifest.permission.READ_PHONE_STATE)
+            prefs().setAutoAnswerEnabled(true)
+            val controller = buildController("王大爷", autoAnswer = true)
+            controller.get().btn_accept.performClick()
+            idle()
+            val dialog = latestRecoveryDialog()
+            dialog.requireView<View>(R.id.btn_incoming_call_system_ui).performClick()
+            idle()
+            assertFalse(dialog.isShowing)
+            shadowOf(context.getSystemService(TelephonyManager::class.java))
+                .setCallState(deviceCallState)
+
+            controller.recreate()
+            idle()
+
+            assertFalse(controller.get().isFinishing)
+            assertTrue(IncomingCallSessionState.current() is IncomingCallState.Failed)
+            assertEquals(View.GONE, controller.get().tv_countdown.visibility)
+            assertTrue(controller.get().tv_countdown.text.isEmpty())
+            controller.destroy()
+        }
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // onNewIntent — 刷新来电人
     // ═══════════════════════════════════════════════════════════════════════
@@ -583,6 +689,10 @@ class IncomingCallActivitySmokeTest {
         shadowOf(context as Application).denyPermissions(Manifest.permission.ANSWER_PHONE_CALLS)
     }
 
+    private fun grantAnswerPermission() {
+        shadowOf(context as Application).grantPermissions(Manifest.permission.ANSWER_PHONE_CALLS)
+    }
+
     private fun latestRecoveryDialog(): AlertDialog {
         return requireNotNull(ShadowDialog.getLatestDialog() as? AlertDialog)
     }
@@ -615,10 +725,14 @@ class IncomingCallActivitySmokeTest {
             buildIntent(callerName, autoAnswer, triggerAction)
         ).setup().get()
 
-    private fun buildController(callerName: String, autoAnswer: Boolean = false) =
+    private fun buildController(
+        callerName: String,
+        autoAnswer: Boolean = false,
+        triggerAction: String? = null
+    ) =
         Robolectric.buildActivity(
             IncomingCallActivity::class.java,
-            buildIntent(callerName, autoAnswer)
+            buildIntent(callerName, autoAnswer, triggerAction)
         ).setup()
 
 

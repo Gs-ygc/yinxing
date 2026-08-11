@@ -40,11 +40,24 @@ class IncomingCallActivity : AppCompatActivity() {
     private var announcer: IncomingCallAnnouncer? = null
     private var currentCallerName: String = ""
     private var recoveryDialog: AlertDialog? = null
+    private var recoveryContext: RecoveryContext? = null
+
+    private data class RecoveryContext(
+        val action: IncomingCallFailedAction,
+        val reason: IncomingCallFailureReason
+    )
 
     companion object {
         private const val TAG = "IncomingCallActivity"
         private const val STATE_AWAITING_SYSTEM_UI_RETURN =
             "incoming_call_awaiting_system_ui_return"
+        private const val STATE_RECOVERY_PRESENT = "incoming_call_recovery_present"
+        private const val STATE_RECOVERY_DIALOG_VISIBLE =
+            "incoming_call_recovery_dialog_visible"
+        private const val STATE_RECOVERY_ACTION = "incoming_call_recovery_action"
+        private const val STATE_RECOVERY_CATEGORY = "incoming_call_recovery_category"
+        private const val STATE_RECOVERY_DETAIL = "incoming_call_recovery_detail"
+        private const val STATE_CALLER_NAME = "incoming_call_caller_name"
 
         const val EXTRA_CALLER_NAME = "extra_caller_name"
         const val EXTRA_AUTO_ANSWER = "extra_auto_answer"
@@ -98,7 +111,9 @@ class IncomingCallActivity : AppCompatActivity() {
         btnAccept.setOnClickListener { acceptCall() }
         btnDecline.setOnClickListener { declineCall() }
 
-        applyIntent(intent)
+        if (!restoreInterruptedRecovery(savedInstanceState)) {
+            applyIntent(intent, allowTriggerAction = savedInstanceState == null)
+        }
     }
 
     override fun onResume() {
@@ -111,6 +126,17 @@ class IncomingCallActivity : AppCompatActivity() {
             STATE_AWAITING_SYSTEM_UI_RETURN,
             recoveryCoordinator.awaitingSystemUiReturn
         )
+        outState.putString(STATE_CALLER_NAME, currentCallerName)
+        recoveryContext?.let { recovery ->
+            outState.putBoolean(STATE_RECOVERY_PRESENT, true)
+            outState.putBoolean(
+                STATE_RECOVERY_DIALOG_VISIBLE,
+                recoveryDialog?.isShowing == true
+            )
+            outState.putString(STATE_RECOVERY_ACTION, recovery.action.name)
+            outState.putString(STATE_RECOVERY_CATEGORY, recovery.reason.category.code)
+            outState.putString(STATE_RECOVERY_DETAIL, recovery.reason.detail)
+        }
         super.onSaveInstanceState(outState)
     }
 
@@ -132,13 +158,15 @@ class IncomingCallActivity : AppCompatActivity() {
         super.onDestroy()
     }
 
-    private fun applyIntent(intent: Intent) {
+    private fun applyIntent(intent: Intent, allowTriggerAction: Boolean = true) {
         val callerName = resolveCallerName(intent.getStringExtra(EXTRA_CALLER_NAME))
         currentCallerName = callerName
         val incomingNumber = intent.getStringExtra(EXTRA_INCOMING_NUMBER).orEmpty()
         val knownContact = intent.getBooleanExtra(EXTRA_KNOWN_CONTACT, false)
         val preferences = LauncherPreferences.getInstance(this)
         val triggerAction = intent.getStringExtra(EXTRA_TRIGGER_ACTION)
+            .takeIf { allowTriggerAction }
+        intent.removeExtra(EXTRA_TRIGGER_ACTION)
         
         val intentAutoAnswer = intent.getBooleanExtra(EXTRA_AUTO_ANSWER, false)
         val prefAutoAnswerEnabled = preferences.isAutoAnswerEnabled()
@@ -190,6 +218,7 @@ class IncomingCallActivity : AppCompatActivity() {
         actionInProgress = false
         riskJob?.cancel()
         dismissRecoveryDialog()
+        recoveryContext = null
         recoveryCoordinator.reset()
         setActionButtonsEnabled(true)
         hideCountdown()
@@ -229,6 +258,7 @@ class IncomingCallActivity : AppCompatActivity() {
 
         val result = answerRingingCall()
         if (result.success) {
+            recoveryContext = null
             IncomingCallSessionState.answered()
             IncomingCallDiagnostics.recordAcceptSuccess(this, result.detail)
             applyAnsweredCallAudioStrategy()
@@ -252,6 +282,7 @@ class IncomingCallActivity : AppCompatActivity() {
 
         val result = endRingingCall()
         if (result.success) {
+            recoveryContext = null
             IncomingCallSessionState.rejected()
             IncomingCallDiagnostics.recordDeclineSuccess(this, result.detail)
             IncomingCallForegroundService.stop(this)
@@ -276,6 +307,7 @@ class IncomingCallActivity : AppCompatActivity() {
             category = IncomingCallFailureCategory.Unknown,
             detail = result.detail
         )
+        recoveryContext = RecoveryContext(action, reason)
         showRecoveryDialog(action, reason, retry)
     }
 
@@ -304,7 +336,10 @@ class IncomingCallActivity : AppCompatActivity() {
                     }
                 }
             },
-            onRetry = retry
+            onRetry = {
+                recoveryContext = null
+                retry()
+            }
         )
         dialog.setOnDismissListener {
             if (recoveryDialog === dialog) {
@@ -322,12 +357,14 @@ class IncomingCallActivity : AppCompatActivity() {
     internal fun applyRecoveryResumeDecision(decision: IncomingCallResumeDecision) {
         when (decision) {
             IncomingCallResumeDecision.FINISH_ANSWERED -> {
+                recoveryContext = null
                 IncomingCallSessionState.answered()
                 IncomingCallDiagnostics.recordSystemCallUiAnswered(this)
                 IncomingCallForegroundService.stop(this)
                 finish()
             }
             IncomingCallResumeDecision.FINISH_ENDED -> {
+                recoveryContext = null
                 IncomingCallSessionState.idle()
                 IncomingCallDiagnostics.recordSystemCallUiEnded(this)
                 IncomingCallForegroundService.stop(this)
@@ -337,6 +374,53 @@ class IncomingCallActivity : AppCompatActivity() {
             IncomingCallResumeDecision.KEEP_RINGING,
             IncomingCallResumeDecision.KEEP_UNKNOWN -> Unit
         }
+    }
+
+    private fun restoreInterruptedRecovery(savedInstanceState: Bundle?): Boolean {
+        if (savedInstanceState == null) return false
+        val awaitingSystemUi = savedInstanceState.getBoolean(STATE_AWAITING_SYSTEM_UI_RETURN)
+        val hasRecovery = savedInstanceState.getBoolean(STATE_RECOVERY_PRESENT)
+        if (!awaitingSystemUi && !hasRecovery) return false
+
+        currentCallerName = resolveCallerName(
+            savedInstanceState.getString(STATE_CALLER_NAME)
+                ?: intent.getStringExtra(EXTRA_CALLER_NAME)
+        )
+        tvCaller.text = currentCallerName
+        renderRisk(null)
+        hideCountdown()
+        actionInProgress = false
+        setActionButtonsEnabled(true)
+        intent.removeExtra(EXTRA_TRIGGER_ACTION)
+
+        val action = IncomingCallFailedAction.entries.firstOrNull {
+            it.name == savedInstanceState.getString(STATE_RECOVERY_ACTION)
+        }
+        val category = IncomingCallFailureCategory.fromCode(
+            savedInstanceState.getString(STATE_RECOVERY_CATEGORY)
+        )
+        val reason = IncomingCallFailureReason(
+            category = category ?: IncomingCallFailureCategory.Unknown,
+            detail = savedInstanceState.getString(STATE_RECOVERY_DETAIL)
+        )
+        if (hasRecovery && action != null) {
+            recoveryContext = RecoveryContext(action, reason)
+        }
+        IncomingCallSessionState.failed(reason)
+
+        if (
+            !awaitingSystemUi &&
+            savedInstanceState.getBoolean(STATE_RECOVERY_DIALOG_VISIBLE) &&
+            action != null
+        ) {
+            showRecoveryDialog(action, reason) {
+                when (action) {
+                    IncomingCallFailedAction.ACCEPT -> acceptCall()
+                    IncomingCallFailedAction.DECLINE -> declineCall()
+                }
+            }
+        }
+        return true
     }
 
     private fun configureWindowForIncomingCall() {

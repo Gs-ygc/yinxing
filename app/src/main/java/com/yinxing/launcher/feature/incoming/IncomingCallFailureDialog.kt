@@ -4,6 +4,7 @@ import android.view.WindowManager
 import android.widget.TextView
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.view.ViewCompat
 import com.google.android.material.button.MaterialButton
 import com.yinxing.launcher.R
 
@@ -43,11 +44,14 @@ internal fun AppCompatActivity.showIncomingCallFailureDialog(
         R.id.btn_incoming_call_system_ui
     )
     val retryButton = dialogView.findViewById<MaterialButton>(R.id.btn_incoming_call_retry)
-    dialogView.findViewById<TextView>(R.id.tv_incoming_call_failure_title).text =
-        getString(titleRes, displayName)
+    val titleView = dialogView.findViewById<TextView>(R.id.tv_incoming_call_failure_title)
+    val titleText = getString(titleRes, displayName)
+    titleView.text = titleText
     messageView.setText(messageRes)
     retryButton.setText(retryRes)
     retryButton.contentDescription = retryButton.text
+    ViewCompat.setAccessibilityPaneTitle(dialogView, titleText)
+    ViewCompat.setAccessibilityHeading(titleView, true)
 
     val dialog = AlertDialog.Builder(this)
         .setView(dialogView)
