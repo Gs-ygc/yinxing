@@ -2,11 +2,18 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the elderly home screen's transient external-app launch failure Toast with a persistent, large-target recovery dialog that offers an immediate retry and a caregiver settings route without changing successful launches.
+**Goal:** Replace the elderly home screen's transient external-app launch failure Toast with a persistent, large-target recovery dialog, then incorporate the user's pre-release device feedback by replacing the generic Root failure state with evidence-based caregiver diagnostics.
 
-**Architecture:** Keep `HomeAppLauncher` as the single launch/gate owner. Add a small dialog helper following the existing phone fallback-dialog pattern, then let `HomeNavigator` own one dialog reference, retry through the same launcher, open the existing `SettingsActivity`, and clear the reference on dismiss/destroy. No new service, timer, Root command, or package mutation is introduced.
+**Architecture:** Keep `HomeAppLauncher` as the single launch/gate owner. Add a small dialog helper following the existing phone fallback-dialog pattern, then let `HomeNavigator` own one dialog reference, retry through the same launcher, open the existing `SettingsActivity`, and clear the reference on dismiss/destroy. For Root observability, classify the already existing fixed `su -c status.sh` result across process, authorization/script, timeout/output, and protocol layers; do not add a second probe, service, timer, or module mutation.
 
-**Tech Stack:** Kotlin, Android Views/XML, AppCompat `AlertDialog`, MaterialCardView, Robolectric/JUnit.
+**Tech Stack:** Kotlin, Android Views/XML, AppCompat `AlertDialog`, MaterialCardView, coroutines, Robolectric/JUnit.
+
+## User-directed amendment (2026-08-11)
+
+Before Preview 24 was published, the user rejected the generic “Root 不可用” diagnosis because it hid
+whether `su`, KernelSU authorization, module scripts, timeout, exit status, or status parsing had failed.
+Preview 24 therefore also includes the narrowly scoped APK diagnostic work in Task 5. The Root Guard module,
+boot behavior, keepalive policy, accessibility recovery, BusyBox assets, and background scheduling remain unchanged.
 
 ## Global Constraints
 
@@ -17,7 +24,9 @@
 - Never automatically remove, disable, reorder, or rewrite a caregiver-selected app entry.
 - Both dialog actions must be large stable targets (minimum `68dp`) with visible text and accessibility descriptions.
 - Every production behavior change needs a test that was observed failing before implementation; run focused tests before broader verification.
-- Do not touch Root, KernelSU module, BusyBox, manifest, services, or background scheduling.
+- The home-app slice must not touch Root. The user-directed diagnostic amendment may modify only the APK's
+  existing Root command result model/repository/settings rendering; do not modify the KernelSU module, BusyBox,
+  manifest, services, boot scripts, keepalive policy, or background scheduling.
 
 ---
 
@@ -165,8 +174,9 @@ bash gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --rerun-tasks
 
 - [x] **Step 2: Inspect the final UI/resource and behavioral diff**
 
-Evidence: `git diff --check` passed; the focused tests assert one successful launch, both action targets
-are at least 68dp with content descriptions, and the source diff contains no new timers/services/Root strings.
+Evidence before the user-directed Task 5 amendment: `git diff --check` passed; the focused tests assert one
+successful launch, and both action targets are at least 68dp with content descriptions. Task 5 separately
+verifies that its Root diagnostic change adds no timer, service, or background command.
 
 - [x] **Step 3: Commit verification evidence and hand off for independent review**
 
@@ -216,8 +226,53 @@ two pre-existing RootCommandRunner API errors and no error in changed files.
 Evidence: `aapt2` reports package `com.yinxing.launcher`, versionCode 40, versionName
 `1.10.0-root-preview.24`, min/target 24/36; `apksigner` reports one Android Debug signer and v2=true.
 `sha256sum -c` passed for `38f12bc412f2bd82e7156f112803dac857c4b22fd074844fddf76881c3755381`.
-Root boundary scan is clean.
+Pre-amendment APK and Root-module boundary scan was clean. Task 5 requires a fresh APK/hash and a new boundary
+scan before publishing; the old checksum is not release evidence after its source changes.
 
-- [ ] **Step 4: Push, tag, publish, and fresh-download verify**
+### Task 5: Replace generic Root failure output with evidence-based diagnostics
+
+**Files:**
+- Modify: `app/src/main/java/com/yinxing/launcher/common/root/RootCommandRunner.kt`
+- Modify: `app/src/main/java/com/yinxing/launcher/common/root/RootHealthRepository.kt`
+- Modify: `app/src/main/java/com/yinxing/launcher/common/root/RootHealthSnapshot.kt`
+- Modify: `app/src/main/java/com/yinxing/launcher/feature/settings/SettingsRootHealthSheet.kt`
+- Modify: `app/src/main/res/values/strings.xml`
+- Modify: focused Root/repository/settings tests
+- Create: `docs/superpowers/specs/2026-08-11-preview-24-root-failure-diagnostics-design.md`
+
+- [x] **Step 1: Add failing tests for exact failure categories**
+
+Evidence: focused compilation failed only because `KERNEL_SU_EXECUTABLE` and
+`SCRIPT_EXECUTION_BLOCKED` did not exist. Earlier red runs likewise proved the missing reason/exit-code fields
+and status-format mapping before implementation. A separate first attempt that timed out downloading Gradle is
+recorded as infrastructure noise, not test evidence.
+
+- [x] **Step 2: Implement classification without adding probes**
+
+Evidence: the runner now uses KernelSU's `/system/bin/su` compatibility entry and classifies start failure,
+explicit authorization denial, Root Guard script denial/missing dependency, timeout, output overflow, generic
+exit code, and status format. The repository preserves both status and recovery-action failures. UI badges and
+summaries show the specific reason, current UID where KernelSU ambiguity is unavoidable, and the next action.
+
+- [x] **Step 3: Run the complete Root/settings regression slice**
+
+```bash
+/usr/bin/time -p env GRADLE_USER_HOME=/nfs/home/leguochun/yinxing/.gradle-user-home \
+  bash gradlew :app:testDebugUnitTest \
+  --tests 'com.yinxing.launcher.common.root.*' \
+  --tests com.yinxing.launcher.feature.settings.SettingsActivitySmokeTest \
+  --no-daemon --console=plain
+```
+
+Evidence: 60 tests, 0 failures, 0 errors, 0 skipped; Gradle succeeded in 34 seconds. Robolectric printed its
+known `Surface.release` cleanup warning, but no test or task failed.
+
+- [ ] **Step 4: Run final full verification and independent review**
+
+Force the complete unit/APK/androidTest build again, rerun lint and classify only current findings, review the
+full `ec83376..HEAD` diff, then regenerate APK metadata/signature/hash evidence. Do not reuse the pre-amendment
+APK checksum.
+
+- [ ] **Step 4: Push, tag, publish, and fresh-download verify (only after Task 5 Step 4)**
 
 Commit metadata/release notes, push the feature branch, fast-forward/push `main`, create annotated tag `v1.10.0-root-preview.24`, and publish a non-draft prerelease to `Gs-ygc/yinxing`. Download both remote assets into a fresh temporary directory and require checksum success, byte-for-byte APK equality, exact asset names/body, remote branch/tag equality, and no device claims when `adb devices -l` is empty.
