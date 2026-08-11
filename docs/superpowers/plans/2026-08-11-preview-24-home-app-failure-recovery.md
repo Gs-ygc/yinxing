@@ -162,13 +162,13 @@ git commit -m "feat: make home app handoff failures recoverable"
 - Modify: `docs/superpowers/specs/2026-08-11-preview-24-home-app-failure-recovery-design.md` only if review finds a design correction.
 - Modify: `docs/superpowers/plans/2026-08-11-preview-24-home-app-failure-recovery.md` to mark completed steps and record evidence.
 
-- [x] **Step 1: Run the complete Android verification matrix**
+- [x] **Step 1: Run the pre-amendment Android verification matrix (historical)**
 
 ```bash
 bash gradlew testDebugUnitTest lintDebug assembleDebug --no-daemon --rerun-tasks
 ```
 
-  Evidence: 80/80 tasks succeeded in 96.49 seconds; 59 JUnit XML files reported 449 tests, 0 failures,
+  Pre-amendment evidence: 80/80 tasks succeeded in 96.49 seconds; 59 JUnit XML files reported 449 tests, 0 failures,
   0 errors, and 0 skipped. `lintDebug` exited 1 with only the unchanged `RootCommandRunner.kt:72` and
   `:150` API 26 errors plus 135 warnings; no Preview24 file had a lint error.
 
@@ -218,16 +218,18 @@ Run in isolation with the known complete cache:
   --rerun-tasks --no-daemon --console=plain
 ```
 
-Evidence: final forced run succeeded (104.46 seconds); tests remained 449/0/0/0. Final lint classification is
-two pre-existing RootCommandRunner API errors and no error in changed files.
+Evidence after the user-directed diagnostic amendment: final forced run succeeded (97.39 seconds), 80/80 tasks
+executed, and 59 JUnit XML files reported 462 tests, 0 failures, 0 errors, and 0 skipped. Final lint found the
+same two inherited `Process.waitFor(timeout)` API 26 errors at current lines 106/184 plus 135 warnings; no new
+diagnostic-specific lint finding was introduced.
 
 - [x] **Step 3: Verify APK metadata, signature, checksums, and Root boundary**
 
 Evidence: `aapt2` reports package `com.yinxing.launcher`, versionCode 40, versionName
 `1.10.0-root-preview.24`, min/target 24/36; `apksigner` reports one Android Debug signer and v2=true.
-`sha256sum -c` passed for `38f12bc412f2bd82e7156f112803dac857c4b22fd074844fddf76881c3755381`.
-Pre-amendment APK and Root-module boundary scan was clean. Task 5 requires a fresh APK/hash and a new boundary
-scan before publishing; the old checksum is not release evidence after its source changes.
+`sha256sum -c` passed for `ec03e3b490ca91074086102a1e89e7a83d951078abf1f71b9dc4cd93cda186b1`;
+the APK is 8,681,655 bytes. The branch diff has no `root/` module, manifest, service, or background-scheduling
+change.
 
 ### Task 5: Replace generic Root failure output with evidence-based diagnostics
 
@@ -244,15 +246,20 @@ scan before publishing; the old checksum is not release evidence after its sourc
 
 Evidence: focused compilation failed only because `KERNEL_SU_EXECUTABLE` and
 `SCRIPT_EXECUTION_BLOCKED` did not exist. Earlier red runs likewise proved the missing reason/exit-code fields
-and status-format mapping before implementation. A separate first attempt that timed out downloading Gradle is
-recorded as infrastructure noise, not test evidence.
+and status-format mapping before implementation. Review-driven red tests then failed on generic permission and
+internal dependency misclassification, and `SCRIPT_UNAVAILABLE` failed compilation before the AOSP ambiguity
+state was implemented. A separate first attempt that timed out downloading Gradle is infrastructure noise, not
+test evidence.
 
 - [x] **Step 2: Implement classification without adding probes**
 
 Evidence: the runner now uses KernelSU's `/system/bin/su` compatibility entry and classifies start failure,
-explicit authorization denial, Root Guard script denial/missing dependency, timeout, output overflow, generic
-exit code, and status format. The repository preserves both status and recovery-action failures. UI badges and
-summaries show the specific reason, current UID where KernelSU ambiguity is unavoidable, and the next action.
+direct Root Guard script denial/missing path, AOSP's ambiguous `inaccessible or not found`, unqualified
+permission denial, timeout, output overflow, generic exit code, and status format. Review corrections removed
+over-broad authorization and `not found` inference: only canonical errors ending in a fixed script path receive
+a script-specific label, while the AOSP phrase remains explicitly ambiguous. The repository preserves both
+status and recovery-action failures. UI badges and summaries show the observed reason, current UID where
+KernelSU ambiguity is unavoidable, and the next action.
 
 - [x] **Step 3: Run the complete Root/settings regression slice**
 
@@ -264,15 +271,17 @@ summaries show the specific reason, current UID where KernelSU ambiguity is unav
   --no-daemon --console=plain
 ```
 
-Evidence: 60 tests, 0 failures, 0 errors, 0 skipped; Gradle succeeded in 34 seconds. Robolectric printed its
-known `Surface.release` cleanup warning, but no test or task failed.
+Evidence: 62 tests, 0 failures, 0 errors, 0 skipped; Gradle succeeded in 35.71 seconds.
 
-- [ ] **Step 4: Run final full verification and independent review**
+- [x] **Step 4: Run final full verification and independent review**
 
-Force the complete unit/APK/androidTest build again, rerun lint and classify only current findings, review the
-full `ec83376..HEAD` diff, then regenerate APK metadata/signature/hash evidence. Do not reuse the pre-amendment
-APK checksum.
+Evidence: the final full build, lint classification, APK metadata/signature/hash checks, and `git diff --check`
+are recorded above. Two independent review passes found three over-inference issues; each was fixed with a red
+regression test. Final re-review reported no blocking code finding and confirmed no module/BusyBox/background
+change. No ADB device was connected, so no OnePlus 15 runtime claim was made.
 
-- [ ] **Step 4: Push, tag, publish, and fresh-download verify (only after Task 5 Step 4)**
+### Task 6: Push, tag, publish, and fresh-download verify
+
+- [ ] **Step 1: Publish only after Task 5 verification**
 
 Commit metadata/release notes, push the feature branch, fast-forward/push `main`, create annotated tag `v1.10.0-root-preview.24`, and publish a non-draft prerelease to `Gs-ygc/yinxing`. Download both remote assets into a fresh temporary directory and require checksum success, byte-for-byte APK equality, exact asset names/body, remote branch/tag equality, and no device claims when `adb devices -l` is empty.
