@@ -34,7 +34,7 @@ esac
 OUTPUT_DIR="$(dirname "$OUTPUT_ABS")"
 mkdir -p "$OUTPUT_DIR"
 
-for required in module.prop skip_mount service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
+for required in module.prop skip_mount customize.sh service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
     [ -f "$MODULE_DIR/$required" ] || die "required module file is missing: $required"
 done
 
@@ -78,6 +78,7 @@ find "$STAGING" -exec touch -t 198001010000 {} +
     zip -X -q "$OUTPUT_TMP" \
         module.prop \
         skip_mount \
+        customize.sh \
         service.sh \
         action.sh \
         uninstall.sh \

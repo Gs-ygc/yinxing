@@ -5076,7 +5076,7 @@ test_uninstall_completes_doze_when_home_removal_needs_retry() {
 }
 
 test_module_package() {
-    local rejection
+    local rejection installed_module installer_failure installer_status
 
     if rejection="$(bash "$REPO_ROOT/tools/package-yinxing-guard.sh" "$MODULE_ROOT" 2>&1)"; then
         fail "packager accepted the module source as its output"
@@ -5111,15 +5111,60 @@ test_module_package() {
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F 'yinxing_guard/' >/dev/null
     ! unzip -Z1 "$TEST_ROOT/module.zip" | grep -F '/tools/' >/dev/null
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'version=9.9.9-test'
-    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=18'
+    assert_contains <(unzip -p "$TEST_ROOT/module.zip" module.prop) 'versionCode=26'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/common.sh) 'MODULE_VERSION="9.9.9-test"'
     assert_contains <(unzip -p "$TEST_ROOT/module.zip" bin/uninstall-cleanup.sh) 'MODULE_VERSION="9.9.9-test"'
-    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.18'
-    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=18'
+    assert_contains "$MODULE_ROOT/module.prop" 'version=1.10.0-root-preview.26'
+    assert_contains "$MODULE_ROOT/module.prop" 'versionCode=26'
     for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
         zipinfo -l "$TEST_ROOT/module.zip" | grep -E "^-rwxr-xr-x .* ${executable}$" >/dev/null || \
             fail "$executable is not executable in the ZIP"
     done
+
+    installed_module="$TEST_ROOT/installed-module"
+    mkdir "$installed_module"
+    unzip -q "$TEST_ROOT/module.zip" -d "$installed_module"
+    find "$installed_module" -type d -exec chmod 0755 {} +
+    find "$installed_module" -type f -exec chmod 0644 {} +
+    [[ -f "$installed_module/customize.sh" ]] || \
+        fail "module does not restore script permissions after KernelSU installation"
+    command -v busybox >/dev/null 2>&1 || \
+        fail "busybox is required to verify the KernelSU installer shell"
+    ASH_STANDALONE=1 busybox ash -c '
+        set_perm() {
+            chmod "$4" "$1"
+        }
+        abort() {
+            printf "%s\n" "$1" >&2
+            exit 1
+        }
+        MODPATH="$1"
+        export MODPATH
+        . "$MODPATH/customize.sh"
+    ' yinxing-installer "$installed_module" || \
+        fail "customize.sh failed in KernelSU BusyBox standalone mode"
+    for executable in service.sh action.sh uninstall.sh bin/common.sh bin/guard.sh bin/status.sh bin/uninstall-cleanup.sh bin/kiosk-home.sh; do
+        [[ -x "$installed_module/$executable" ]] || \
+            fail "$executable is not executable after KernelSU installation"
+    done
+    if installer_failure="$(ASH_STANDALONE=1 busybox ash -c '
+        set_perm() {
+            return 1
+        }
+        abort() {
+            printf "%s\n" "$1" >&2
+            exit 86
+        }
+        MODPATH="$1"
+        export MODPATH
+        . "$MODPATH/customize.sh"
+    ' yinxing-installer "$installed_module" 2>&1)"; then
+        fail "customize.sh accepted a failed KernelSU set_perm call"
+    else
+        installer_status=$?
+    fi
+    assert_equals "86" "$installer_status" "customize.sh must abort a failed permission repair"
+    assert_contains_text "$installer_failure" "Failed to make service.sh executable"
     zipinfo -T -l "$TEST_ROOT/module.zip" | awk '/^[-d]/{ if ($(NF - 1) != "19800101.000000") exit 1 }' || \
         fail "module ZIP timestamps are not normalized"
     MTIME_REFERENCE="$TEST_ROOT/module.prop.mtime"
