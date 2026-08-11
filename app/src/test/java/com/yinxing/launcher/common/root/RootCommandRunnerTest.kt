@@ -42,7 +42,12 @@ class RootCommandRunnerTest {
         try {
             Files.setPosixFilePermissions(
                 script,
-                setOf(PosixFilePermission.OWNER_READ, PosixFilePermission.OWNER_WRITE)
+                setOf(
+                    PosixFilePermission.OWNER_READ,
+                    PosixFilePermission.OWNER_WRITE,
+                    PosixFilePermission.GROUP_READ,
+                    PosixFilePermission.OTHERS_READ
+                )
             )
 
             val direct = ProcessBuilder("/bin/sh", "-c", script.toString())
@@ -125,6 +130,42 @@ class RootCommandRunnerTest {
             assertEquals(RootFailureStage.COMMAND_RUN, result.evidence?.stage)
             assertEquals(126, result.evidence?.exitCode)
             assertTrue(result.evidence?.detail.orEmpty().contains("Permission denied"))
+        }
+    }
+
+    @Test
+    fun androidShellPermissionVariantsStillIdentifyTheSelectedScript() {
+        listOf("can't open", "cannot open", "can't execute").forEach { shellMessage ->
+            withFakeSu(
+                "printf \"/system/bin/sh: /data/adb/modules/yinxing_guard/bin/status.sh: " +
+                    "$shellMessage: Permission denied\\n\"; exit 126"
+            ) { executable ->
+                val result = SuRootCommandRunner(
+                    timeoutMillis = 1_000,
+                    suExecutable = executable.toString()
+                ).run(RootCommand.STATUS)
+
+                assertEquals(
+                    "unexpected classification for $shellMessage",
+                    RootFailureReason.SCRIPT_EXECUTION_BLOCKED,
+                    result.failureReason
+                )
+            }
+        }
+    }
+
+    @Test
+    fun androidShellCantOpenStillIdentifiesMissingSelectedScript() {
+        withFakeSu(
+            "printf \"/system/bin/sh: /data/adb/modules/yinxing_guard/bin/status.sh: " +
+                "can't open: No such file or directory\\n\"; exit 127"
+        ) { executable ->
+            val result = SuRootCommandRunner(
+                timeoutMillis = 1_000,
+                suExecutable = executable.toString()
+            ).run(RootCommand.STATUS)
+
+            assertEquals(RootFailureReason.SCRIPT_NOT_FOUND, result.failureReason)
         }
     }
 

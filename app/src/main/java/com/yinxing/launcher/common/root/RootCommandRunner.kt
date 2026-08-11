@@ -369,19 +369,34 @@ private fun hasDirectRootCommandError(
         .map(String::trim)
         .any { line ->
             commands.any { command ->
-                val normalizedLine = line.replace("'", "").replace("\"", "")
+                val normalizedLine = line
+                    .replace("'${command.shellPath}'", command.shellPath)
+                    .replace("\"${command.shellPath}\"", command.shellPath)
                 val pathIndex = normalizedLine.indexOf(command.shellPath)
                 if (pathIndex < 0) {
                     false
                 } else {
-                    val afterPath = normalizedLine.substring(pathIndex + command.shellPath.length).trim()
+                    val afterPath = normalizedLine
+                        .substring(pathIndex + command.shellPath.length)
+                        .trim()
+                        .removePrefix(":")
+                        .trim()
                     messages.any { message ->
-                        afterPath.startsWith(": $message") || afterPath == message
+                        afterPath == message || DIRECT_SCRIPT_ERROR_PREFIXES.any { prefix ->
+                            afterPath.startsWith("$prefix:") &&
+                                afterPath.substringAfter(':').trim() == message
+                        }
                     }
                 }
             }
         }
 }
+
+private val DIRECT_SCRIPT_ERROR_PREFIXES = setOf(
+    "can't open",
+    "cannot open",
+    "can't execute"
+)
 
 private fun Throwable.diagnosticText(): String = buildString {
     append(this@diagnosticText::class.java.simpleName)
